@@ -8,7 +8,7 @@ import { closeDb } from "../db.js";
 
 const server = new McpServer({
   name: "yahoo-stock-mcp",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 function text(data: unknown): any {
