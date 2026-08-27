@@ -22,15 +22,19 @@ npm install -g yahoo-stock-mcp
 
 ```bash
 
-# 0. 配置外部 MySQL 连接（.env）
+# 0. CLI 基础（无需数据库）
+yahoo-stock-mcp --version        # 打印版本号
+yahoo-stock-mcp --help           # 打印使用说明（也可用：yahoo-stock-mcp help sync）
+
+# 1. 配置外部 MySQL 连接（.env）
 #    YAHOO_STOCK_MCP_DATABASE_URL=mysql://user:pass@host:3306/yahoo_stock_mcp
 #    本地临时开发库可用 deploy/docker-compose.mysql.yml 起一个：
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 1. 对配置的数据库初始化表结构
+# 2. 对配置的数据库初始化表结构
 yahoo-stock-mcp db:init
 
-# 2. 全量同步一只股票（从 2000-01-01 开始拉历史 + 全部基本面）
+# 3. 全量同步一只股票（从 2000-01-01 开始拉历史 + 全部基本面）
 yahoo-stock-mcp sync --symbol NVDA --full
 
 # 之后增量同步（只拉新增数据）
@@ -45,9 +49,29 @@ yahoo-stock-mcp sync --all --full
 # 同步全部 GICS 板块 ETF 行情 + 成分股（板块轮动数据）
 yahoo-stock-mcp sync --sectors
 
-# 3. 启动 MCP server（stdio）
+# 4. 启动 MCP server（stdio）
 yahoo-stock-mcp server
 ```
+
+## 命令参考
+
+```text
+Usage: yahoo-stock-mcp <command> [options]
+
+Commands:
+  server                启动 MCP server（stdio，无参数时默认执行）
+  db:init               在配置的数据库中初始化表结构
+  sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 MySQL
+  version               打印版本号
+  help [command]        查看总帮助或某个命令的帮助
+
+Options:
+  -h, --help            查看帮助
+  -v, --version         打印版本号
+```
+
+运行 `yahoo-stock-mcp help sync`（或 `yahoo-stock-mcp sync --help`）查看 sync 的选项。
+`--version` / `-v` / `version` 都会输出 `yahoo-stock-mcp <版本号>`。
 
 ## 从源码运行（开发 / 贡献）
 
@@ -61,9 +85,10 @@ npm run server      # stdio；其余命令用 npm run sync -- ... 或 npm run de
 
 ```bash
 # 需要本地 MySQL（默认 127.0.0.1:3306，见 deploy/docker-compose.mysql.yml）且已初始化表结构
+npm run test:cli   # CLI 行为：version / help / 未知命令处理（无需数据库）
 npm run test:db    # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
 npm run test:mcp   # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
-npm test           # 两者一起
+npm test           # 三者一起
 ```
 
 测试使用独立的 `ZZTEST` 标的，跑完自动清理，不会动已有数据。

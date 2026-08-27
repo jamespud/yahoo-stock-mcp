@@ -22,15 +22,19 @@ The package already ships the compiled `dist/` and the Go sidecar `bin/gqlproxy`
 
 ```bash
 
-# 0. Configure the external MySQL connection (.env)
+# 0. CLI basics (no database needed)
+yahoo-stock-mcp --version        # print version
+yahoo-stock-mcp --help           # print usage (also: yahoo-stock-mcp help sync)
+
+# 1. Configure the external MySQL connection (.env)
 #    YAHOO_STOCK_MCP_DATABASE_URL=mysql://user:pass@host:3306/yahoo_stock_mcp
 #    For a local dev database you can spin one up with deploy/docker-compose.mysql.yml:
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 1. Initialise the schema in the configured database
+# 2. Initialise the schema in the configured database
 yahoo-stock-mcp db:init
 
-# 2. Full sync of one stock (pull history from 2000-01-01 + all fundamentals)
+# 3. Full sync of one stock (pull history from 2000-01-01 + all fundamentals)
 yahoo-stock-mcp sync --symbol NVDA --full
 
 # Incremental sync afterwards (only new data)
@@ -45,9 +49,29 @@ yahoo-stock-mcp sync --all --full
 # Sync all GICS sector ETFs + constituents (sector rotation data)
 yahoo-stock-mcp sync --sectors
 
-# 3. Start the MCP server (stdio)
+# 4. Start the MCP server (stdio)
 yahoo-stock-mcp server
 ```
+
+## Command reference
+
+```text
+Usage: yahoo-stock-mcp <command> [options]
+
+Commands:
+  server                 Start the MCP server over stdio (default with no arguments)
+  db:init                Create the MySQL schema in the configured database
+  sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
+  version                Print the version number
+  help [command]         Show general help, or help for a specific command
+
+Options:
+  -h, --help             Show this help
+  -v, --version          Print the version number
+```
+
+Run `yahoo-stock-mcp help sync` (or `yahoo-stock-mcp sync --help`) for sync options.
+`--version` / `-v` / `version` all print `yahoo-stock-mcp <version>`.
 
 ## Run from source (development / contribution)
 
@@ -61,9 +85,10 @@ npm run server      # stdio; use npm run sync -- ... or npm run dev for other co
 
 ```bash
 # Requires a local MySQL (default 127.0.0.1:3306, see deploy/docker-compose.mysql.yml) with the schema initialised
+npm run test:cli   # CLI behaviour: version / help / unknown-command handling (no DB required)
 npm run test:db    # query layer: covers all query functions, LIMIT binding regression, edge params
 npm run test:mcp   # protocol layer: initialize/tools/list/tools/call end-to-end + stdin close exit
-npm test           # both
+npm test           # all three
 ```
 
 Tests use a dedicated `ZZTEST` symbol and clean up automatically, so they never touch real data.

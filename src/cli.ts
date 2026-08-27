@@ -1,51 +1,183 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+
 import { closeDb, initSchema } from "./db.js";
 import { syncAll, syncOne, syncSectors, type IntradayInterval } from "./services/sync.service.js";
 import { startMcpServer } from "./mcp/server.js";
 
 const INTRADAY_INTERVALS = ["1m", "5m", "15m", "30m", "60m"] as const;
 
-function parseArgs(argv: string[]) {
-  const args = argv.slice(2);
+const NAME = "yahoo-stock-mcp";
+const VERSION = (
+  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
+).version;
+
+const GENERAL_HELP = `yahoo-stock-mcp — Yahoo Finance + Investing.com stock data MCP server
+
+Usage:
+  ${NAME} <command> [options]
+  ${NAME} -h | --help
+  ${NAME} -v | --version
+
+Commands:
+  server                 Start the MCP server over stdio (default with no arguments)
+  db:init                Create the MySQL schema in the configured database
+  sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
+  version                Print the version number
+  help [command]         Show general help, or help for a specific command
+
+Options:
+  -h, --help             Show this help
+  -v, --version          Print the version number
+
+Run '${NAME} help <command>' for command-specific help.
+
+Examples:
+  ${NAME} --version
+  ${NAME} sync --symbol NVDA --full
+  ${NAME} sync --all --full
+  ${NAME} sync --sectors
+  ${NAME} server`;
+
+const SYNC_HELP = `Sync stock data from Yahoo Finance / Investing.com into MySQL.
+
+Usage:
+  ${NAME} sync --symbol <SYMBOL> [--full|--incremental] [--intraday <interval>]
+  ${NAME} sync --all [--full] [--intraday <interval>]
+  ${NAME} sync --sectors [--no-members]
+
+Options:
+  --symbol <SYMBOL>   Sync a single symbol
+  --all               Sync every symbol already stored in the database
+  --sectors           Sync the 11 GICS sector ETFs + their top holdings (rotation data)
+  --no-members        With --sectors, skip the top-holdings members sync
+  --full              Full sync: bars since YAHOO_STOCK_MCP_BARS_START_DATE + all fundamentals
+  --incremental       Incremental sync (default): only new data since the last sync
+  --intraday <int>    Also pull minute bars: ${INTRADAY_INTERVALS.join(" | ")} (default 15m)
+
+Examples:
+  ${NAME} sync --symbol NVDA --full
+  ${NAME} sync --symbol NVDA --intraday 15m
+  ${NAME} sync --all --full
+  ${NAME} sync --sectors`;
+
+const SERVER_HELP = `Start the MCP server over stdio.
+
+MCP clients (Claude Desktop, Cursor, Codex, ...) launch this server with:
+  "command": "${NAME}", "args": ["server"]
+
+Usage:
+  ${NAME} server`;
+
+const DBINIT_HELP = `Initialise the MySQL schema in the configured database.
+
+The connection is read from YAHOO_STOCK_MCP_DATABASE_URL, or from the
+YAHOO_STOCK_MCP_DB_* variables (host/port/user/password/name).
+
+Usage:
+  ${NAME} db:init`;
+
+const HELP_TOPICS: Record<string, string> = {
+  "": GENERAL_HELP,
+  help: GENERAL_HELP,
+  sync: SYNC_HELP,
+  server: SERVER_HELP,
+  "db:init": DBINIT_HELP,
+};
+
+function printHelp(topic = ""): void {
+  console.log(HELP_TOPICS[topic] ?? GENERAL_HELP);
+}
+
+function printVersion(): void {
+  console.log(`${NAME} ${VERSION}`);
+}
+
+interface SyncArgs {
+  cmd: string;
+  symbol?: string;
+  all: boolean;
+  full: boolean;
+  sectors: boolean;
+  sectorMembers: boolean;
+  intraday?: IntradayInterval;
+  help: boolean;
+}
+
+function parseArgs(args: string[]): SyncArgs {
   const cmd = args[0] ?? "server";
-  const flags = new Map<string, string>();
-  let symbol: string | undefined;
-  let all = false;
-  let full = false;
-  let sectors = false;
-  let sectorMembers = true;
-  let intraday: IntradayInterval | undefined;
+  const opts: SyncArgs = { cmd, all: false, full: false, sectors: false, sectorMembers: true, help: false };
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
-    if (a === "--symbol" && args[i + 1]) { symbol = args[++i]; }
-    else if (a === "--all") all = true;
-    else if (a === "--full") full = true;
-    else if (a === "--incremental") full = false;
-    else if (a === "--sectors") sectors = true;
-    else if (a === "--no-members") sectorMembers = false;
+    if (a === "--symbol" && args[i + 1]) opts.symbol = args[++i];
+    else if (a === "--all") opts.all = true;
+    else if (a === "--full") opts.full = true;
+    else if (a === "--incremental") opts.full = false;
+    else if (a === "--sectors") opts.sectors = true;
+    else if (a === "--no-members") opts.sectorMembers = false;
+    else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "--intraday") {
       const iv = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "15m";
       if (!(INTRADAY_INTERVALS as readonly string[]).includes(iv)) {
         console.error(`invalid intraday interval: ${iv} (use ${INTRADAY_INTERVALS.join("/")})`);
         process.exit(1);
       }
-      intraday = iv as IntradayInterval;
+      opts.intraday = iv as IntradayInterval;
     }
-    else if (a.startsWith("--")) flags.set(a, args[i + 1] ?? "");
   }
-  return { cmd, symbol, all, full, sectors, sectorMembers, intraday };
+  return opts;
 }
 
 async function main() {
-  const { cmd, symbol, all, full, sectors, sectorMembers, intraday } = parseArgs(process.argv);
+  const args = process.argv.slice(2);
+
+  // Global flags (before any command).
+  if (args[0] === "-h" || args[0] === "--help") {
+    printHelp();
+    return;
+  }
+  if (args[0] === "-v" || args[0] === "--version") {
+    printVersion();
+    return;
+  }
+
+  const { cmd, symbol, all, full, sectors, sectorMembers, intraday, help } = parseArgs(args);
 
   switch (cmd) {
+    case "version":
+      printVersion();
+      return;
+
+    case "help": {
+      const topic = args[1];
+      if (!topic) {
+        printHelp();
+        return;
+      }
+      if (topic in HELP_TOPICS) {
+        printHelp(topic);
+        return;
+      }
+      console.error(`no help available for: ${topic}`);
+      printHelp();
+      process.exitCode = 1;
+      return;
+    }
+
     case "db:init":
+      if (help) {
+        printHelp("db:init");
+        return;
+      }
       await initSchema();
       break;
 
     case "sync":
+      if (help) {
+        printHelp("sync");
+        return;
+      }
       if (sectors) {
         await syncSectors({ members: sectorMembers });
       } else if (all) {
@@ -54,17 +186,23 @@ async function main() {
         const r = await syncOne(symbol, { full, intraday });
         console.log(`synced ${symbol}: bars=${r.bars} news=${r.news} options=${r.options} intraday=${r.intraday}`);
       } else {
-        console.error(
-          "usage: yahoo-stock-mcp sync --symbol NVDA [--full|--incremental] [--intraday 15m] | sync --all [--full] [--intraday 15m] | sync --sectors [--no-members]"
-        );
+        printHelp("sync");
         process.exitCode = 1;
       }
       break;
 
     case "server":
-    default:
+      if (help) {
+        printHelp("server");
+        return;
+      }
       await startMcpServer();
       break;
+
+    default:
+      console.error(`unknown command: ${cmd}`);
+      console.error(`run "${NAME} --help" to see available commands`);
+      process.exitCode = 1;
   }
   await closeDb();
 }

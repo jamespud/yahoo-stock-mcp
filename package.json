@@ -42,12 +42,13 @@
     "smoke": "tsx scripts/smoke.ts",
     "test:db": "tsx scripts/test-db.ts",
     "test:mcp": "tsx scripts/test-mcp.ts",
-    "test": "npm run test:db && npm run test:mcp",
+    "test": "npm run test:cli && npm run test:db && npm run test:mcp",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:sidecar": "cd cmd/gqlproxy && go build -o ../../bin/gqlproxy .",
     "build:all": "npm run build && npm run build:sidecar",
     "prepack": "npm run build:all",
-    "prepublishOnly": "npm run build:all"
+    "prepublishOnly": "npm run build:all",
+    "test:cli": "tsx scripts/test-cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
