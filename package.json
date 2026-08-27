@@ -1,6 +1,6 @@
 {
   "name": "yahoo-stock-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for stock information via Yahoo Finance + Investing.com, backed by MySQL",
   "type": "module",
   "main": "dist/cli.js",
