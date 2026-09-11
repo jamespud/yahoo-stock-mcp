@@ -34,6 +34,8 @@ const TOOLS = [
   "get_short_interest",
   "get_holder_breakdown",
   "get_intraday_bars",
+  "get_indicators",
+  "list_indicators",
   "list_sectors",
   "get_sector_performance",
   "get_sector_members",
@@ -63,6 +65,12 @@ const TOOL_ARGS: Record<string, Record<string, unknown>> = {
   get_short_interest: { symbol: TEST_SYMBOL },
   get_holder_breakdown: { symbol: TEST_SYMBOL },
   get_intraday_bars: { symbol: TEST_SYMBOL, interval: "15m" },
+  get_indicators: {
+    symbol: TEST_SYMBOL,
+    indicators: ["RSI(2)", { name: "SMA", params: { period: 2 } }],
+    limit: 3,
+  },
+  list_indicators: {},
   list_sectors: {},
   get_sector_performance: {},
   get_sector_members: { sector: "ZZSEC", limit: 5 },
@@ -184,6 +192,48 @@ async function main() {
     const err = await probe.request("tools/call", { name: "get_quote", arguments: { symbol: "QQQQNOPE" } });
     assert.equal(err.result.isError, true, "unknown symbol should return isError");
     assert.match(err.result.content[0].text, /ERROR/);
+
+    const listInd = await probe.request("tools/call", { name: "list_indicators", arguments: {} });
+    const meta = JSON.parse(listInd.result.content[0].text);
+    assert.equal(meta.length, 42, "list_indicators should expose all 42 indicators");
+    assert.ok(meta.every((m: any) => m.name && m.group && m.outputs.length), "each indicator needs metadata");
+
+    const ind = await probe.request("tools/call", {
+      name: "get_indicators",
+      arguments: { symbol: TEST_SYMBOL, indicators: ["RSI(2)", "SMA(2)"], limit: 3 },
+    });
+    const payload = JSON.parse(ind.result.content[0].text);
+    assert.equal(payload.symbol, TEST_SYMBOL);
+    assert.equal(payload.series.length, 3, "series should be limited to 3 points");
+    assert.ok("RSI.rsi" in payload.series[2], "flattened channel keys");
+    assert.ok("SMA.sma" in payload.series[2]);
+    assert.equal(payload.basis, "adjusted");
+
+    // 日内路径：basis 强制 raw，且不能被 interval 的默认值误判成互斥参数
+    const intradayInd = await probe.request("tools/call", {
+      name: "get_indicators",
+      arguments: { symbol: TEST_SYMBOL, indicators: ["SMA(2)"], intraday: "15m", limit: 2 },
+    });
+    assert.notEqual(intradayInd.result.isError, true, `intraday call failed: ${JSON.stringify(intradayInd.result)}`);
+    const intradayPayload = JSON.parse(intradayInd.result.content[0].text);
+    assert.equal(intradayPayload.interval, "intraday");
+    assert.equal(intradayPayload.basis, "raw");
+    assert.equal(intradayPayload.series.length, 2);
+    assert.equal(typeof intradayPayload.series[1]["SMA.sma"], "number", "intraday OHLC must be numbers");
+
+    const bad = await probe.request("tools/call", {
+      name: "get_indicators",
+      arguments: { symbol: TEST_SYMBOL, indicators: ["RSII"] },
+    });
+    assert.equal(bad.result.isError, true, "unknown indicator should be an error");
+    assert.match(bad.result.content[0].text, /unknown indicator/);
+
+    const badParam = await probe.request("tools/call", {
+      name: "get_indicators",
+      arguments: { symbol: TEST_SYMBOL, indicators: [{ name: "RSI", params: { period: 1 } }] },
+    });
+    assert.equal(badParam.result.isError, true, "out-of-range param should be an error");
+    assert.match(badParam.result.content[0].text, /between 2 and 500/);
 
     probe.assertCleanStdout();
   } finally {

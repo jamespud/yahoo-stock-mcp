@@ -39,6 +39,23 @@ async function main() {
     assert.equal((await q.getBars(TEST_SYMBOL, "1mo"))?.length, 1);
     assert.equal(await q.getBars("QQQQNOPE", "1d"), null);
 
+    // --- indicator bars: camelCase 归一化 + 周月聚合带 adj_close ---
+    const daily = await q.getIndicatorBars(TEST_SYMBOL, "1d", undefined, undefined, 10);
+    assert.equal(daily?.length, 3, "indicator bars should return all daily rows");
+    assert.equal(daily?.[0].date, "2026-08-01");
+    // DECIMAL 列在 mysql2 里是字符串 "10.5000"，getIndicatorBars 必须归一化成 number
+    assert.equal(daily?.[0].adjClose, 10.5, "adj_close should map to adjClose");
+    assert.equal(typeof daily?.[0].close, "number", "OHLC must be numbers, never DECIMAL strings");
+    assert.equal(await q.getIndicatorBars("QQQQNOPE", "1d", undefined, undefined, 10), null);
+
+    const weekly = await q.getIndicatorBars(TEST_SYMBOL, "1wk", undefined, undefined, 10);
+    assert.equal(weekly?.length, 2, "weekly aggregation should keep 2 buckets");
+    // 种子数据 08-01(Sat)+08-02(Sun) 同属 07-27 那一周，桶内最后一根是 08-02 的 11.5
+    assert.equal(weekly?.[0].adjClose, 11.5, "weekly buckets must carry the last non-null adjClose in the bucket");
+
+    const barsWithAdj = await q.getBars(TEST_SYMBOL, "1wk");
+    assert.ok(barsWithAdj && "adj_close" in barsWithAdj[0], "get_bars weekly aggregation must include adj_close");
+
     // --- profile / financials ---
     assert.equal((await q.getProfile(TEST_SYMBOL))?.name, TEST_NAME);
     const fin = await q.getFinancials(TEST_SYMBOL);

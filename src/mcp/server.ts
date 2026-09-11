@@ -4,6 +4,8 @@ import { z } from "zod";
 import { syncOne, syncSectors } from "../services/sync.service.js";
 import { fetchYahooOptionChain } from "../providers/yahoo.js";
 import * as q from "../services/query.service.js";
+import { listIndicatorMeta } from "../indicators/registry.js";
+import { getIndicators } from "../services/indicator.service.js";
 import { closeDb } from "../db.js";
 
 const server = new McpServer({
@@ -331,6 +333,60 @@ server.tool(
       if (!r) throw new Error(`instrument not found in DB: ${symbol}`);
       return r;
     })
+);
+
+server.tool(
+  "get_indicators",
+  "Compute technical indicators from stored bars (SMA/EMA/RSI/MACD/KDJ/ATR/ADX/OBV/BBANDS/... call list_indicators for the full catalog). Returns a date-aligned series plus the latest value per channel.",
+  {
+    symbol: z.string().describe("Ticker, e.g. NVDA"),
+    indicators: z
+      .array(
+        z.union([
+          z.string().describe('Indicator shorthand, e.g. "RSI" or "MACD(12,26,9)"'),
+          z.object({
+            name: z.string().describe('Indicator name, e.g. "MACD"'),
+            params: z.record(z.number()).optional().describe("Named parameters; see list_indicators"),
+            outputs: z.array(z.string()).optional().describe("Subset of output channels to return"),
+          }),
+        ])
+      )
+      .min(1)
+      .describe('Indicators to compute, e.g. ["RSI(14)", {"name": "MACD"}]'),
+    interval: z
+      .enum(["1d", "1wk", "1mo"])
+      .optional()
+      .describe("Daily/weekly/monthly bars (default 1d; mutually exclusive with intraday)"),
+    intraday: z.enum(["1m", "5m", "15m", "30m", "60m"]).optional().describe("Use minute bars instead of interval"),
+    basis: z
+      .enum(["adjusted", "raw"])
+      .optional()
+      .default("adjusted")
+      .describe("adjusted rescales OHLC by adjClose/close; intraday always uses raw"),
+    from: z.string().optional().describe("Start date YYYY-MM-DD"),
+    to: z.string().optional().describe("End date YYYY-MM-DD"),
+    limit: z.number().int().min(1).max(5000).optional().default(250).describe("Number of output points"),
+  },
+  async ({ symbol, indicators, interval, intraday, basis, from, to, limit }) =>
+    guard(() =>
+      getIndicators({
+        symbol,
+        indicators: indicators as Array<string | { name: string; params?: Record<string, number>; outputs?: string[] }>,
+        interval,
+        intraday,
+        basis,
+        from,
+        to,
+        limit,
+      })
+    )
+);
+
+server.tool(
+  "list_indicators",
+  "List every supported technical indicator with its group, parameters (defaults and ranges), output channels and warm-up length.",
+  {},
+  async () => guard(async () => listIndicatorMeta())
 );
 
 server.tool(

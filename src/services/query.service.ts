@@ -48,6 +48,125 @@ function toDateStr(d: any): string {
   return new Date(d).toISOString().slice(0, 10);
 }
 
+export interface IndicatorBarRow {
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  adjClose: number | null;
+  volume: number | null;
+}
+
+interface AggregatedBucket {
+  period: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  adj_close: number | null;
+  volume: number;
+  count: number;
+}
+
+function bucketKey(day: string, interval: "1wk" | "1mo"): string {
+  if (interval === "1mo") return day.slice(0, 7);
+  const t = new Date(day + "T00:00:00Z");
+  const diff = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - diff);
+  return t.toISOString().slice(0, 10);
+}
+
+/** 周/月聚合：OHLC 取桶内首/最高/最低/末，成交量求和，adj_close 取桶内最后一个非空值。 */
+function aggregateRows(rows: any[], interval: "1wk" | "1mo"): AggregatedBucket[] {
+  const buckets = new Map<string, AggregatedBucket>();
+  for (const b of rows) {
+    const key = bucketKey(toDateStr(b.trade_date), interval);
+    const cur =
+      buckets.get(key) ??
+      ({
+        period: key,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        adj_close: null,
+        volume: 0,
+        count: 0,
+      } as AggregatedBucket);
+    cur.high = Math.max(cur.high ?? -Infinity, b.high ?? -Infinity);
+    cur.low = Math.min(cur.low ?? Infinity, b.low ?? Infinity);
+    cur.close = b.close;
+    if (b.adj_close !== null && b.adj_close !== undefined) cur.adj_close = b.adj_close;
+    cur.volume += b.volume ?? 0;
+    cur.count += 1;
+    buckets.set(key, cur);
+  }
+  return [...buckets.values()];
+}
+
+const finiteOrNull = (v: number | null | undefined): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/**
+ * mysql2 把 DECIMAL(18,4) 列返回成字符串（实测 `"10.5000"`），而指标原语只接受
+ * number（`isNum()` 会把字符串当 null），因此进入指标引擎前必须统一归一化。
+ */
+export function toNumOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 指标引擎专用取数：返回 camelCase 的 OHLCV + adjClose。
+ * 注意：DECIMAL 列是字符串，返回值必须是 number 或 null（见 toNumOrNull）。
+ * 周/月线先按 8×/24× 系数取足量日线再聚合；limit 表示"返回多少根 bar"。
+ */
+export async function getIndicatorBars(
+  symbol: string,
+  interval: "1d" | "1wk" | "1mo",
+  from?: string,
+  to?: string,
+  limit = 1000
+): Promise<IndicatorBarRow[] | null> {
+  const inst = await getInstrument(symbol);
+  if (!inst) return null;
+  const cond = ["instrument_id = ?"];
+  const params: any[] = [inst.id];
+  if (from) { cond.push("trade_date >= ?"); params.push(from); }
+  if (to) { cond.push("trade_date <= ?"); params.push(to); }
+  const wanted = Math.max(1, Math.min(limit, 10000));
+  const rawLimit = interval === "1d" ? wanted : Math.min(20000, wanted * (interval === "1wk" ? 8 : 24));
+  const rows = await query<any[]>(
+    `SELECT trade_date, open, high, low, close, adj_close, volume FROM daily_bars
+     WHERE ${cond.join(" AND ")} ORDER BY trade_date DESC LIMIT ${rawLimit}`,
+    params
+  );
+  const ascending = rows.reverse();
+  const shaped: IndicatorBarRow[] =
+    interval === "1d"
+      ? ascending.map((b) => ({
+          date: toDateStr(b.trade_date),
+          open: toNumOrNull(b.open),
+          high: toNumOrNull(b.high),
+          low: toNumOrNull(b.low),
+          close: toNumOrNull(b.close),
+          adjClose: toNumOrNull(b.adj_close),
+          volume: toNumOrNull(b.volume),
+        }))
+      : aggregateRows(ascending, interval).map((b) => ({
+          date: b.period,
+          open: toNumOrNull(b.open),
+          high: finiteOrNull(b.high),
+          low: finiteOrNull(b.low),
+          close: toNumOrNull(b.close),
+          adjClose: toNumOrNull(b.adj_close),
+          volume: toNumOrNull(b.volume),
+        }));
+  return shaped.slice(-wanted);
+}
+
 export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", from?: string, to?: string, limit = 1000) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
@@ -65,23 +184,16 @@ export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", fr
     return bars.map((b) => ({ ...b, trade_date: toDateStr(b.trade_date) }));
   }
   // aggregate weekly / monthly in JS
-  const out: any[] = [];
-  const keyOf = (d: string) =>
-    interval === "1wk"
-      ? (() => { const t = new Date(d + "T00:00:00Z"); const day = t.getUTCDay(); const diff = (day + 6) % 7; t.setUTCDate(t.getUTCDate() - diff); return t.toISOString().slice(0, 10); })()
-      : d.slice(0, 7);
-  const buckets = new Map<string, any>();
-  for (const b of bars) {
-    const k = keyOf(toDateStr(b.trade_date));
-    const cur = buckets.get(k) ?? { period: k, open: b.open, high: b.high, low: b.low, close: b.close, volume: 0, count: 0 };
-    cur.high = Math.max(cur.high ?? -Infinity, b.high ?? -Infinity);
-    cur.low = Math.min(cur.low ?? Infinity, b.low ?? Infinity);
-    cur.close = b.close;
-    cur.volume += b.volume ?? 0;
-    cur.count += 1;
-    buckets.set(k, cur);
-  }
-  for (const b of buckets.values()) out.push(b);
+  const out = aggregateRows(bars, interval).map((b) => ({
+    period: b.period,
+    open: b.open,
+    high: finiteOrNull(b.high),
+    low: finiteOrNull(b.low),
+    close: b.close,
+    adj_close: b.adj_close,
+    volume: b.volume,
+    count: b.count,
+  }));
   return out;
 }
 
