@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   diff,
   ema,
@@ -368,5 +369,59 @@ const noAdj: IndicatorBar[] = [
 assert.equal(applyBasis(noAdj, "adjusted")[0].high, 12);
 
 assertConformance();
+
+// ── 外部参考值比对（fixture 由 scripts/gen-indicator-fixtures.ts 生成） ──
+// 覆盖 TA-Lib 系的 21 项；KDJ / HMA / CMF / VWAP / ANNVOL / ADL 等参考库未收录或口径
+// 不同（或参考库未收录）的项不在其中，改用解析式用例 + lookback 一致性断言覆盖。
+
+const fixture = JSON.parse(
+  readFileSync(new URL("./fixtures/indicator-reference.json", import.meta.url), "utf8")
+) as {
+  align?: Record<string, number>;
+  mode?: Record<string, "delta">;
+  tolerance?: Record<string, number>;
+  indicators: Record<string, Record<string, Array<number | null>>>;
+};
+
+function closeEnough(actual: number | null, expected: number | null, label: string, tolerance = 1e-6): void {
+  if (expected === null || actual === null) {
+    assert.equal(actual, expected, `${label}: null mismatch (actual=${actual} expected=${expected})`);
+    return;
+  }
+  const scale = Math.max(1, Math.abs(expected));
+  assert.ok(Math.abs(actual - expected) / scale < tolerance, `${label}: expected ${expected}, got ${actual}`);
+}
+
+const fixtureIndicators = Object.keys(fixture.indicators);
+assert.ok(fixtureIndicators.length >= 20, `fixture should cover at least 20 indicators (got ${fixtureIndicators.length})`);
+
+for (const [name, channels] of Object.entries(fixture.indicators)) {
+  const spec = resolveIndicator(name);
+  assert.ok(spec, `fixture references unknown indicator ${name}`);
+  const params = normalizeParams(spec, {});
+  const series = spec.calculate(CONFORMANCE_BARS, params);
+  const base = spec.lookback(params);
+  for (const [output, expected] of Object.entries(channels)) {
+    const idx = spec.outputs.indexOf(output);
+    assert.ok(idx >= 0, `${name}.${output} is not a declared output of ${name}`);
+    const key = `${name}.${output}`;
+    const shift = fixture.align?.[key] ?? 0;
+    const tolerance = fixture.tolerance?.[key] ?? 1e-6;
+    if (fixture.mode?.[key] === "delta") {
+      // OBV 的初值约定各家不同，因此只按一阶差分比对
+      for (let i = 1; i < expected.length; i++) {
+        const ours = (series[idx][base + shift + i] as number) - (series[idx][base + shift + i - 1] as number);
+        const theirs = (expected[i] as number) - (expected[i - 1] as number);
+        closeEnough(ours, theirs, `${key} delta[${i}]`, tolerance);
+      }
+      continue;
+    }
+    for (let i = 0; i < expected.length; i++) {
+      closeEnough(series[idx][base + shift + i], expected[i], `${key}[${i}]`, tolerance);
+    }
+  }
+}
+
+console.log("indicator reference fixtures OK");
 
 console.log("indicator math tests OK");

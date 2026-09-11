@@ -49,7 +49,8 @@
     "build:all": "npm run build && npm run build:sidecar",
     "prepack": "npm run build:all",
     "prepublishOnly": "npm run build:all",
-    "test:cli": "tsx scripts/test-cli.ts"
+    "test:cli": "tsx scripts/test-cli.ts",
+    "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -60,6 +61,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "technicalindicators": "^3.1.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },
