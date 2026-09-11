@@ -120,10 +120,32 @@ npm test           # 三者一起
 | `get_short_interest` | 空头持仓快照：做空股数、short ratio、占流通盘比例（Yahoo defaultKeyStatistics） |
 | `get_holder_breakdown` | 持股结构：内部人/机构占比、机构占流通盘、机构数（Yahoo majorHoldersBreakdown） |
 | `get_intraday_bars` | 分钟级 K 线（1m/5m/15m/30m/60m，同步入库后查询） |
+| `get_indicators` | 从库中 bar 计算 42 个技术指标（SMA/EMA/RSI/MACD/KDJ/BBANDS/ATR/ADX/OBV/…）：返回按日期对齐的序列 + 各通道最新值 |
+| `list_indicators` | 指标自描述清单：分组、参数（默认值与范围）、输出通道、暖机长度 |
 | `list_sectors` | 板块目录：11 个 GICS 板块 + SPY 基准，映射到 SPDR 板块 ETF |
 | `get_sector_performance` | 板块轮动视图：各板块最新价 + 1d/5d/20d 涨跌幅排名 + SPY 基准对比 |
 | `get_sector_members` | 板块成分股（板块 ETF topHoldings，含权重） |
 | `sync_sectors` | 同步全部板块 ETF 行情（约 30 天 K 线）与成分股 |
+
+## 技术指标
+
+`get_indicators` 完全用 `daily_bars` / `intraday_bars` 本地计算，不依赖额外数据源，也不需要改表结构。
+
+共 42 个指标，分七组：
+
+- **趋势 / 均线（9）**：SMA、EMA、WMA、DEMA、TEMA、HMA、KAMA、BBANDS、SAR
+- **动量（8）**：RSI、MACD、STOCH、KDJ、STOCHRSI、WILLR、CCI、MFI
+- **振荡 / 趋势强度（9）**：ADX、ROC、MOM、CMO、TRIX、ULTOSC、AROON、AO、KST
+- **量能（6）**：VWAP、OBV、ADL、ADOSC、CMF、FI
+- **波动率（5）**：TRANGE、ATR、NATR、STDDEV、ANNVOL
+- **价格变换（4）**：TYPPRICE、MEDPRICE、WCLPRICE、AVGPRICE
+- **回归（1）**：LINEARREG（回归值、斜率、截距、外推、±k 标准误通道）
+
+约定：
+
+- 默认 `basis=adjusted`，用 `adjClose/close` 等比缩放 OHLC；日内 bar 恒为原始价。
+- 公式对齐 TA-Lib 惯例；有意偏离的部分（RSI/STOCH/KDJ/WILLR 在退化窗口的取值、滚动 VWAP、首根 bar 的 TR）在对应实现的注释与指标说明里标注。
+- 想知道每个指标的参数与取值范围，直接调 `list_indicators`。
 
 ## 数据源
 

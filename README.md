@@ -120,10 +120,34 @@ Tests use a dedicated `ZZTEST` symbol and clean up automatically, so they never 
 | `get_short_interest` | Short-interest snapshot: shares short, short ratio, % of float (Yahoo `defaultKeyStatistics`) |
 | `get_holder_breakdown` | Ownership breakdown: insider/institutional %, institutional float, institutional count (Yahoo `majorHoldersBreakdown`) |
 | `get_intraday_bars` | Minute-level bars (1m/5m/15m/30m/60m, queried after being synced to DB) |
+| `get_indicators` | Compute 42 technical indicators (SMA/EMA/RSI/MACD/KDJ/BBANDS/ATR/ADX/OBV/...) from stored bars: date-aligned series + latest value per channel |
+| `list_indicators` | Self-describing catalog of every supported indicator: group, parameters, defaults/ranges, output channels, warm-up length |
 | `list_sectors` | Sector catalog: the 11 GICS sectors + SPY benchmark, mapped to SPDR sector ETFs |
 | `get_sector_performance` | Sector rotation view: each sector's latest price + 1d/5d/20d change ranking vs SPY benchmark |
 | `get_sector_members` | Sector constituents (sector ETF `topHoldings`, incl. weights) |
 | `sync_sectors` | Sync all sector ETF quotes (~30 days of bars) and constituents |
+
+## Technical indicators
+
+`get_indicators` computes everything locally from `daily_bars` / `intraday_bars` — no extra data source,
+no schema change.
+
+42 indicators in seven groups:
+
+- **Trend / moving averages (9)**: SMA, EMA, WMA, DEMA, TEMA, HMA, KAMA, BBANDS, SAR
+- **Momentum (8)**: RSI, MACD, STOCH, KDJ, STOCHRSI, WILLR, CCI, MFI
+- **Oscillators / trend strength (9)**: ADX, ROC, MOM, CMO, TRIX, ULTOSC, AROON, AO, KST
+- **Volume (6)**: VWAP, OBV, ADL, ADOSC, CMF, FI
+- **Volatility (5)**: TRANGE, ATR, NATR, STDDEV, ANNVOL
+- **Price transforms (4)**: TYPPRICE, MEDPRICE, WCLPRICE, AVGPRICE
+- **Regression (1)**: LINEARREG (value, slope, intercept, forecast, ±k standard-error channel)
+
+Conventions:
+
+- `basis=adjusted` by default: OHLC is rescaled by `adjClose/close`; intraday bars are always raw.
+- Formulas follow TA-Lib conventions; the deliberate deviations (degenerate-window values for
+  RSI/STOCH/KDJ/WILLR, rolling VWAP, the first bar's true range) are noted in the corresponding implementation comments and indicator summaries.
+- Call `list_indicators` for each indicator's parameters and valid ranges.
 
 ## Data sources
 
