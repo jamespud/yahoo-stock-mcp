@@ -72,7 +72,8 @@ async function loadIntradayBars(
 ): Promise<IndicatorBar[] | null> {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const rows = await getIntradayBars(symbol, barInterval, from, to, Math.max(1, Math.min(limit, 20000)));
+  // "desc" 取最后 limit 根，返回时仍为升序
+  const rows = await getIntradayBars(symbol, barInterval, from, to, Math.max(1, Math.min(limit, 20000)), "desc");
   // getIntradayBars 返回 { symbol, interval, bars } 包装对象；日内价同样是 DECIMAL 字符串
   return (rows?.bars ?? []).map((r: any) => ({
     date: typeof r.ts === "string" ? r.ts : new Date(r.ts).toISOString().slice(0, 19).replace("T", " "),

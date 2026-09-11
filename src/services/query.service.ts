@@ -444,7 +444,18 @@ export async function getHolderBreakdown(symbol: string) {
   return { symbol: inst.symbol, breakdown: rows };
 }
 
-export async function getIntradayBars(symbol: string, interval: string, from?: string, to?: string, limit = 5000) {
+/**
+ * 日内 bar 查询。默认按时间升序取最早 limit 根（既有 get_intraday_bars 行为不变）；
+ * `order: "desc"` 取"最后 limit 根"后再翻回升序，供指标引擎按"最后 limit 根"的窗口语义使用。
+ */
+export async function getIntradayBars(
+  symbol: string,
+  interval: string,
+  from?: string,
+  to?: string,
+  limit = 5000,
+  order: "asc" | "desc" = "asc"
+) {
   const inst = await instOrNull(symbol);
   if (!inst) return null;
   const cond = ["instrument_id = ?", "bar_interval = ?"];
@@ -454,10 +465,10 @@ export async function getIntradayBars(symbol: string, interval: string, from?: s
   const rows = await query<any[]>(
     `SELECT ts, bar_interval, open, high, low, close, volume, source
      FROM intraday_bars WHERE ${cond.join(" AND ")}
-     ORDER BY ts ASC LIMIT ${Math.max(1, Math.min(limit, 20000))}`,
+     ORDER BY ts ${order === "desc" ? "DESC" : "ASC"} LIMIT ${Math.max(1, Math.min(limit, 20000))}`,
     params
   );
-  return { symbol: inst.symbol, interval, bars: rows };
+  return { symbol: inst.symbol, interval, bars: order === "desc" ? rows.reverse() : rows };
 }
 
 // ── sector queries ─────────────────────────────────────────────

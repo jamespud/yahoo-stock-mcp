@@ -370,6 +370,13 @@ assert.equal(applyBasis(noAdj, "adjusted")[0].high, 12);
 
 assertConformance();
 
+// ── 波指标补充断言（final review follow-up） ───────────────────
+// KAMA：平坦序列 ER=0 → SC 项为 0，输出恒定 = 种子收盘价；单位斜坡 ER=1 → 收敛到 close − (1−SC)/SC = close − 1.25
+const kamaSpec = resolveIndicator("KAMA")!;
+assert.equal(lastNonNull(kamaSpec.calculate(flatBars, normalizeParams(kamaSpec, {}))[0]), 50, "KAMA flat -> 50");
+const kamaOnRamp = lastNonNull(kamaSpec.calculate(monotonicUp, normalizeParams(kamaSpec, {}))[0]) as number;
+assert.ok(Math.abs(kamaOnRamp - 58.75) < 0.1, `KAMA converges to the ramp with a 1.25 lag (got ${kamaOnRamp})`);
+
 // ── 外部参考值比对（fixture 由 scripts/gen-indicator-fixtures.ts 生成） ──
 // 覆盖 TA-Lib 系的 21 项；KDJ / HMA / CMF / VWAP / ANNVOL / ADL 等参考库未收录或口径
 // 不同（或参考库未收录）的项不在其中，改用解析式用例 + lookback 一致性断言覆盖。
@@ -383,13 +390,22 @@ const fixture = JSON.parse(
   indicators: Record<string, Record<string, Array<number | null>>>;
 };
 
-function closeEnough(actual: number | null, expected: number | null, label: string, tolerance = 1e-6): void {
+/**
+ * `absoluteTolerance` 只给参考库自己取整的通道（RSI/MFI 保留两位小数）：那里必须按绝对误差
+ * 比较，否则 RSI≈100 时 6e-3 的相对容差会放宽到 0.6。
+ */
+function closeEnough(actual: number | null, expected: number | null, label: string, absoluteTolerance?: number): void {
   if (expected === null || actual === null) {
     assert.equal(actual, expected, `${label}: null mismatch (actual=${actual} expected=${expected})`);
     return;
   }
+  const diff = Math.abs(actual - expected);
+  if (absoluteTolerance !== undefined) {
+    assert.ok(diff <= absoluteTolerance, `${label}: expected ${expected}, got ${actual} (abs tol ${absoluteTolerance})`);
+    return;
+  }
   const scale = Math.max(1, Math.abs(expected));
-  assert.ok(Math.abs(actual - expected) / scale < tolerance, `${label}: expected ${expected}, got ${actual}`);
+  assert.ok(diff / scale < 1e-6, `${label}: expected ${expected}, got ${actual}`);
 }
 
 const fixtureIndicators = Object.keys(fixture.indicators);
@@ -406,7 +422,7 @@ for (const [name, channels] of Object.entries(fixture.indicators)) {
     assert.ok(idx >= 0, `${name}.${output} is not a declared output of ${name}`);
     const key = `${name}.${output}`;
     const shift = fixture.align?.[key] ?? 0;
-    const tolerance = fixture.tolerance?.[key] ?? 1e-6;
+    const tolerance = fixture.tolerance?.[key];
     if (fixture.mode?.[key] === "delta") {
       // OBV 的初值约定各家不同，因此只按一阶差分比对
       for (let i = 1; i < expected.length; i++) {

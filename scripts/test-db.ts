@@ -108,6 +108,44 @@ async function main() {
     assert.equal((await q.getIntradayBars(TEST_SYMBOL, "1m"))?.bars.length, 0, "interval filter works");
     assert.equal(await q.getIntradayBars("QQQQNOPE", "15m"), null);
 
+    // --- intraday windows must be the LAST limit bars, not the first ---
+    const isoMinute = (v: unknown): string =>
+      (typeof v === "string" ? v.replace(" ", "T") : new Date(v as string).toISOString()).slice(0, 16);
+    for (const [ts, last] of [
+      ["2026-08-03 15:00:00", 12.9],
+      ["2026-08-03 15:15:00", 13.1],
+    ] as Array<[string, number]>) {
+      await query(
+        `INSERT INTO intraday_bars (instrument_id, ts, bar_interval, open, high, low, close, volume, source)
+         VALUES (?, ?, '15m', ?, ?, ?, ?, 900, 'yahoo')`,
+        [id, ts, last - 0.2, last + 0.2, last - 0.4, last]
+      );
+    }
+    // 既有 get_intraday_bars 语义不变：默认仍取最早 limit 根
+    const intraAsc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2);
+    assert.equal(intraAsc?.bars.length, 2);
+    assert.equal(isoMinute(intraAsc?.bars[0].ts), "2026-08-03T14:30");
+    assert.equal(isoMinute(intraAsc?.bars[1].ts), "2026-08-03T14:45");
+    // 指标引擎专用路径：取最后 limit 根，仍按升序返回
+    const intraDesc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2, "desc");
+    assert.equal(intraDesc?.bars.length, 2);
+    assert.equal(isoMinute(intraDesc?.bars[0].ts), "2026-08-03T15:00");
+    assert.equal(isoMinute(intraDesc?.bars[1].ts), "2026-08-03T15:15");
+    const { getIndicators } = await import("../src/services/indicator.service.js");
+    const intradayInd = await getIndicators({
+      symbol: TEST_SYMBOL,
+      indicators: ["SMA(2)"],
+      intraday: "15m",
+      limit: 2,
+    });
+    assert.equal(intradayInd.interval, "intraday");
+    assert.equal(intradayInd.basis, "raw");
+    assert.deepEqual(
+      intradayInd.series.map((r) => String(r.date).slice(11, 16)),
+      ["15:00", "15:15"],
+      "intraday indicators must cover the newest bars"
+    );
+
     // --- sector queries ---
     const sectors = await q.listSectors();
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "XLK"), "sector catalog has XLK");
