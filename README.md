@@ -154,6 +154,14 @@ Conventions:
 - **Yahoo Finance**: bars (v8 chart), quoteSummary (needs cookie+crumb), options (v7), news (v1 search), fundamentals (fundamentals-timeseries, no auth)
 - **Investing.com**: GraphQL `gql.api.investing.com/graphql` (quotes/statements/ratios/dividends/estimates/earnings/profile/executives/holders, no auth), TVC bars (carrier token)
 
+### Source priority
+
+Yahoo is authoritative by default: when both providers return a value for the same row (ratios,
+financial fields, dividends, forward events), Yahoo's value wins and investing only fills what Yahoo
+did not provide. Set `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` to flip that. Building an instrument
+no longer calls investing when Yahoo already returned its identity, so a new ticker (or a whole sector
+sync) does not wait on investing's 403 retries.
+
 ## Data checklist
 
 For the "watch the market, position early" use case, the following dimensions are added on top of the per-stock fundamentals, all fetched from existing **Yahoo quoteSummary / Investing GraphQL** endpoints:
@@ -228,6 +236,7 @@ npm run build:all
 | `YAHOO_STOCK_MCP_PROXY_URL` | none | HTTP(S) proxy for all Node fetch requests, e.g. `http://127.0.0.1:17890`; Yahoo needs it from mainland China |
 | `YAHOO_STOCK_MCP_BARS_START_DATE` | 2000-01-01 | Full-sync start date |
 | `YAHOO_STOCK_MCP_BARS_PROVIDER` | yahoo | Bar source (yahoo/investing) |
+| `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | Which source is authoritative when both return a value (yahoo/investing); the other fills only what the primary lacks |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | News count per fetch |
 | `YAHOO_STOCK_MCP_INVESTING_TRANSPORT` | auto | node / go / auto |
 | `YAHOO_STOCK_MCP_GQLPROXY_COOKIE_FILE` | .cache/gqlproxy_cookies.txt | sidecar cookie session file |

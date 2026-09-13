@@ -152,6 +152,13 @@ npm test           # 三者一起
 - **Yahoo Finance**：K 线（v8 chart）、quoteSummary（需 cookie+crumb）、期权（v7）、新闻（v1 search）、财务（fundamentals-timeseries，免认证）
 - **Investing.com**：GraphQL `gql.api.investing.com/graphql`（行情/三表/比率/分红/预测/盈利/公司资料/高管/持有人，免认证）、TVC K 线（carrier token）
 
+### 数据源优先级
+
+默认以 **Yahoo 为权威源**：同一行数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
+investing 只补 Yahoo 没给的。设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` 可把优先级翻过来。
+新建标的时若 Yahoo 已经给出标的身份，就不再调用 investing —— 新增一只股票或整轮板块同步都不会再
+等 investing 的 403 重试。
+
 ## 数据清单（Data Checklist）
 
 面向"关注行情、提前布局"场景，在原有个股基本面基础上新增以下数据维度，全部由 **Yahoo quoteSummary / Investing GraphQL** 现有接口获取：
@@ -226,6 +233,7 @@ npm run build:all
 | `YAHOO_STOCK_MCP_PROXY_URL` | 无 | 所有 Node fetch 请求使用的 HTTP(S) 代理，例如 `http://127.0.0.1:17890`；Yahoo 在大陆需配置 |
 | `YAHOO_STOCK_MCP_BARS_START_DATE` | 2000-01-01 | 全量同步起点 |
 | `YAHOO_STOCK_MCP_BARS_PROVIDER` | yahoo | K 线来源（yahoo/investing） |
+| `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | 两家都有值时以谁为准（yahoo/investing），另一家只补主源缺失的数据 |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | 每次抓取的新闻条数 |
 | `YAHOO_STOCK_MCP_INVESTING_TRANSPORT` | auto | node / go / auto |
 | `YAHOO_STOCK_MCP_GQLPROXY_COOKIE_FILE` | .cache/gqlproxy_cookies.txt | sidecar cookie 会话文件 |
