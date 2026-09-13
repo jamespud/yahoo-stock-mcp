@@ -42,7 +42,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "test:db": "tsx scripts/test-db.ts",
     "test:mcp": "tsx scripts/test-mcp.ts",
-    "test": "npm run test:cli && npm run test:indicators && npm run test:db && npm run test:mcp",
+    "test": "npm run test:cli && npm run test:providers && npm run test:indicators && npm run test:db && npm run test:mcp",
     "test:indicators": "tsx scripts/test-indicators.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:sidecar": "cd cmd/gqlproxy && go build -o ../../bin/gqlproxy .",
@@ -50,6 +50,7 @@
     "prepack": "npm run build:all",
     "prepublishOnly": "npm run build:all",
     "test:cli": "tsx scripts/test-cli.ts",
+    "test:providers": "tsx scripts/test-providers.ts",
     "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts"
   },
   "dependencies": {

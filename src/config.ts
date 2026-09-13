@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parsePrimaryProvider } from "./providers/priority.js";
 
 const ENV_PREFIX = "YAHOO_STOCK_MCP_";
 
@@ -60,6 +61,11 @@ export const config = {
   requestDelayMs: num(env("REQUEST_DELAY_MS"), 300),
   barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
   barsProvider: (env("BARS_PROVIDER") ?? "yahoo") as "yahoo" | "investing",
+  /**
+   * 两家都有数据时以谁为准（另一家只在主源缺数据时补位）。
+   * `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`，默认 yahoo。
+   */
+  primaryProvider: parsePrimaryProvider(env("PRIMARY_PROVIDER")),
   newsCount: num(env("NEWS_COUNT"), 20),
   /** Optional HTTP(S) proxy for all Node fetch requests, e.g. http://127.0.0.1:17890 */
   proxyUrl: env("PROXY_URL")?.trim() || null,
