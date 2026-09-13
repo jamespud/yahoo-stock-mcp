@@ -6,7 +6,7 @@ function typicalPrice(bars: IndicatorBar[]): Series {
   return zipAll([pick(bars, "high"), pick(bars, "low"), pick(bars, "close")], ([h, l, c]) => (h + l + c) / 3);
 }
 
-/** OBV：初值 0，之后按收盘涨跌累积成交量。 */
+/** OBV: starts at 0, then accumulates volume on close-to-close up/down moves. */
 function obvCalc(close: Series, volume: Series): Series {
   const out: Series = new Array(close.length).fill(null);
   let acc = 0;
@@ -30,7 +30,7 @@ function obvCalc(close: Series, volume: Series): Series {
   return out;
 }
 
-/** 佳庆资金流量线：累加 资金流量乘数 × 成交量。 */
+/** Chaikin A/D line: accumulates money-flow multiplier × volume. */
 function adlCalc(high: Series, low: Series, close: Series, volume: Series): Series {
   const out: Series = new Array(close.length).fill(null);
   let acc = 0;

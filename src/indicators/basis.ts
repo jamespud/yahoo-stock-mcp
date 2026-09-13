@@ -1,7 +1,7 @@
 import { isNum } from "./math.js";
 import type { IndicatorBar } from "./types.js";
 
-/** 复权口径：adjusted 用 adjClose/close 的因子等比缩放 OHLC，成交量不动。 */
+/** Price basis: `adjusted` rescales OHLC by the adjClose/close factor and leaves volume untouched. */
 export function applyBasis(bars: IndicatorBar[], basis: "adjusted" | "raw"): IndicatorBar[] {
   if (basis === "raw") return bars;
   return bars.map((bar) => {

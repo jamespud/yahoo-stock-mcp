@@ -44,7 +44,7 @@ export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
 
   const yahoo = await fetchYahooSummary(symbol).catch(() => null);
   const primary = config.primaryProvider;
-  // Yahoo 已经给出标的身份时不再等 investing（主源就是 Yahoo，多问一次只会拖慢建仓与板块同步）
+  // Skip investing once Yahoo gave the identity; asking again only slows instrument/sector creation down
   const investing = needsInvestingIdentity(primary, yahoo?.modules)
     ? await fetchInvestingSnapshot(symbol).catch(() => null)
     : null;
@@ -113,7 +113,8 @@ async function syncBars(instrument: InstrumentRow, from: string, to: string): Pr
 // ── financial statements / ratios ───────────────────────────────
 
 /**
- * 财务字段写入：`YAHOO_STOCK_MCP_PRIMARY_PROVIDER` 指定的主源覆盖，另一家只在主源缺失时补位。
+ * Financial-field writes: the provider named by `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` overrides, the
+ * other one only fills values the primary has not written.
  */
 export async function saveFinancials(
   instrumentId: number,
@@ -340,7 +341,7 @@ export async function syncOne(
     const modules = summary.modules;
     const price = modules.price ?? {};
     const px = yahooNum(price.regularMarketPrice);
-    // 只有 Yahoo 是主源时才用 Yahoo 的名字/交易所/币种覆盖已有值
+    // Only let Yahoo overwrite the stored name/exchange/currency when Yahoo is the primary source
     if (px != null && config.primaryProvider === "yahoo") {
       await query(
         `UPDATE instruments SET name = COALESCE(?, name), exchange = COALESCE(?, exchange), currency = COALESCE(?, currency), updated_at = NOW() WHERE id = ?`,

@@ -1,6 +1,6 @@
 import type { IndicatorBar } from "../src/indicators/types.js";
 
-/** 确定性 LCG，保证测试与 fixture 生成拿到完全相同的序列。 */
+/** Deterministic LCG so tests and fixture generation see exactly the same series. */
 export function lcg(seed: number): () => number {
   let state = seed >>> 0;
   return () => {

@@ -2,7 +2,7 @@ import { ema, isNum, pick, rollingStdev, sma, wma, zip, zipAll } from "./math.js
 import type { IndicatorBar, Series } from "./types.js";
 import { defineIndicators, num } from "./types.js";
 
-/** Kaufman 自适应均线：ER 决定平滑速度。 */
+/** Kaufman adaptive moving average: the efficiency ratio drives the smoothing speed. */
 function kama(close: Series, period: number, fast: number, slow: number): Series {
   const out: Series = new Array(close.length).fill(null);
   const fastSC = 2 / (fast + 1);
@@ -24,7 +24,7 @@ function kama(close: Series, period: number, fast: number, slow: number): Series
       volatility += Math.abs(a - b);
     }
     if (!ok) continue;
-    if (prev === null) prev = c; // 种子：第一根有效 bar 的收盘价（此时 SC 项为 0）
+    if (prev === null) prev = c; // seed: close of the first valid bar (the SC term is 0 there)
     const er = volatility === 0 ? 0 : Math.abs(c - back) / volatility;
     const sc = (er * (fastSC - slowSC) + slowSC) ** 2;
     prev = prev + sc * (c - prev);
@@ -33,7 +33,7 @@ function kama(close: Series, period: number, fast: number, slow: number): Series
   return out;
 }
 
-/** Parabolic SAR；第一根 bar 只用于初始化，因此首个输出在下标 1。 */
+/** Parabolic SAR; the first bar only initializes, so the first output lands at index 1. */
 function sarCalc(high: Series, low: Series, acceleration: number, maxAccel: number): Series[] {
   const n = high.length;
   const sar: Series = new Array(n).fill(null);

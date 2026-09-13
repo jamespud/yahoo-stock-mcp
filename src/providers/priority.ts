@@ -1,29 +1,30 @@
 /**
- * 数据源优先级（Yahoo / Investing）。
+ * Data-source priority (Yahoo / Investing).
  *
- * 规则：主源（`YAHOO_STOCK_MCP_PRIMARY_PROVIDER`，默认 yahoo）永远赢；
- * 主源还没有数据时，另一家可以补位。同步层的 upsert 与建 instrument 的取值顺序
- * 都由这里的纯函数决定，SQL 侧用 `priorityValueClause()` 保持同一套规则。
+ * Rule: the primary source (`YAHOO_STOCK_MCP_PRIMARY_PROVIDER`, default yahoo) always wins;
+ * the other provider may only fill values the primary has not written yet. Both the sync-layer
+ * upserts and the instrument-creation field order are decided by the pure functions here, and
+ * the SQL side reuses the same rule through `priorityValueClause()`.
  */
 
 export type Provider = "yahoo" | "investing";
 
-/** 数据库 source 列：可能是别家、历史值或空。 */
+/** The `source` column of an existing row: might be the other provider, a legacy value, or empty. */
 export type SourceTag = string | null | undefined;
 
-/** 解析 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER`：大小写/空白不敏感，未知值回落 yahoo。 */
+/** Parses `YAHOO_STOCK_MCP_PRIMARY_PROVIDER`: case/whitespace insensitive, unknown values fall back to yahoo. */
 export function parsePrimaryProvider(raw: string | undefined | null): Provider {
   return (raw ?? "").trim().toLowerCase() === "investing" ? "investing" : "yahoo";
 }
 
-/** 本次写入是否应该覆盖库里已有的值。 */
+/** Whether an incoming write should override the value already stored in the row. */
 export function shouldOverride(primary: Provider, incumbent: SourceTag, incoming: Provider): boolean {
   if (incoming === primary) return true;
   if (incumbent === primary) return false;
   return true;
 }
 
-/** 同一字段两家都有值时按主源取；主源为空则回退到另一家。 */
+/** Picks the primary source's value for a field; falls back to the other provider when it is null. */
 export function preferPrimary<T>(
   primary: Provider,
   yahooValue: T | null | undefined,
@@ -34,8 +35,10 @@ export function preferPrimary<T>(
 }
 
 /**
- * 建 instrument 时是否还需要问 investing：主源是 investing，或 Yahoo 连标的身份都没给出来。
- * Yahoo 已经给出名字就跳过 investing（板块 ETF 同步原来每个都要等一次 investing 重试）。
+ * Whether creating an instrument still needs to ask investing: either investing is the primary
+ * source, or Yahoo did not return the instrument's identity at all. When Yahoo already gave a name
+ * we skip investing — that call used to make every new instrument (and every sector ETF) wait on
+ * investing's 403 retries.
  */
 export function needsInvestingIdentity(primary: Provider, yahooModules: Record<string, any> | null | undefined): boolean {
   if (primary === "investing") return true;
@@ -44,18 +47,19 @@ export function needsInvestingIdentity(primary: Provider, yahooModules: Record<s
 }
 
 /**
- * upsert 里"是否用新值覆盖"的 SQL 片段（与 `shouldOverride` 同一套真假表）：
- * 新值是主源 → 覆盖；已有值是主源 → 保留；都不是主源 → 覆盖（后来者生效）。
+ * SQL fragment for an upsert deciding whether to take the incoming value (same truth table as
+ * `shouldOverride`): incoming is primary → override; stored value is primary → keep; neither is
+ * primary → override (last writer wins).
  */
 export function priorityValueClause(primary: Provider): { sql: string; params: [Provider, Provider] } {
   return { sql: "IF(VALUES(source) = ? OR source <> ?, VALUES(value), value)", params: [primary, primary] };
 }
 
 /**
- * 生成整段 `ON DUPLICATE KEY UPDATE` 赋值列表：每列按同一规则决定是否用新值，
- * 并把 `source` 一起改写成胜出方（否则 Yahoo 覆盖 investing 行后，下一轮 investing
- * 写入又会把它盖回去）。列赋值在前、`source` 赋值在后 —— MySQL 从左到右求值，
- * 这样所有判定读到的都是**原有**的 source。
+ * Builds the whole `ON DUPLICATE KEY UPDATE` assignment list: every column applies the same rule,
+ * and `source` is rewritten to the winning provider (otherwise a Yahoo-overwritten investing row
+ * would be clobbered again by the next investing sync). Column assignments come first and `source`
+ * last: MySQL evaluates assignments left to right, so every predicate reads the *original* source.
  */
 export function priorityUpdate(primary: Provider, columns: string[]): { sql: string; params: Provider[] } {
   const cond = "VALUES(source) = ? OR source <> ?";

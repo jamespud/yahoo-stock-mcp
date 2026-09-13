@@ -173,15 +173,15 @@ CREATE TABLE IF NOT EXISTS sync_state (
 
 -- ============================================================
 -- Data checklist additions (Yahoo / Investing based)
---   company_events        : 前瞻事件日历（财报/电话会/除息/派息）
---   insider_transactions  : 内部人交易
---   analyst_actions       : 分析师升级/降级与目标价调整
---   earnings_trend        : 季度盈利预测趋势与修正
---   recommendation_trend  : 分析师评级趋势（月度）
---   fund_holders          : 基金持有人（mutual fund ownership）
---   short_interest        : 空头持仓快照
---   holder_breakdown      : 内部人/机构持股结构
---   intraday_bars         : 分钟级行情
+--   company_events        : forward event calendar (earnings / calls / ex-dividend / pay date)
+--   insider_transactions  : insider transactions
+--   analyst_actions       : analyst upgrades/downgrades and price-target changes
+--   earnings_trend        : quarterly estimate trend and revisions
+--   recommendation_trend  : monthly analyst rating trend
+--   fund_holders          : mutual fund ownership
+--   short_interest        : short-interest snapshot
+--   holder_breakdown      : insider/institutional ownership breakdown
+--   intraday_bars         : minute bars
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS company_events (
@@ -317,8 +317,8 @@ CREATE TABLE IF NOT EXISTS intraday_bars (
 
 -- ============================================================
 -- Sector / industry data (GICS 11 sectors via SPDR sector ETFs)
---   sectors        : 板块目录（代码 + 名称 + 板块 ETF + 基准标记）
---   sector_members : 板块成分股（来自板块 ETF topHoldings，含权重）
+--   sectors        : sector catalog (code + name + sector ETF + benchmark flag)
+--   sector_members : sector constituents (from the sector ETF's topHoldings, with weights)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS sectors (

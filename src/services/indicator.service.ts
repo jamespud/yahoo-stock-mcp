@@ -62,7 +62,7 @@ function resolveSelection(selection: string | IndicatorSelection): Resolved {
   return { spec, params: normalizeParams(spec, selection.params ?? {}), outputs };
 }
 
-/** 日内 bar 复用 get_intraday_bars 的查询，再归一化成指标引擎的 bar 形状。 */
+/** Intraday bars reuse the get_intraday_bars query, then get normalized into the engine's bar shape. */
 async function loadIntradayBars(
   symbol: string,
   barInterval: "1m" | "5m" | "15m" | "30m" | "60m",
@@ -72,9 +72,9 @@ async function loadIntradayBars(
 ): Promise<IndicatorBar[] | null> {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  // "desc" 取最后 limit 根，返回时仍为升序
+  // "desc" takes the last `limit` bars; the array is still returned ascending
   const rows = await getIntradayBars(symbol, barInterval, from, to, Math.max(1, Math.min(limit, 20000)), "desc");
-  // getIntradayBars 返回 { symbol, interval, bars } 包装对象；日内价同样是 DECIMAL 字符串
+  // getIntradayBars returns a { symbol, interval, bars } wrapper; intraday prices are DECIMAL strings too
   return (rows?.bars ?? []).map((r: any) => ({
     date: typeof r.ts === "string" ? r.ts : new Date(r.ts).toISOString().slice(0, 19).replace("T", " "),
     open: toNumOrNull(r.open),
@@ -86,7 +86,7 @@ async function loadIntradayBars(
   }));
 }
 
-/** 指标计算主入口：取数 → 复权 → 计算 → 截取最后 limit 个点 → 组装。 */
+/** Main entry point: fetch → basis → compute → tail `limit` points → assemble. */
 export async function getIndicators(request: IndicatorRequest): Promise<IndicatorResult> {
   if (request.intraday && request.interval) {
     throw new Error("intraday and interval are mutually exclusive");

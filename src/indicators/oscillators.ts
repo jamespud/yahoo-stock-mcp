@@ -6,7 +6,7 @@ function rocOf(src: Series, period: number): Series {
   return zip(src, shift(src, period), (a, b) => (b === 0 ? null : ((a - b) / b) * 100));
 }
 
-/** Aroon 上下行：窗口包含当前 bar，共 period+1 个点。 */
+/** Aroon up/down: the window includes the current bar, so it spans period+1 points. */
 function aroonCalc(high: Series, low: Series, period: number): Series[] {
   const up: Series = new Array(high.length).fill(null);
   const down: Series = new Array(high.length).fill(null);
@@ -41,7 +41,7 @@ function aroonCalc(high: Series, low: Series, period: number): Series[] {
   return [up, down, osc];
 }
 
-/** Know Sure Thing 的标准 ROC / 平滑阶梯。 */
+/** Know Sure Thing's standard ROC / smoothing ladder. */
 const KST_ROC = [10, 15, 20, 30];
 const KST_SMA = [10, 10, 10, 15];
 const KST_WEIGHT = [1, 2, 3, 4];

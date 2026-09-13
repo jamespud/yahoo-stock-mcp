@@ -39,18 +39,18 @@ async function main() {
     assert.equal((await q.getBars(TEST_SYMBOL, "1mo"))?.length, 1);
     assert.equal(await q.getBars("QQQQNOPE", "1d"), null);
 
-    // --- indicator bars: camelCase 归一化 + 周月聚合带 adj_close ---
+    // --- indicator bars: camelCase normalization + weekly/monthly aggregation carrying adj_close ---
     const daily = await q.getIndicatorBars(TEST_SYMBOL, "1d", undefined, undefined, 10);
     assert.equal(daily?.length, 3, "indicator bars should return all daily rows");
     assert.equal(daily?.[0].date, "2026-08-01");
-    // DECIMAL 列在 mysql2 里是字符串 "10.5000"，getIndicatorBars 必须归一化成 number
+    // mysql2 returns DECIMAL columns as strings ("10.5000"); getIndicatorBars must normalize them to numbers
     assert.equal(daily?.[0].adjClose, 10.5, "adj_close should map to adjClose");
     assert.equal(typeof daily?.[0].close, "number", "OHLC must be numbers, never DECIMAL strings");
     assert.equal(await q.getIndicatorBars("QQQQNOPE", "1d", undefined, undefined, 10), null);
 
     const weekly = await q.getIndicatorBars(TEST_SYMBOL, "1wk", undefined, undefined, 10);
     assert.equal(weekly?.length, 2, "weekly aggregation should keep 2 buckets");
-    // 种子数据 08-01(Sat)+08-02(Sun) 同属 07-27 那一周，桶内最后一根是 08-02 的 11.5
+    // The seeded 08-01 (Sat) + 08-02 (Sun) rows share the week of 07-27; the last row in that bucket is 08-02 with 11.5
     assert.equal(weekly?.[0].adjClose, 11.5, "weekly buckets must carry the last non-null adjClose in the bucket");
 
     const barsWithAdj = await q.getBars(TEST_SYMBOL, "1wk");
@@ -88,17 +88,17 @@ async function main() {
       asOf: PROBE_AS_OF,
       source,
     });
-    // investing 先落库，Yahoo（主源）后到 → 覆盖并改写 source
+    // investing lands first, then Yahoo (the primary) arrives → it overrides and retags the row
     await saveRatios(id, [probe(1, "investing")], "yahoo");
     assert.equal((await readProbe())?.value, 1, "gap filled by the fallback source");
     await saveRatios(id, [probe(2, "yahoo")], "yahoo");
     assert.deepEqual(await readProbe(), { value: 2, source: "yahoo" }, "primary overrides and retags the row");
-    // 非主源再写 → 不许覆盖
+    // the fallback source writes again → it must not override
     await saveRatios(id, [probe(3, "investing")], "yahoo");
     assert.equal((await readProbe())?.value, 2, "fallback source must not override the primary");
     await saveRatios(id, [probe(4, "yahoo")], "yahoo");
     assert.equal((await readProbe())?.value, 4, "primary keeps overriding");
-    // 把优先级翻成 investing → 规则镜像
+    // flip the priority to investing → the rule mirrors
     await saveRatios(id, [probe(5, "investing")], "investing");
     assert.deepEqual(await readProbe(), { value: 5, source: "investing" }, "flipped primary overrides");
     await saveRatios(id, [probe(6, "yahoo")], "investing");
@@ -154,12 +154,12 @@ async function main() {
         [id, ts, last - 0.2, last + 0.2, last - 0.4, last]
       );
     }
-    // 既有 get_intraday_bars 语义不变：默认仍取最早 limit 根
+    // the existing get_intraday_bars semantics stay unchanged: the default still takes the earliest `limit` bars
     const intraAsc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2);
     assert.equal(intraAsc?.bars.length, 2);
     assert.equal(isoMinute(intraAsc?.bars[0].ts), "2026-08-03T14:30");
     assert.equal(isoMinute(intraAsc?.bars[1].ts), "2026-08-03T14:45");
-    // 指标引擎专用路径：取最后 limit 根，仍按升序返回
+    // the indicator-engine path takes the last `limit` bars and still returns them ascending
     const intraDesc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2, "desc");
     assert.equal(intraDesc?.bars.length, 2);
     assert.equal(isoMinute(intraDesc?.bars[0].ts), "2026-08-03T15:00");

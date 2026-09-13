@@ -2,7 +2,7 @@ import { isNum, pick } from "./math.js";
 import type { Series } from "./types.js";
 import { defineIndicators, num } from "./types.js";
 
-/** 窗口内最小二乘拟合：x = 0..n-1，value 取末端拟合值，forecast 外推一期。 */
+/** Least-squares fit over the window: x = 0..n-1, `value` is the endpoint, `forecast` extrapolates one bar. */
 function linearRegression(close: Series, period: number, k: number): Series[] {
   const length = close.length;
   const value: Series = new Array(length).fill(null);

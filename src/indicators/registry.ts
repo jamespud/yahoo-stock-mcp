@@ -32,7 +32,7 @@ function editDistance(a: string, b: string): number {
   return dp[a.length][b.length];
 }
 
-/** 未知指标名时给出最多 limit 个最接近的候选。 */
+/** Returns up to `limit` closest names for an unknown indicator. */
 export function suggestNames(name: string, limit = 5): string[] {
   const q = name.trim().toUpperCase();
   return INDICATORS.map((s) => ({ name: s.name, d: editDistance(q, s.name) }))
@@ -65,7 +65,7 @@ export function normalizeParams(spec: IndicatorSpec, input: Params = {}): Params
   return out;
 }
 
-/** 解析 "RSI" / "RSI(14)" / "MACD(12,26,9)"，位置参数按 spec.params 顺序展开。 */
+/** Parses "RSI" / "RSI(14)" / "MACD(12,26,9)"; positional arguments follow `spec.params` order. */
 export function parseIndicatorToken(token: string): { name: string; params: Params } {
   const text = token.trim();
   const open = text.indexOf("(");
@@ -91,7 +91,7 @@ export function parseIndicatorToken(token: string): { name: string; params: Para
   return { name: spec.name, params };
 }
 
-/** 供 MCP 工具 list_indicators 使用的自描述元信息。 */
+/** Self-describing metadata for the `list_indicators` MCP tool. */
 export function listIndicatorMeta() {
   return INDICATORS.map((s) => ({
     name: s.name,

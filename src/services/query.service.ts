@@ -77,7 +77,7 @@ function bucketKey(day: string, interval: "1wk" | "1mo"): string {
   return t.toISOString().slice(0, 10);
 }
 
-/** 周/月聚合：OHLC 取桶内首/最高/最低/末，成交量求和，adj_close 取桶内最后一个非空值。 */
+/** Weekly/monthly aggregation: first/highest/lowest/last OHLC per bucket, summed volume, last non-null adj_close. */
 function aggregateRows(rows: any[], interval: "1wk" | "1mo"): AggregatedBucket[] {
   const buckets = new Map<string, AggregatedBucket>();
   for (const b of rows) {
@@ -109,8 +109,9 @@ const finiteOrNull = (v: number | null | undefined): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
 /**
- * mysql2 把 DECIMAL(18,4) 列返回成字符串（实测 `"10.5000"`），而指标原语只接受
- * number（`isNum()` 会把字符串当 null），因此进入指标引擎前必须统一归一化。
+ * mysql2 hands back DECIMAL(18,4) columns as strings (`"10.5000"`), while the indicator primitives
+ * only accept numbers (`isNum()` treats strings as null), so everything must be normalized before
+ * it reaches the indicator engine.
  */
 export function toNumOrNull(v: unknown): number | null {
   if (v === null || v === undefined) return null;
@@ -119,9 +120,10 @@ export function toNumOrNull(v: unknown): number | null {
 }
 
 /**
- * 指标引擎专用取数：返回 camelCase 的 OHLCV + adjClose。
- * 注意：DECIMAL 列是字符串，返回值必须是 number 或 null（见 toNumOrNull）。
- * 周/月线先按 8×/24× 系数取足量日线再聚合；limit 表示"返回多少根 bar"。
+ * Indicator-engine loader: returns camelCase OHLCV plus adjClose.
+ * Note: DECIMAL columns arrive as strings, so every value must come back as number or null
+ * (see toNumOrNull). Weekly/monthly bars fetch 8×/24× daily rows first and then aggregate;
+ * `limit` always means "how many bars to return".
  */
 export async function getIndicatorBars(
   symbol: string,
@@ -445,8 +447,9 @@ export async function getHolderBreakdown(symbol: string) {
 }
 
 /**
- * 日内 bar 查询。默认按时间升序取最早 limit 根（既有 get_intraday_bars 行为不变）；
- * `order: "desc"` 取"最后 limit 根"后再翻回升序，供指标引擎按"最后 limit 根"的窗口语义使用。
+ * Intraday bar query. By default it takes the earliest `limit` bars in ascending order (the existing
+ * get_intraday_bars behaviour); `order: "desc"` takes the last `limit` bars and flips them back to
+ * ascending, which is the window semantics the indicator engine needs.
  */
 export async function getIntradayBars(
   symbol: string,

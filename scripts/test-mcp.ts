@@ -209,7 +209,7 @@ async function main() {
     assert.ok("SMA.sma" in payload.series[2]);
     assert.equal(payload.basis, "adjusted");
 
-    // 日内路径：basis 强制 raw，且不能被 interval 的默认值误判成互斥参数
+    // Intraday path: basis is forced to raw, and the default interval must not trip the mutual-exclusion guard
     const intradayInd = await probe.request("tools/call", {
       name: "get_indicators",
       arguments: { symbol: TEST_SYMBOL, indicators: ["SMA(2)"], intraday: "15m", limit: 2 },

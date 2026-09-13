@@ -20,14 +20,14 @@ function typicalPrice(bars: IndicatorBar[]): Series {
   return zipAll([pick(bars, "high"), pick(bars, "low"), pick(bars, "close")], ([h, l, c]) => (h + l + c) / 3);
 }
 
-/** 随机指标原始值；HH == LL 时给中性值 flatValue。 */
+/** Raw stochastic value; returns the neutral `flatValue` when HH == LL. */
 function rawStochastic(values: Series, high: Series, low: Series, period: number, flatValue: number): Series {
   const hh = rollingMax(high, period);
   const ll = rollingMin(low, period);
   return zipAll([values, hh, ll], ([v, h, l]) => (h - l === 0 ? flatValue : ((v - l) / (h - l)) * 100));
 }
 
-/** Wilder RSI。无下跌 → 100；无上涨 → 0；全平 → 50。 */
+/** Wilder RSI: no losses → 100, no gains → 0, perfectly flat → 50. */
 function rsiCalc(close: Series, period: number): Series {
   const delta = diff(close);
   const gains = delta.map((v) => (isNum(v) ? Math.max(v, 0) : null));

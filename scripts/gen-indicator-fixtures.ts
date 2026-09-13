@@ -1,11 +1,11 @@
-// 用 devDependency `technicalindicators` 生成参考值 fixture（不随包发布）。
-// 只在开发机跑；比对测试读的是提交进仓库的 JSON，CI 不需要装这个库。
+// Generates the reference fixture with the `technicalindicators` devDependency (never shipped).
+// Dev-machine only: the comparison test reads the committed JSON, so CI needs no reference library.
 //
-// 每个通道记录三件事，供 scripts/test-indicators.ts 比对：
-//   - align：参考序列第 0 个元素落在"本实现下标 = lookback(params) + align"处；
-//     负数表示参考库暖机比我们早，正数表示晚（它的初值约定或暖机更长）。
-//   - mode："delta" 只比对一阶差分（参考库的初值约定与本实现不同，例如 OBV）。
-//   - tolerance：参考库自身做了取整的通道（RSI / MFI 保留两位小数）放宽到 6e-3。
+// Every channel records three things for scripts/test-indicators.ts:
+//   - align: the reference array's first element sits at "our index = lookback(params) + align";
+//     negative means the reference warms up earlier, positive means later (different seed or longer warm-up).
+//   - mode: "delta" compares first differences only (reference seed conventions differ, e.g. OBV).
+//   - tolerance: relaxed to 6e-3 for channels the reference library rounds (RSI / MFI keep 2 decimals).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,13 +22,13 @@ const high = bars.map((b) => b.high as number);
 const low = bars.map((b) => b.low as number);
 const volume = bars.map((b) => b.volume as number);
 
-/** 12 位有效数字足够，且让 diff 稳定。 */
+/** 12 significant digits are plenty and keep diffs stable. */
 const round = (v: number): number => Number(v.toPrecision(12));
 
 interface ChannelMeta {
-  /** 参考序列首元素对应的 bar 下标（在我们自己的坐标系里）。 */
+  /** Bar index (in our coordinates) that the reference array's first element maps to. */
   start: number;
-  /** 丢掉参考序列开头的几个元素（参考库自身的初始化瞬态，例如 PSAR 的前两根）。 */
+  /** Leading reference elements to drop (the reference library's own init transient, e.g. PSAR's first bars). */
   dropHead?: number;
   delta?: boolean;
   tolerance?: number;
@@ -59,7 +59,7 @@ function put(name: string, output: string, values: Array<number | null>, meta: C
   );
 }
 
-/** 对象数组取某个键；缺键的条目直接跳过（technicalindicators 的暖机表达方式）。 */
+/** Reads one key out of an array of objects, skipping entries without it (how technicalindicators warms up). */
 function channel(theirs: Array<Record<string, number | undefined>>, key: string): number[] {
   const out: number[] = [];
   for (const row of theirs) {
@@ -83,12 +83,13 @@ put("BBANDS", "middle", channel(bb, "middle"), { start: 19 });
 put("BBANDS", "lower", channel(bb, "lower"), { start: 19 });
 put("BBANDS", "percentB", channel(bb, "pb"), { start: 19 });
 
-// SAR 不入 fixture：PSAR 是路径依赖的递归指标，参考库的初始化与反转处理不同，300 根里
-// 有 5 个点（含 3 个趋势反转点）与我们的值不同，其余逐点一致——逐点参考比对不适合这类
-// 递归状态指标。SAR 的行为由 Task 3 的解析式断言（单调上涨时 trend=1、SAR 在价格下方）覆盖。
+// SAR stays out of the fixture: PSAR is path-dependent and the reference library initializes and flips
+// differently — across 300 bars 5 points disagree (3 of them trend reversals) while the rest match, so
+// point-wise comparison is not the right tool for this recursive indicator. SAR is covered by the
+// analytic assertions instead (trend=1 and SAR below price in a monotonic uptrend).
 
 // ── momentum ──────────────────────────────────────────────────
-// 参考库的 RSI/MFI 输出保留两位小数，比对时用 6e-3 容差；MFI 的暖机比我们晚一根。
+// The reference library prints RSI/MFI with 2 decimals, hence the 6e-3 tolerance; MFI warms up one bar later.
 put("RSI", "rsi", num(ti.RSI.calculate({ period: 14, values: close })), { start: 14, tolerance: 6e-3 });
 put("MFI", "mfi", num(ti.MFI.calculate({ period: 14, high, low, close, volume })), {
   start: 15,
@@ -97,7 +98,7 @@ put("MFI", "mfi", num(ti.MFI.calculate({ period: 14, high, low, close, volume })
 put("WILLR", "willr", num(ti.WilliamsR.calculate({ period: 14, high, low, close })), { start: 13 });
 put("CCI", "cci", num(ti.CCI.calculate({ period: 20, high, low, close })), { start: 19 });
 
-// 参考库的 Stochastic 只做一层平滑：它的 d 就是我们的慢速 %K（k），d 通道无对应参考。
+// The reference Stochastic smooths once: its `d` is our slow %K (k), so our %D has no counterpart.
 const stoch = ti.Stochastic.calculate({ high, low, close, period: 14, signalPeriod: 3 }) as Array<
   Record<string, number>
 >;
@@ -146,8 +147,9 @@ put("ATR", "atr", num(ti.ATR.calculate({ period: 14, high, low, close }) as numb
 put("STDDEV", "stddev", num(ti.SD.calculate({ period: 20, values: close }) as number[]), { start: 19 });
 
 // ── volume ────────────────────────────────────────────────────
-// 参考库的 ADL 把累计值取整到整数，做不了逐点比对（ADL 由 Task 7 的解析式断言覆盖）；
-// OBV 的初值约定不同（它没有第一根），因此只比一阶差分。
+// The reference ADL rounds its cumulative value to an integer, so point-wise comparison is meaningless
+// (ADL is covered by the analytic assertions instead). OBV's seed differs (it has no first bar), so its
+// comparison uses first differences only.
 put("OBV", "obv", num(ti.OBV.calculate({ close, volume }) as number[]), { start: 1, delta: true });
 put("FI", "forceIndex", num(ti.ForceIndex.calculate({ close, volume, period: 13 }) as number[]), { start: 13 });
 

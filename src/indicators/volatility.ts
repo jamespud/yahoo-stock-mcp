@@ -2,7 +2,7 @@ import { pick, rma, rollingStdev, shift, trueRange, zip, zipAll } from "./math.j
 import type { Series } from "./types.js";
 import { defineIndicators, num } from "./types.js";
 
-/** 对数收益 ln(C_t / C_{t-1})，非正值给 null。 */
+/** Log returns ln(C_t / C_{t-1}); null for non-positive prices. */
 function logReturns(close: Series): Series {
   return zip(close, shift(close), (curr, prev) => (curr > 0 && prev > 0 ? Math.log(curr / prev) : null));
 }

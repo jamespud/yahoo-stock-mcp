@@ -62,8 +62,8 @@ export const config = {
   barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
   barsProvider: (env("BARS_PROVIDER") ?? "yahoo") as "yahoo" | "investing",
   /**
-   * 两家都有数据时以谁为准（另一家只在主源缺数据时补位）。
-   * `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`，默认 yahoo。
+   * Which provider is authoritative when both return a value (the other one only fills what the
+   * primary lacks). `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`, default yahoo.
    */
   primaryProvider: parsePrimaryProvider(env("PRIMARY_PROVIDER")),
   newsCount: num(env("NEWS_COUNT"), 20),

@@ -57,7 +57,7 @@ export function zipAll(series: Series[], fn: (vals: number[]) => number | null):
   return out;
 }
 
-/** 对每个长度为 period 的连续有效窗口调用 fn；窗口触及 null 时该点输出 null。 */
+/** Calls fn on every consecutive window of `period` valid values; a window touching null yields null. */
 export function windowed(src: Series, period: number, fn: (w: number[]) => number | null): Series {
   const out: Series = new Array(src.length).fill(null);
   if (!Number.isInteger(period) || period <= 0) return out;
@@ -89,14 +89,14 @@ export const rollingMin = (src: Series, period: number): Series =>
 export const rollingMax = (src: Series, period: number): Series =>
   windowed(src, period, (w) => Math.max(...w));
 
-/** 总体标准差（÷n），与 TA-Lib BBANDS/STDDEV 一致。 */
+/** Population standard deviation (÷n), matching TA-Lib's BBANDS/STDDEV. */
 export const rollingStdev = (src: Series, period: number): Series =>
   windowed(src, period, (w) => {
     const mean = w.reduce((a, b) => a + b, 0) / period;
     return Math.sqrt(w.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
   });
 
-/** 平均绝对偏差，CCI 的分母。 */
+/** Mean absolute deviation, the denominator of CCI. */
 export const meanDeviation = (src: Series, period: number): Series =>
   windowed(src, period, (w) => {
     const mean = w.reduce((a, b) => a + b, 0) / period;
@@ -108,7 +108,7 @@ export function wma(src: Series, period: number): Series {
   return windowed(src, period, (w) => w.reduce((acc, v, idx) => acc + v * (idx + 1), 0) / denom);
 }
 
-/** EMA：前 period 个有效值的 SMA 作种子，之后 α·v + (1−α)·prev。遇 null 保留状态。 */
+/** EMA: seeded with the SMA of the first `period` valid values, then α·v + (1−α)·prev. Keeps state across nulls. */
 export function ema(src: Series, period: number): Series {
   const out: Series = new Array(src.length).fill(null);
   const alpha = 2 / (period + 1);
@@ -130,7 +130,7 @@ export function ema(src: Series, period: number): Series {
   return out;
 }
 
-/** Wilder 平滑（RMA）：前 period 个有效值的均值作种子，之后 (prev·(n−1)+v)/n。 */
+/** Wilder smoothing (RMA): seeded with the mean of the first `period` valid values, then (prev·(n−1)+v)/n. */
 export function rma(src: Series, period: number): Series {
   const out: Series = new Array(src.length).fill(null);
   let prev: number | null = null;
@@ -151,7 +151,7 @@ export function rma(src: Series, period: number): Series {
   return out;
 }
 
-/** True Range；第一根 bar 没有前收盘，输出 null（首根 bar 无前收盘，因此输出 null）。 */
+/** True Range; the first bar has no previous close, so it outputs null. */
 export function trueRange(high: Series, low: Series, close: Series): Series {
   const out: Series = new Array(high.length).fill(null);
   for (let i = 1; i < high.length; i++) {
