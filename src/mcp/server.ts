@@ -10,7 +10,7 @@ import { closeDb } from "../db.js";
 
 const server = new McpServer({
   name: "yahoo-stock-mcp",
-  version: "0.2.2",
+  version: "0.2.3",
 });
 
 function text(data: unknown): any {
