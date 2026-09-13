@@ -50,3 +50,18 @@ export function needsInvestingIdentity(primary: Provider, yahooModules: Record<s
 export function priorityValueClause(primary: Provider): { sql: string; params: [Provider, Provider] } {
   return { sql: "IF(VALUES(source) = ? OR source <> ?, VALUES(value), value)", params: [primary, primary] };
 }
+
+/**
+ * 生成整段 `ON DUPLICATE KEY UPDATE` 赋值列表：每列按同一规则决定是否用新值，
+ * 并把 `source` 一起改写成胜出方（否则 Yahoo 覆盖 investing 行后，下一轮 investing
+ * 写入又会把它盖回去）。列赋值在前、`source` 赋值在后 —— MySQL 从左到右求值，
+ * 这样所有判定读到的都是**原有**的 source。
+ */
+export function priorityUpdate(primary: Provider, columns: string[]): { sql: string; params: Provider[] } {
+  const cond = "VALUES(source) = ? OR source <> ?";
+  const sets = columns.map((c) => `${c} = IF(${cond}, VALUES(${c}), ${c})`);
+  sets.push(`source = IF(${cond}, VALUES(source), source)`);
+  const params: Provider[] = [];
+  for (let i = 0; i <= columns.length; i++) params.push(primary, primary);
+  return { sql: sets.join(", "), params };
+}

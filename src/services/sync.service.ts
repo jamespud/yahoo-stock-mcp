@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { query, runBatch } from "../db.js";
 import { fetchInvestingBars, fetchInvestingSnapshot } from "../providers/investing.js";
+import { needsInvestingIdentity, preferPrimary, priorityUpdate, type Provider } from "../providers/priority.js";
 import {
   extractCalendarEvents,
   extractDividendsFromSummary,
@@ -42,14 +43,19 @@ export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
   if (existing.length > 0) return existing[0];
 
   const yahoo = await fetchYahooSummary(symbol).catch(() => null);
-  const investing = await fetchInvestingSnapshot(symbol).catch(() => null);
+  const primary = config.primaryProvider;
+  // Yahoo 已经给出标的身份时不再等 investing（主源就是 Yahoo，多问一次只会拖慢建仓与板块同步）
+  const investing = needsInvestingIdentity(primary, yahoo?.modules)
+    ? await fetchInvestingSnapshot(symbol).catch(() => null)
+    : null;
 
-  const name = yahoo?.modules.price?.longName ?? investing?.identity.name ?? symbol;
-  const exchange = yahoo?.modules.price?.exchangeName ?? investing?.identity.exchange ?? null;
-  const currency = yahoo?.modules.price?.currency ?? null;
   const profile: any = investing?.profile ?? {};
   const assetProfile = yahoo?.modules.assetProfile ?? {};
-  const companyName = yahoo?.modules.price?.longName ?? yahoo?.modules.quoteType?.longName ?? investing?.identity.name ?? symbol;
+  const price = yahoo?.modules.price ?? {};
+  const companyName =
+    preferPrimary(primary, price.longName ?? yahoo?.modules.quoteType?.longName, investing?.identity.name) ?? symbol;
+  const exchange = preferPrimary(primary, price.exchangeName, investing?.identity.exchange);
+  const currency = price.currency ?? null;
 
   const res = await query<{ insertId: number }>(
     `INSERT INTO instruments (symbol, name, exchange, currency, yahoo_symbol, investing_id, sector, industry, business_summary, employees, website, street_address, city, country, phone)
@@ -63,15 +69,15 @@ export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
       symbol, companyName, exchange, currency,
       yahoo?.modules.price?.symbol ?? symbol,
       investing?.identity.investingId ?? null,
-      assetProfile.sector ?? profile.sector,
-      assetProfile.industry ?? profile.industry,
-      profile.businessSummary ?? assetProfile.longBusinessSummary ?? null,
-      profile.employees ?? assetProfile.fullTimeEmployees?.raw ?? null,
-      assetProfile.website ?? profile.web,
-      profile.streetAddress ?? assetProfile.address1 ?? null,
-      profile.city ?? assetProfile.city ?? null,
-      profile.country ?? assetProfile.country ?? null,
-      profile.phone ?? assetProfile.phone ?? null,
+      preferPrimary(primary, assetProfile.sector, profile.sector),
+      preferPrimary(primary, assetProfile.industry, profile.industry),
+      preferPrimary(primary, assetProfile.longBusinessSummary, profile.businessSummary),
+      preferPrimary(primary, assetProfile.fullTimeEmployees?.raw ?? null, profile.employees),
+      preferPrimary(primary, assetProfile.website, profile.web),
+      preferPrimary(primary, assetProfile.address1, profile.streetAddress),
+      preferPrimary(primary, assetProfile.city, profile.city),
+      preferPrimary(primary, assetProfile.country, profile.country),
+      preferPrimary(primary, assetProfile.phone, profile.phone),
     ]
   );
   const row = await query<InstrumentRow[]>(
@@ -106,28 +112,41 @@ async function syncBars(instrument: InstrumentRow, from: string, to: string): Pr
 
 // ── financial statements / ratios ───────────────────────────────
 
-async function saveFinancials(instrumentId: number, fields: FinancialField[]): Promise<void> {
+/**
+ * 财务字段写入：`YAHOO_STOCK_MCP_PRIMARY_PROVIDER` 指定的主源覆盖，另一家只在主源缺失时补位。
+ */
+export async function saveFinancials(
+  instrumentId: number,
+  fields: FinancialField[],
+  primary: Provider = config.primaryProvider
+): Promise<void> {
   if (fields.length === 0) return;
+  const keep = priorityUpdate(primary, ["value"]);
   const sql =
     `INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+     ON DUPLICATE KEY UPDATE ${keep.sql}`;
   const stmts = fields.map((f): [string, any[]] => [
     sql,
-    [instrumentId, f.statementType, f.periodType, f.periodEnd, f.fieldName, f.value, f.currency, f.source],
+    [instrumentId, f.statementType, f.periodType, f.periodEnd, f.fieldName, f.value, f.currency, f.source, ...keep.params],
   ]);
   for (let i = 0; i < stmts.length; i += 500) await runBatch(stmts.slice(i, i + 500));
 }
 
-async function saveRatios(instrumentId: number, ratios: RatioValue[]): Promise<void> {
+export async function saveRatios(
+  instrumentId: number,
+  ratios: RatioValue[],
+  primary: Provider = config.primaryProvider
+): Promise<void> {
   if (ratios.length === 0) return;
+  const keep = priorityUpdate(primary, ["value"]);
   const sql =
     `INSERT INTO ratios (instrument_id, metric, as_of, value, source)
      VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE value = VALUES(value)`;
+     ON DUPLICATE KEY UPDATE ${keep.sql}`;
   const stmts = ratios.map((r): [string, any[]] => [
     sql,
-    [instrumentId, r.metric, r.asOf, r.value, r.source],
+    [instrumentId, r.metric, r.asOf, r.value, r.source, ...keep.params],
   ]);
   await runBatch(stmts);
 }
@@ -199,11 +218,12 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
   await safe("company_events", async () => {
     const events = extractCalendarEvents(modules);
     if (!events.length) return;
+    const eventKeep = priorityUpdate(config.primaryProvider, ["event_date", "details"]);
     const stmts = events.map((e): [string, any[]] => [
       `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
        VALUES (?, ?, ?, ?, 'yahoo')
-       ON DUPLICATE KEY UPDATE event_date = VALUES(event_date), details = VALUES(details)`,
-      [instrument.id, e.eventType, e.eventDate, e.details],
+       ON DUPLICATE KEY UPDATE ${eventKeep.sql}`,
+      [instrument.id, e.eventType, e.eventDate, e.details, ...eventKeep.params],
     ]);
     await runBatch(stmts);
   });
@@ -257,11 +277,12 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
 
 async function syncInvestingCalendar(instrument: InstrumentRow, nextEarningsDate: string | null): Promise<void> {
   if (!nextEarningsDate) return;
+  const keep = priorityUpdate(config.primaryProvider, ["event_date"]);
   await query(
     `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
      VALUES (?, 'EARNINGS', ?, NULL, 'investing')
-     ON DUPLICATE KEY UPDATE event_date = VALUES(event_date)`,
-    [instrument.id, nextEarningsDate]
+     ON DUPLICATE KEY UPDATE ${keep.sql}`,
+    [instrument.id, nextEarningsDate, ...keep.params]
   );
 }
 
@@ -319,7 +340,8 @@ export async function syncOne(
     const modules = summary.modules;
     const price = modules.price ?? {};
     const px = yahooNum(price.regularMarketPrice);
-    if (px != null) {
+    // 只有 Yahoo 是主源时才用 Yahoo 的名字/交易所/币种覆盖已有值
+    if (px != null && config.primaryProvider === "yahoo") {
       await query(
         `UPDATE instruments SET name = COALESCE(?, name), exchange = COALESCE(?, exchange), currency = COALESCE(?, currency), updated_at = NOW() WHERE id = ?`,
         [price.longName ?? null, price.exchangeName ?? null, price.currency ?? null, instrument.id]
@@ -329,12 +351,13 @@ export async function syncOne(
 
     // dividends from yahoo
     const divs = extractDividendsFromSummary(modules);
+    const divKeep = priorityUpdate(config.primaryProvider, ["amount", "ttm_dividend", "yield_pct"]);
     for (const d of divs) {
       await query(
         `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
          VALUES (?, ?, ?, ?, ?, ?, 'yahoo')
-         ON DUPLICATE KEY UPDATE amount = VALUES(amount), ttm_dividend = VALUES(ttm_dividend), yield_pct = VALUES(yield_pct)`,
-        [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct]
+         ON DUPLICATE KEY UPDATE ${divKeep.sql}`,
+        [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, ...divKeep.params]
       );
     }
 
@@ -396,22 +419,28 @@ export async function syncOne(
     return null;
   });
   if (snapshot) {
+    const divKeepInv = priorityUpdate(config.primaryProvider, ["amount", "pay_date"]);
     await saveFinancials(instrument.id, snapshot.financials);
     await saveRatios(instrument.id, snapshot.ratios);
 
     const divStmts = snapshot.dividends.map((d): [string, any[]] => [
       `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
        VALUES (?, ?, ?, ?, ?, ?, 'investing')
-       ON DUPLICATE KEY UPDATE amount = VALUES(amount), pay_date = VALUES(pay_date)`,
-      [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct],
+       ON DUPLICATE KEY UPDATE ${divKeepInv.sql}`,
+      [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, ...divKeepInv.params],
     ]);
     if (divStmts.length) await runBatch(divStmts);
+    const summaryKeep = priorityUpdate(config.primaryProvider, [
+      "dividend_yield",
+      "payout_ratio",
+      "annualized_payout",
+      "five_year_growth",
+      "next_dividend_date",
+    ]);
     await query(
       `INSERT INTO dividends_summary (instrument_id, dividend_yield, payout_ratio, annualized_payout, five_year_growth, next_dividend_date, source)
        VALUES (?, ?, ?, ?, ?, ?, 'investing')
-       ON DUPLICATE KEY UPDATE dividend_yield = VALUES(dividend_yield), payout_ratio = VALUES(payout_ratio),
-         annualized_payout = VALUES(annualized_payout), five_year_growth = VALUES(five_year_growth),
-         next_dividend_date = VALUES(next_dividend_date)`,
+       ON DUPLICATE KEY UPDATE ${summaryKeep.sql}`,
       [
         instrument.id,
         snapshot.dividendSummary.yield,
@@ -419,6 +448,7 @@ export async function syncOne(
         snapshot.dividendSummary.annualizedPayout,
         snapshot.dividendSummary.fiveYearGrowth,
         snapshot.dividendSummary.nextDividendDate,
+        ...summaryKeep.params,
       ]
     );
 

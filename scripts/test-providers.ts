@@ -1,6 +1,12 @@
 // 数据源优先级纯函数测试（不连库、不联网）。
 import assert from "node:assert/strict";
-import { needsInvestingIdentity, parsePrimaryProvider, preferPrimary, shouldOverride } from "../src/providers/priority.js";
+import {
+  needsInvestingIdentity,
+  parsePrimaryProvider,
+  preferPrimary,
+  priorityUpdate,
+  shouldOverride,
+} from "../src/providers/priority.js";
 
 // ── shouldOverride：主源永远赢，主源缺失时后来者生效 ──────────────
 
@@ -52,5 +58,26 @@ assert.equal(parsePrimaryProvider("nonsense"), "yahoo", "unknown value falls bac
 // ── config 接线：默认值来自环境变量（未设置时 yahoo） ───────────
 const { config } = await import("../src/config.js");
 assert.equal(config.primaryProvider, "yahoo", "config.primaryProvider default");
+
+// ── priorityUpdate：upsert 子句形态（列先写、source 最后，保证判定用的是旧 source） ──
+
+const one = priorityUpdate("yahoo", ["value"]);
+assert.equal(
+  one.sql,
+  "value = IF(VALUES(source) = ? OR source <> ?, VALUES(value), value), " +
+    "source = IF(VALUES(source) = ? OR source <> ?, VALUES(source), source)",
+  "single column clause"
+);
+assert.deepEqual(one.params, ["yahoo", "yahoo", "yahoo", "yahoo"], "one pair of params per assignment");
+
+const multi = priorityUpdate("investing", ["amount", "pay_date"]);
+assert.equal(
+  multi.sql,
+  "amount = IF(VALUES(source) = ? OR source <> ?, VALUES(amount), amount), " +
+    "pay_date = IF(VALUES(source) = ? OR source <> ?, VALUES(pay_date), pay_date), " +
+    "source = IF(VALUES(source) = ? OR source <> ?, VALUES(source), source)",
+  "multi column clause keeps the source assignment last"
+);
+assert.deepEqual(multi.params, ["investing", "investing", "investing", "investing", "investing", "investing"]);
 
 console.log("provider priority tests OK");

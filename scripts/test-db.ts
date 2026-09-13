@@ -72,6 +72,39 @@ async function main() {
     assert.equal((await q.getForecast(TEST_SYMBOL))?.forecasts.length, 1);
     assert.equal((await q.getEarnings(TEST_SYMBOL))?.earnings.length, 1);
 
+    // --- data-source priority: primary wins, the other source may only fill gaps ---
+    const { saveRatios } = await import("../src/services/sync.service.js");
+    const PROBE_AS_OF = "2026-01-02";
+    const readProbe = async (): Promise<{ value: number; source: string } | null> => {
+      const rows = await query<any[]>(
+        "SELECT value, source FROM ratios WHERE instrument_id = ? AND metric = ? AND as_of = ?",
+        [id, "priority_probe", PROBE_AS_OF]
+      );
+      return rows[0] ? { value: Number(rows[0].value), source: rows[0].source } : null;
+    };
+    const probe = (value: number, source: "yahoo" | "investing") => ({
+      metric: "priority_probe",
+      value,
+      asOf: PROBE_AS_OF,
+      source,
+    });
+    // investing 先落库，Yahoo（主源）后到 → 覆盖并改写 source
+    await saveRatios(id, [probe(1, "investing")], "yahoo");
+    assert.equal((await readProbe())?.value, 1, "gap filled by the fallback source");
+    await saveRatios(id, [probe(2, "yahoo")], "yahoo");
+    assert.deepEqual(await readProbe(), { value: 2, source: "yahoo" }, "primary overrides and retags the row");
+    // 非主源再写 → 不许覆盖
+    await saveRatios(id, [probe(3, "investing")], "yahoo");
+    assert.equal((await readProbe())?.value, 2, "fallback source must not override the primary");
+    await saveRatios(id, [probe(4, "yahoo")], "yahoo");
+    assert.equal((await readProbe())?.value, 4, "primary keeps overriding");
+    // 把优先级翻成 investing → 规则镜像
+    await saveRatios(id, [probe(5, "investing")], "investing");
+    assert.deepEqual(await readProbe(), { value: 5, source: "investing" }, "flipped primary overrides");
+    await saveRatios(id, [probe(6, "yahoo")], "investing");
+    assert.equal((await readProbe())?.value, 5, "yahoo must not override when investing is primary");
+    await query("DELETE FROM ratios WHERE instrument_id = ? AND metric = ?", [id, "priority_probe"]);
+
     // --- holders / news / options ---
     assert.equal((await q.getHolders(TEST_SYMBOL, 10))?.holders.length, 1);
     assert.equal((await q.getHolders(TEST_SYMBOL, 0))?.holders.length, 1, "limit should be clamped to >= 1");
