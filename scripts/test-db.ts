@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { closeDb, initSchema, loadMigrations, migrateSchema, query, replaceBatch } from "../src/db.js";
 import * as q from "../src/services/query.service.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
-import { persistSyncState, summarizeSyncStatus } from "../src/services/sync.service.js";
+import {
+  applyInstrumentProfile,
+  mergeInstrumentProfile,
+  persistSyncState,
+  summarizeSyncStatus,
+} from "../src/services/sync.service.js";
 
 async function main() {
   await initSchema();
@@ -122,7 +127,77 @@ async function main() {
     assert.ok(barsWithAdj && "adj_close" in barsWithAdj[0], "get_bars weekly aggregation must include adj_close");
 
     // --- profile / financials ---
-    assert.equal((await q.getProfile(TEST_SYMBOL))?.name, TEST_NAME);
+    const yahooProfile = {
+      price: { longName: "Yahoo Name", exchangeName: "YH", currency: "USD", symbol: "ZZTEST.Y" },
+      assetProfile: {
+        sector: "Yahoo Sector",
+        industry: "Yahoo Industry",
+        longBusinessSummary: "Yahoo Summary",
+        fullTimeEmployees: { raw: 100 },
+        website: "https://yahoo.example",
+        city: "Yahoo City",
+      },
+    };
+    const investingProfile = {
+      identity: { investingId: 999, name: "Investing Name", ticker: "ZZTEST", exchange: "INV" },
+      profile: {
+        sector: "Investing Sector",
+        industry: "Investing Industry",
+        businessSummary: "Investing Summary",
+        employees: 200,
+        web: "https://investing.example",
+        streetAddress: "Investing Street",
+        city: "Investing City",
+        country: "Investing Country",
+        phone: "123",
+      },
+    } as any;
+
+    const mergedYahoo = mergeInstrumentProfile("yahoo", yahooProfile, investingProfile);
+    assert.equal(mergedYahoo.sector, "Yahoo Sector");
+    assert.equal(mergedYahoo.streetAddress, "Investing Street", "fallback provider should fill a missing primary field");
+
+    await applyInstrumentProfile(id, yahooProfile, investingProfile, "yahoo");
+    const yahooPrimaryProfile = await q.getProfile(TEST_SYMBOL);
+    assert.equal(yahooPrimaryProfile?.name, "Yahoo Name");
+    assert.equal(yahooPrimaryProfile?.sector, "Yahoo Sector");
+    assert.equal(yahooPrimaryProfile?.address, "Investing Street");
+
+    await applyInstrumentProfile(
+      id,
+      null,
+      {
+        ...investingProfile,
+        identity: { ...investingProfile.identity, name: "Fallback Override" },
+        profile: { ...investingProfile.profile, sector: "Fallback Override Sector" },
+      },
+      "yahoo"
+    );
+    const yahooPrimaryAfterFailure = await q.getProfile(TEST_SYMBOL);
+    assert.equal(yahooPrimaryAfterFailure?.name, "Yahoo Name", "fallback must not overwrite stored Yahoo canonical data when Yahoo is unavailable");
+    assert.equal(yahooPrimaryAfterFailure?.sector, "Yahoo Sector");
+
+    await applyInstrumentProfile(id, yahooProfile, investingProfile, "investing");
+    const investingPrimaryProfile = await q.getProfile(TEST_SYMBOL);
+    assert.equal(investingPrimaryProfile?.name, "Investing Name", "investing-primary refresh should mirror precedence");
+    assert.equal(investingPrimaryProfile?.sector, "Investing Sector");
+    assert.equal(investingPrimaryProfile?.city, "Investing City");
+
+    await applyInstrumentProfile(
+      id,
+      {
+        ...yahooProfile,
+        price: { ...yahooProfile.price, longName: "Yahoo Fallback Override" },
+        assetProfile: { ...yahooProfile.assetProfile, sector: "Yahoo Fallback Sector" },
+      },
+      null,
+      "investing"
+    );
+    const investingPrimaryAfterFailure = await q.getProfile(TEST_SYMBOL);
+    assert.equal(investingPrimaryAfterFailure?.name, "Investing Name", "Yahoo fallback must not overwrite stored Investing canonical data");
+    assert.equal(investingPrimaryAfterFailure?.sector, "Investing Sector");
+
+    assert.equal((await q.getProfile(TEST_SYMBOL))?.name, "Investing Name");
     const fin = await q.getFinancials(TEST_SYMBOL);
     assert.equal(fin?.periods.length, 3, "all statement types seeded");
     const inc = await q.getFinancials(TEST_SYMBOL, "INCOME", "ANNUAL");
