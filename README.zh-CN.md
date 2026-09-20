@@ -141,6 +141,12 @@ npm test                # 五组测试全部执行
 | `get_sector_members` | 板块成分股（板块 ETF topHoldings，含权重） |
 | `sync_sectors` | 同步全部板块 ETF 行情（约 30 天 K 线）与成分股 |
 
+## 统一比率指标
+
+Yahoo 与 Investing.com 的字段命名不同，部分百分比字段的单位也不同。同步与查询层会先把常用别名归一为稳定的公开 metric ID，再应用数据源优先级。例如：`pe_ttm`、`pe_forward`、`ps_ttm`、`pb_mrq`、`net_margin_pct_ttm`、`gross_margin_pct_ttm`、`operating_margin_pct_ttm`、`roe_pct_ttm`、`roa_pct_ttm`、`dividend_yield_pct_ann`、`payout_ratio_pct_ttm`。
+
+ID 中带 `_pct_` 的指标统一按“百分点”存储，例如 `25.3` 表示 25.3%。已有数据库中的旧 provider 字段名会在读取时兼容归一；在配置的主数据源内部选择最新观测，副数据源仅用于填补缺失的 canonical metric。
+
 ## 技术指标
 
 `get_indicators` 完全用 `daily_bars` / `intraday_bars` 本地计算，不依赖额外数据源，也不需要改表结构。
