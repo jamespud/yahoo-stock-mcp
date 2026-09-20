@@ -184,6 +184,15 @@ async function main() {
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "XLK"), "sector catalog has XLK");
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "SPY"), "sector catalog has SPY benchmark");
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "ZZSEC"), "sector catalog has test sector");
+    // getSectorPerformance intentionally scans only the most recent 45 calendar days.
+    // Seed one fresh bar here so this regression test does not expire as wall-clock time advances.
+    const today = new Date().toISOString().slice(0, 10);
+    await query(
+      `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
+       VALUES (?, ?, 12.5, 13.5, 12.0, 13.0, 13.0, 1600, 'yahoo')
+       ON DUPLICATE KEY UPDATE close = VALUES(close), adj_close = VALUES(adj_close), volume = VALUES(volume)`,
+      [id, today]
+    );
     const perf = await q.getSectorPerformance();
     assert.ok(perf?.sectors.some((x: any) => x.sector_code === "ZZSEC" && x.price != null), "sector performance has test sector price");
     const mem = await q.getSectorMembers("ZZSEC", 5);

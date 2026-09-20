@@ -12,6 +12,23 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root123
+          MYSQL_DATABASE: yahoo_stock_mcp
+          MYSQL_USER: stock
+          MYSQL_PASSWORD: stock123
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot123"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
     steps:
       - uses: actions/checkout@v4
 
@@ -23,17 +40,29 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: cmd/gqlproxy/go.mod
+          cache-dependency-path: cmd/gqlproxy/go.mod
 
       - run: npm ci
 
-      - name: Build TypeScript + gqlproxy sidecar
+      - name: Validate TypeScript and tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Validate Go sidecar
+        working-directory: cmd/gqlproxy
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build release artifacts once
         run: npm run build:all
 
       - name: Verify package contents
-        run: npm pack --dry-run
+        run: npm pack --dry-run --ignore-scripts
 
       - name: Publish
-        run: npm publish
+        run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

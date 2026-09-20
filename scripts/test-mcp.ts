@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import readline from "node:readline";
-import { closeDb, initSchema } from "../src/db.js";
+import { closeDb, initSchema, query } from "../src/db.js";
 import { cleanupTestData, seedTestData, TEST_SYMBOL } from "./test-util.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -152,7 +152,7 @@ class McpProbe {
 
 async function main() {
   await initSchema();
-  await seedTestData();
+  const instrumentId = await seedTestData();
 
   const child = spawn(tsxBin, ["src/cli.ts", "server"], { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
   const probe = new McpProbe(child);
@@ -180,6 +180,15 @@ async function main() {
     }
 
     for (const name of Object.keys(TOOL_ARGS)) {
+      if (name === "get_sector_performance") {
+        const today = new Date().toISOString().slice(0, 10);
+        await query(
+          `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
+           VALUES (?, ?, 12.5, 13.5, 12.0, 13.0, 13.0, 1600, 'yahoo')
+           ON DUPLICATE KEY UPDATE close = VALUES(close), adj_close = VALUES(adj_close), volume = VALUES(volume)`,
+          [instrumentId, today]
+        );
+      }
       const res = await probe.request("tools/call", { name, arguments: TOOL_ARGS[name] });
       assert.ok(res.result, `${name} failed: ${JSON.stringify(res)}`);
       assert.notEqual(res.result.isError, true, `${name} returned isError: ${JSON.stringify(res.result.content)}`);
