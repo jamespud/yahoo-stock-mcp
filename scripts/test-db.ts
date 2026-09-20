@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { closeDb, initSchema, query, replaceBatch } from "../src/db.js";
+import { closeDb, initSchema, loadMigrations, migrateSchema, query, replaceBatch } from "../src/db.js";
 import * as q from "../src/services/query.service.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
 import { persistSyncState, summarizeSyncStatus } from "../src/services/sync.service.js";
@@ -8,6 +8,27 @@ async function main() {
   await initSchema();
   const id = await seedTestData();
   try {
+    const migrations = loadMigrations();
+    assert.ok(migrations.length >= 1, "at least the baseline migration should be packaged");
+    assert.equal(migrations[0].version, "0001_baseline");
+    const appliedBefore = await query<any[]>(
+      "SELECT version, checksum FROM schema_migrations ORDER BY version"
+    );
+    assert.ok(
+      appliedBefore.some((row) => row.version === "0001_baseline"),
+      "db:init should record the baseline migration"
+    );
+    const baseline = migrations.find((m) => m.version === "0001_baseline")!;
+    assert.equal(
+      appliedBefore.find((row) => row.version === "0001_baseline")?.checksum,
+      baseline.checksum,
+      "stored migration checksum should match the packaged file"
+    );
+    assert.deepEqual(await migrateSchema(), [], "rerunning migrations should not replay applied versions");
+    const appliedAfter = await query<any[]>("SELECT version FROM schema_migrations ORDER BY version");
+    assert.equal(appliedAfter.length, appliedBefore.length, "migration rerun must not add duplicate rows");
+
+
     assert.equal(
       summarizeSyncStatus({ bars: { status: "ok" }, news: { status: "failed", error: "boom" } }),
       "partial",
