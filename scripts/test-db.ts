@@ -44,9 +44,23 @@ async function main() {
     assert.equal((await q.getBars(TEST_SYMBOL, "1mo"))?.length, 1);
     assert.equal(await q.getBars("QQQQNOPE", "1d"), null);
 
+    // A second provider may store the same dates, but public bar/quote/indicator reads must stay on one source.
+    await query(
+      `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
+       VALUES (?, '2026-08-03', 90, 110, 80, 100, 100, 9999, 'investing'),
+              (?, '2026-08-04', 190, 210, 180, 200, 200, 9999, 'investing')`,
+      [id, id]
+    );
+    const isolatedBars = await q.getBars(TEST_SYMBOL, "1d", undefined, undefined, 100);
+    assert.equal(isolatedBars?.length, 3, "configured Yahoo reads must not mix Investing rows");
+    assert.ok(isolatedBars?.every((b: any) => b.source === "yahoo"), "all returned daily bars use one source");
+    const isolatedQuote = await q.getQuote(TEST_SYMBOL);
+    assert.equal(Number(isolatedQuote?.latestBar?.close), 12.5, "quote must not switch to a newer fallback-provider bar");
+
     // --- indicator bars: camelCase normalization + weekly/monthly aggregation carrying adj_close ---
     const daily = await q.getIndicatorBars(TEST_SYMBOL, "1d", undefined, undefined, 10);
     assert.equal(daily?.length, 3, "indicator bars should return all daily rows");
+    assert.equal(daily?.[daily.length - 1].close, 12.5, "indicator series must ignore duplicate dates from another source");
     assert.equal(daily?.[0].date, "2026-08-01");
     // mysql2 returns DECIMAL columns as strings ("10.5000"); getIndicatorBars must normalize them to numbers
     assert.equal(daily?.[0].adjClose, 10.5, "adj_close should map to adjClose");
