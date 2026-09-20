@@ -76,7 +76,7 @@ async function main() {
   }
 
   // command-specific help.
-  for (const topic of ["sync", "server", "db:init"]) {
+  for (const topic of ["sync", "server", "db:init", "db:migrate"]) {
     const r = await runCli(["help", topic]);
     assert.equal(r.code, 0, `help ${topic} exit code`);
     assert.match(r.stdout, /Usage:/, `help ${topic} shows usage`);

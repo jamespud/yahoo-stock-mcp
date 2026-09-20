@@ -31,8 +31,11 @@ yahoo-stock-mcp --help           # 打印使用说明（也可用：yahoo-stock-
 #    本地临时开发库可用 deploy/docker-compose.mysql.yml 起一个：
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 2. 对配置的数据库初始化表结构
+# 2. 初始化新的/空数据库（bootstrap schema + 全部迁移）
 yahoo-stock-mcp db:init
+
+# 已有数据库升级：只执行尚未应用的迁移
+yahoo-stock-mcp db:migrate
 
 # 3. 全量同步一只股票（从 2000-01-01 开始拉历史 + 全部基本面）
 yahoo-stock-mcp sync --symbol NVDA --full
@@ -60,7 +63,8 @@ Usage: yahoo-stock-mcp <command> [options]
 
 Commands:
   server                启动 MCP server（stdio，无参数时默认执行）
-  db:init               在配置的数据库中初始化表结构
+  db:init               创建 bootstrap schema 并执行全部迁移
+  db:migrate            对已有数据库执行尚未应用的迁移
   sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 MySQL
   version               打印版本号
   help [command]        查看总帮助或某个命令的帮助
@@ -79,7 +83,15 @@ Options:
 npm install
 npm run build:all   # TypeScript + Go sidecar
 npm run server      # stdio；其余命令用 npm run sync -- ... 或 npm run dev
+npm run db:migrate  # 执行尚未应用的数据库迁移
 ```
+
+## 数据库迁移
+
+`db/schema.sql` 是 bootstrap baseline。之后发布的结构变更放在 `db/migrations/` 下，按编号顺序执行且发布后不可修改；
+已应用版本和 SHA-256 checksum 记录在 `schema_migrations`。新数据库使用 `db:init`，已有安装升级使用
+`db:migrate`。迁移通过 MySQL advisory lock 串行化。由于 MySQL 的很多 DDL 会隐式提交，迁移文件应尽量保持
+单一、前向且小粒度的结构变更。
 
 ## 测试
 
