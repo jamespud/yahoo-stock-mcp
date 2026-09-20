@@ -33,6 +33,15 @@ interface InstrumentRow {
 
 export type IntradayInterval = "1m" | "5m" | "15m" | "30m" | "60m";
 
+export const INCREMENTAL_BAR_REPLAY_DAYS = 3;
+
+export function incrementalBarsFrom(lastBarDate: unknown, nowMs = Date.now()): string {
+  const anchor = lastBarDate ? new Date(lastBarDate as string | number | Date) : new Date(nowMs);
+  const replayDays = lastBarDate ? INCREMENTAL_BAR_REPLAY_DAYS : 30;
+  anchor.setUTCDate(anchor.getUTCDate() - replayDays);
+  return anchor.toISOString().slice(0, 10);
+}
+
 // ── instrument resolution ───────────────────────────────────────
 
 export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
@@ -325,9 +334,7 @@ export async function syncOne(
       "SELECT last_bar_date FROM sync_state WHERE instrument_id = ?",
       [instrument.id]
     );
-    const from = state[0]?.last_bar_date
-      ? new Date(new Date(state[0].last_bar_date).getTime() + 86400000).toISOString().slice(0, 10)
-      : new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const from = incrementalBarsFrom(state[0]?.last_bar_date);
     result.bars = await syncBars(instrument, from, today);
   }
 
