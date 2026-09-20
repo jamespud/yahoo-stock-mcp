@@ -1,4 +1,5 @@
 import { query } from "../db.js";
+import { config } from "../config.js";
 
 function rows<T = any>(r: T): T {
   return r;
@@ -12,13 +13,30 @@ export async function getInstrument(symbol: string) {
   return r[0] ?? null;
 }
 
+async function getBarSource(instrumentId: number): Promise<string | null> {
+  const preferred = config.barsProvider;
+  const rows = await query<Array<{ source: string }>>(
+    `SELECT source
+     FROM daily_bars
+     WHERE instrument_id = ?
+     GROUP BY source
+     ORDER BY (source = ?) DESC, MAX(trade_date) DESC, source ASC
+     LIMIT 1`,
+    [instrumentId, preferred]
+  );
+  return rows[0]?.source ?? null;
+}
+
 export async function getQuote(symbol: string) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const [bar] = await query<any[]>(
-    "SELECT * FROM daily_bars WHERE instrument_id = ? ORDER BY trade_date DESC LIMIT 1",
-    [inst.id]
-  );
+  const barSource = await getBarSource(inst.id);
+  const [bar] = barSource
+    ? await query<any[]>(
+        "SELECT * FROM daily_bars WHERE instrument_id = ? AND source = ? ORDER BY trade_date DESC LIMIT 1",
+        [inst.id, barSource]
+      )
+    : [];
   const [divSummary] = await query<any[]>(
     "SELECT * FROM dividends_summary WHERE instrument_id = ?",
     [inst.id]
@@ -134,8 +152,10 @@ export async function getIndicatorBars(
 ): Promise<IndicatorBarRow[] | null> {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const cond = ["instrument_id = ?"];
-  const params: any[] = [inst.id];
+  const barSource = await getBarSource(inst.id);
+  if (!barSource) return [];
+  const cond = ["instrument_id = ?", "source = ?"];
+  const params: any[] = [inst.id, barSource];
   if (from) { cond.push("trade_date >= ?"); params.push(from); }
   if (to) { cond.push("trade_date <= ?"); params.push(to); }
   const wanted = Math.max(1, Math.min(limit, 10000));
@@ -172,8 +192,10 @@ export async function getIndicatorBars(
 export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", from?: string, to?: string, limit = 1000) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
+  const barSource = await getBarSource(inst.id);
+  if (!barSource) return [];
   const cond = [];
-  const params: any[] = [inst.id];
+  const params: any[] = [inst.id, barSource];
   if (from) { cond.push("trade_date >= ?"); params.push(from); }
   if (to) { cond.push("trade_date <= ?"); params.push(to); }
   const where = cond.length ? `AND ${cond.join(" AND ")}` : "";
@@ -181,7 +203,7 @@ export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", fr
   const rawLimit = interval === "1d" ? wanted : Math.min(20000, wanted * (interval === "1wk" ? 8 : 24));
   const bars = await query<any[]>(
     `SELECT trade_date, open, high, low, close, adj_close, volume, source
-     FROM daily_bars WHERE instrument_id = ? ${where} ORDER BY trade_date DESC LIMIT ${rawLimit}`,
+     FROM daily_bars WHERE instrument_id = ? AND source = ? ${where} ORDER BY trade_date DESC LIMIT ${rawLimit}`,
     params
   );
   bars.reverse();
