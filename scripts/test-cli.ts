@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { shouldSyncSectorMembers } from "../src/services/sync.service.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
@@ -37,6 +38,10 @@ function runCli(args: string[]): Promise<RunResult> {
 }
 
 async function main() {
+  assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");
+  assert.equal(shouldSyncSectorMembers({ members: true }), true, "members=true stays enabled");
+  assert.equal(shouldSyncSectorMembers({ members: false }), false, "members=false disables holdings sync");
+
   // version: subcommand and global flags must all print "<name> <version>".
   for (const flag of [["version"], ["--version"], ["-v"]]) {
     const r = await runCli(flag);

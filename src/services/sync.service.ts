@@ -197,8 +197,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     const stmts = insiders.map((t): [string, any[]] => [
       `INSERT INTO insider_transactions (instrument_id, transaction_date, insider_name, title, transaction_text, shares, value, ownership, source)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
-       ON DUPLICATE KEY UPDATE shares = VALUES(shares), value = VALUES(value)`,
-      [instrument.id, t.transactionDate, t.insiderName, t.title, t.transactionText, t.shares, t.value, t.ownership],
+       ON DUPLICATE KEY UPDATE shares = VALUES(shares), value = VALUES(value)`,      [instrument.id, t.transactionDate, t.insiderName, t.title, t.transactionText, t.shares, t.value, t.ownership],
     ]);
     await runBatch(stmts);
   });
@@ -397,8 +396,7 @@ export async function syncOne(
           (() => { const ts = yahooNum(o.reportDate); return ts ? new Date(ts * 1000).toISOString().slice(0, 10) : holdDate; })(),
           o.organization,
           yahooNum(o.position),
-          (() => { const pct = yahooNum(o.pctHeld); return pct != null ? pct * 100 : null; })(),
-          null,
+          (() => { const pct = yahooNum(o.pctHeld); return pct != null ? pct * 100 : null; })(),          null,
           null,
           yahooNum(o.value),
         ],
@@ -597,8 +595,7 @@ export async function syncAll(opts: { full: boolean; intraday?: IntradayInterval
     try {
       const res = await syncOne(r.symbol, opts);
       console.log(`[${r.symbol}] bars=${res.bars} news=${res.news} options=${res.options} intraday=${res.intraday}`);
-    } catch (e: any) {
-      console.error(`[${r.symbol}] sync failed: ${e.message}`);
+    } catch (e: any) {      console.error(`[${r.symbol}] sync failed: ${e.message}`);
     }
   }
 }
@@ -613,8 +610,15 @@ interface SectorRow {
   instrument_id: number | null;
 }
 
-/** Sync a single sector ETF: quote ratios + incremental bars + top holdings -> sector_members. */
-async function syncSectorEtf(sector: SectorRow): Promise<{ bars: number; members: number }> {
+export function shouldSyncSectorMembers(opts: { members?: boolean } = {}): boolean {
+  return opts.members !== false;
+}
+
+/** Sync a single sector ETF: quote ratios + incremental bars + optional top holdings -> sector_members. */
+async function syncSectorEtf(
+  sector: SectorRow,
+  opts: { members: boolean }
+): Promise<{ bars: number; members: number }> {
   const today = new Date().toISOString().slice(0, 10);
   const etf = sector.etf_symbol;
   const instrument = await ensureInstrument(etf);
@@ -648,7 +652,7 @@ async function syncSectorEtf(sector: SectorRow): Promise<{ bars: number; members
 
   // top holdings -> sector members
   let membersN = 0;
-  if (summary) {
+  if (opts.members && summary) {
     const members = extractTopHoldings(summary.modules);
     if (members.length) {
       await query("DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sector.sector_code]);
@@ -671,9 +675,10 @@ export async function syncSectors(opts: { members?: boolean } = {}): Promise<Arr
     "SELECT sector_code, name, etf_symbol, is_benchmark, instrument_id FROM sectors ORDER BY is_benchmark, sector_code"
   );
   const out: Array<{ sector_code: string; name: string; bars: number; members: number }> = [];
+  const members = shouldSyncSectorMembers(opts);
   for (const s of rows) {
     try {
-      const r = await syncSectorEtf(s);
+      const r = await syncSectorEtf(s, { members });
       out.push({ sector_code: s.sector_code, name: s.name, ...r });
       console.log(`[sector:${s.sector_code}] etf=${s.etf_symbol} bars=${r.bars} members=${r.members}`);
     } catch (e: any) {
