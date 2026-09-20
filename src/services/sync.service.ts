@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { query, replaceBatch, runBatch } from "../db.js";
 import { fetchInvestingBars, fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
 import { needsInvestingIdentity, priorityUpdate, type Provider } from "../providers/priority.js";
+import { canonicalizeRatioValue } from "../providers/ratios.js";
 import {
   extractCalendarEvents,
   extractDividendsFromSummary,
@@ -300,7 +301,7 @@ export async function saveRatios(
     `INSERT INTO ratios (instrument_id, metric, as_of, value, source)
      VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE ${keep.sql}`;
-  const stmts = ratios.map((r): [string, any[]] => [
+  const stmts = ratios.map(canonicalizeRatioValue).map((r): [string, any[]] => [
     sql,
     [instrumentId, r.metric, r.asOf, r.value, r.source, ...keep.params],
   ]);
