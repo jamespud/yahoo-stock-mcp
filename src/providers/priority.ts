@@ -69,3 +69,26 @@ export function priorityUpdate(primary: Provider, columns: string[]): { sql: str
   for (let i = 0; i <= columns.length; i++) params.push(primary, primary);
   return { sql: sets.join(", "), params };
 }
+
+/**
+ * Null-aware field merge for provider-independent canonical rows.
+ *
+ * - incoming primary: replace only non-null fields
+ * - incumbent primary: fallback may fill null fields but never replace populated primary fields
+ * - neither is primary: latest non-null fallback value wins
+ *
+ * The row-level source remains the canonical owner; per-field provenance is intentionally not modeled.
+ */
+export function priorityMergeUpdate(primary: Provider, columns: string[]): { sql: string; params: Provider[] } {
+  const sets = columns.map(
+    (c) =>
+      `${c} = IF(VALUES(source) = ?, COALESCE(VALUES(${c}), ${c}), ` +
+      `IF(source = ?, COALESCE(${c}, VALUES(${c})), COALESCE(VALUES(${c}), ${c})))`
+  );
+  const sourceCond = "VALUES(source) = ? OR source <> ?";
+  sets.push(`source = IF(${sourceCond}, VALUES(source), source)`);
+  const params: Provider[] = [];
+  for (let i = 0; i < columns.length; i++) params.push(primary, primary);
+  params.push(primary, primary);
+  return { sql: sets.join(", "), params };
+}
