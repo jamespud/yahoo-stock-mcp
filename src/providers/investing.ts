@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, env } from "../config.js";
 import { httpFetch, httpText } from "./http.js";
+import { canonicalizeRatio } from "./ratios.js";
 import type { AnalystForecast, Bar, Dividend, EarningsRecord, FinancialField, Holder, RatioValue } from "./types.js";
 
 const GQL_URL = "https://gql.api.investing.com/graphql";
@@ -289,7 +290,8 @@ export async function fetchInvestingSnapshot(symbol: string): Promise<InvestingS
   const asOf = new Date().toISOString().slice(0, 10);
   for (const [metric, v] of Object.entries(a.financials?.ratios?.indicators ?? {})) {
     const item = v as any;
-    ratios.push({ metric, value: item?.value != null ? Number(item.value) : null, asOf, source: "investing" });
+    const normalized = canonicalizeRatio(metric, item?.value != null ? Number(item.value) : null);
+    ratios.push({ metric: normalized.metric, value: normalized.value, asOf, source: "investing" });
   }
 
   const dividends: Dividend[] = [];

@@ -1,5 +1,6 @@
 import { httpFetch, httpJson, httpText, HttpError } from "./http.js";
 import { config } from "../config.js";
+import { canonicalizeRatio } from "./ratios.js";
 import type { AnalystAction, Bar, CompanyEvent, Dividend, EarningsTrendRow, FinancialField, FundHolder, HolderBreakdown, InsiderTransaction, IntradayBar, NewsItem, OptionChain, OptionQuote, RatioValue, RecommendationTrendRow, ShortInterest } from "./types.js";
 
 const CHART_HOST = "https://query1.finance.yahoo.com";
@@ -304,7 +305,8 @@ export function extractRatiosFromSummary(modules: Record<string, any>, symbol: s
   const push = (metric: string, v: any) => {
     const value = num(v);
     if (value == null) return;
-    out.push({ metric, value, asOf, source: "yahoo" });
+    const normalized = canonicalizeRatio(metric, value);
+    out.push({ metric: normalized.metric, value: normalized.value, asOf, source: "yahoo" });
   };
   const dks = modules.defaultKeyStatistics ?? {};
   const fd = modules.financialData ?? {};

@@ -261,6 +261,33 @@ async function main() {
     assert.equal((await readProbe())?.value, 5, "yahoo must not override when investing is primary");
     await query("DELETE FROM ratios WHERE instrument_id = ? AND metric = ?", [id, "priority_probe"]);
 
+    // Provider aliases collapse to one canonical storage key, so real provider priority now applies.
+    const CANONICAL_AS_OF = "2026-01-03";
+    await saveRatios(id, [{ metric: "trailing_pe", value: 20, asOf: CANONICAL_AS_OF, source: "yahoo" }], "yahoo");
+    await saveRatios(id, [{ metric: "pe_ratio_ttm", value: 99, asOf: CANONICAL_AS_OF, source: "investing" }], "yahoo");
+    const canonicalPe = (await query<any[]>(
+      "SELECT metric, value, source FROM ratios WHERE instrument_id = ? AND metric = ? AND as_of = ?",
+      [id, "pe_ttm", CANONICAL_AS_OF]
+    ))[0];
+    assert.equal(Number(canonicalPe.value), 20, "Yahoo canonical PE should resist Investing alias overwrite");
+    assert.equal(canonicalPe.source, "yahoo");
+    await query("DELETE FROM ratios WHERE instrument_id = ? AND metric = ? AND as_of = ?", [id, "pe_ttm", CANONICAL_AS_OF]);
+
+    // Existing legacy aliases remain readable; freshness is resolved inside one provider after alias collapse.
+    await query(
+      `INSERT INTO ratios (instrument_id, metric, as_of, value, source)
+       VALUES (?, 'trailing_pe', '2026-07-01', 18, 'yahoo'),
+              (?, 'pe_ratio_ttm', '2026-08-05', 21, 'yahoo')`,
+      [id, id]
+    );
+    const legacyCanonical = await q.getRatios(TEST_SYMBOL);
+    const legacyPe = legacyCanonical?.ratios.find((r: any) => r.metric === "pe_ttm");
+    assert.equal(Number(legacyPe?.value), 21, "newest same-provider legacy alias should win");
+    await query(
+      "DELETE FROM ratios WHERE instrument_id = ? AND metric IN ('trailing_pe', 'pe_ratio_ttm')",
+      [id]
+    );
+
     // --- holders / news / options ---
     assert.equal((await q.getHolders(TEST_SYMBOL, 10))?.holders.length, 1);
     assert.equal((await q.getHolders(TEST_SYMBOL, 0))?.holders.length, 1, "limit should be clamped to >= 1");

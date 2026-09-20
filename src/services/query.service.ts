@@ -1,5 +1,6 @@
 import { query } from "../db.js";
 import { config } from "../config.js";
+import { canonicalizeStoredRatioRows } from "../providers/ratios.js";
 
 function rows<T = any>(r: T): T {
   return r;
@@ -28,18 +29,19 @@ async function getBarSource(instrumentId: number): Promise<string | null> {
 }
 
 async function latestRatios(instrumentId: number) {
-  return query<any[]>(
+  const rows = await query<any[]>(
     `SELECT metric, value, as_of, source
      FROM (
        SELECT metric, value, as_of, source,
-              ROW_NUMBER() OVER (PARTITION BY metric ORDER BY as_of DESC, source ASC) AS rn
+              ROW_NUMBER() OVER (PARTITION BY metric, source ORDER BY as_of DESC) AS rn
        FROM ratios
        WHERE instrument_id = ?
      ) ranked
      WHERE rn = 1
-     ORDER BY metric`,
+     ORDER BY metric, source`,
     [instrumentId]
   );
+  return canonicalizeStoredRatioRows(rows, config.primaryProvider);
 }
 
 export async function getQuote(symbol: string) {
