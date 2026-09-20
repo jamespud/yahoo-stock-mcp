@@ -282,7 +282,7 @@ export async function getRatios(symbol: string) {
   if (!inst) return null;
   const rows = await latestRatios(inst.id);
   const newestAsOf = rows.reduce<string | null>((max, row) => {
-    const d = row.as_of == null ? null : String(row.as_of).slice(0, 10);
+    const d = row.as_of == null ? null : toDateStr(row.as_of);
     return d && (!max || d > max) ? d : max;
   }, null);
   return { symbol: inst.symbol, asOf: newestAsOf, ratios: rows };
