@@ -4,7 +4,11 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { shouldSyncSectorMembers } from "../src/services/sync.service.js";
+import {
+  incrementalBarsFrom,
+  INCREMENTAL_BAR_REPLAY_DAYS,
+  shouldSyncSectorMembers,
+} from "../src/services/sync.service.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
@@ -41,6 +45,18 @@ async function main() {
   assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");
   assert.equal(shouldSyncSectorMembers({ members: true }), true, "members=true stays enabled");
   assert.equal(shouldSyncSectorMembers({ members: false }), false, "members=false disables holdings sync");
+
+  assert.equal(INCREMENTAL_BAR_REPLAY_DAYS, 3, "incremental replay window should stay explicit");
+  assert.equal(
+    incrementalBarsFrom("2026-08-03", Date.UTC(2030, 0, 1)),
+    "2026-07-31",
+    "incremental sync should replay recent days before the last stored bar"
+  );
+  assert.equal(
+    incrementalBarsFrom(null, Date.UTC(2026, 8, 21, 12)),
+    "2026-08-22",
+    "first incremental sync should retain the 30-day bootstrap window"
+  );
 
   // version: subcommand and global flags must all print "<name> <version>".
   for (const flag of [["version"], ["--version"], ["-v"]]) {
