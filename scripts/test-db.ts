@@ -109,7 +109,23 @@ async function main() {
     assert.ok(inc && "total_revenue" in inc.periods[0].fields, "income fields should be pivoted");
 
     // --- ratios / dividends / forecast / earnings ---
-    assert.equal((await q.getRatios(TEST_SYMBOL))?.ratios.length, 2);
+    await query(
+      `INSERT INTO ratios (instrument_id, metric, as_of, value, source)
+       VALUES (?, 'pe', '2026-08-02', 30, 'yahoo'),
+              (?, 'beta', '2026-08-01', 1.25, 'yahoo')`,
+      [id, id]
+    );
+    const latestRatios = await q.getRatios(TEST_SYMBOL);
+    assert.equal(latestRatios?.ratios.length, 3, "latest ratio query should keep metrics with older observation dates");
+    const ratioByMetric = new Map(latestRatios?.ratios.map((r: any) => [r.metric, Number(r.value)]));
+    assert.equal(ratioByMetric.get("pe"), 30, "latest observation should win within one metric");
+    assert.equal(ratioByMetric.get("ps"), 5.2, "older metric should not disappear when another metric has a newer date");
+    assert.equal(ratioByMetric.get("beta"), 1.25);
+    assert.equal(latestRatios?.asOf, "2026-08-02", "asOf should summarize the newest selected observation date");
+    const quoteWithStaggeredRatios = await q.getQuote(TEST_SYMBOL);
+    assert.equal(Number(quoteWithStaggeredRatios?.ratios.pe), 30);
+    assert.equal(Number(quoteWithStaggeredRatios?.ratios.ps), 5.2, "quote and getRatios must share latest-per-metric semantics");
+    assert.equal(Number(quoteWithStaggeredRatios?.ratios.beta), 1.25);
     const divs = await q.getDividends(TEST_SYMBOL);
     assert.ok(divs?.summary, "dividend summary should exist");
     assert.equal(divs?.dividends.length, 1);
