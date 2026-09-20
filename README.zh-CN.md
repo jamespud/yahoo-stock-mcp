@@ -207,7 +207,7 @@ investing 只补 Yahoo 没给的。设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investi
 - 板块：`sync --sectors` 一键同步 11 个 GICS 板块 ETF（XLC..XLU）+ SPY 基准的行情与 `topHoldings` 成分股，`get_sector_performance` 输出板块轮动排名。
 - 期权行情：`get_options` 读取同步入库的快照；`get_option_quote` 每次直接从 Yahoo 按需拉取最新报价（含标的现价、可选到期日、行权价、方向过滤），无需先执行同步。
 - 所有写入均为幂等 upsert（`INSERT ... ON DUPLICATE KEY UPDATE`），可重复执行。
-- 限流已内置（默认 300ms/请求），Yahoo crumb 缓存 25 分钟，TVC token 缓存 25 分钟。
+- Node HTTP 请求使用进程级共享限流（默认请求启动间隔 300ms，Yahoo 与 Investing Node transport 共用；并发调用会预留不同发送时隙），Yahoo crumb 缓存 25 分钟，TVC token 缓存 25 分钟。
 
 ## 关于 investing.com 的 TLS 拦截
 

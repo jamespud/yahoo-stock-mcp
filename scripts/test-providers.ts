@@ -1,5 +1,6 @@
 // Data-source priority: pure-function tests (no DB, no network).
 import assert from "node:assert/strict";
+import { RateLimiter } from "../src/providers/http.js";
 import {
   needsInvestingIdentity,
   parsePrimaryProvider,
@@ -8,6 +9,27 @@ import {
   shouldOverride,
 } from "../src/providers/priority.js";
 import { extractCalendarEvents } from "../src/providers/yahoo.js";
+
+// ── RateLimiter: concurrent callers reserve distinct send slots ──
+
+{
+  const intervalMs = 25;
+  const limiter = new RateLimiter(intervalMs);
+  const start = Date.now();
+  const completed = await Promise.all(
+    Array.from({ length: 4 }, async (_, i) => {
+      await limiter.wait();
+      return { i, at: Date.now() - start };
+    })
+  );
+  assert.deepEqual(completed.map((x) => x.i), [0, 1, 2, 3], "concurrent waiters should preserve reservation order");
+  for (let i = 1; i < completed.length; i++) {
+    assert.ok(
+      completed[i].at - completed[i - 1].at >= intervalMs - 8,
+      `request slots ${i - 1}/${i} were too close: ${completed[i - 1].at}ms -> ${completed[i].at}ms`
+    );
+  }
+}
 
 // ── shouldOverride: the primary always wins, otherwise the later writer fills in ──
 
