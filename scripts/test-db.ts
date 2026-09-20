@@ -2,11 +2,36 @@ import assert from "node:assert/strict";
 import { closeDb, initSchema, query } from "../src/db.js";
 import * as q from "../src/services/query.service.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
+import { persistSyncState, summarizeSyncStatus } from "../src/services/sync.service.js";
 
 async function main() {
   await initSchema();
   const id = await seedTestData();
   try {
+    assert.equal(
+      summarizeSyncStatus({ bars: { status: "ok" }, news: { status: "failed", error: "boom" } }),
+      "partial",
+      "one injected component failure should produce partial status"
+    );
+    assert.equal(
+      summarizeSyncStatus({ bars: { status: "failed", error: "a" }, news: { status: "failed", error: "b" } }),
+      "failed",
+      "all attempted components failing should produce failed status"
+    );
+
+    const beforeState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
+    await persistSyncState(id, false, "2026-08-04", ["news: boom"], false);
+    const partialState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
+    assert.equal(Number(partialState.full_synced), 1, "incremental sync must preserve prior full_synced");
+    assert.equal(String(partialState.last_full_sync_at), String(beforeState.last_full_sync_at), "incremental sync must preserve last_full_sync_at");
+    assert.equal(Number(partialState.error_count), 1);
+    assert.equal(partialState.last_error, "news: boom");
+    await persistSyncState(id, false, "2026-08-04", [], true);
+    const recoveredState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
+    assert.equal(Number(recoveredState.error_count), 0, "successful later sync clears current error state");
+    assert.equal(recoveredState.last_error, null);
+
+
     // --- search_symbol regression (LIMIT used to be bound as DOUBLE) ---
     const hits = await q.searchSymbols(TEST_SYMBOL);
     assert.ok(hits.some((h: any) => h.symbol === TEST_SYMBOL), "searchSymbols should find seeded instrument");
