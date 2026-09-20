@@ -202,7 +202,7 @@ investing 只补 Yahoo 没给的。设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investi
 ## 说明
 
 - 全量同步：从 `YAHOO_STOCK_MCP_BARS_START_DATE`（默认 2000-01-01）拉全部日 K + 全部基本面 + 期权快照 + 新闻 + 数据清单（事件/内部人/分析师/盈利趋势/空头/基金等）。
-- 增量同步：按 `sync_state.last_bar_date` 只拉新 K 线，并刷新行情、比率、预测、新闻、期权快照与数据清单。
+- 增量同步：会围绕 `sync_state.last_bar_date` 重拉一小段近期日 K 并幂等 upsert，用于刷新盘中未收盘 K 线和数据源后续修正；同时刷新行情、比率、预测、新闻、期权快照与数据清单。
 - 分钟线：`--intraday <1m|5m|15m|30m|60m>` 拉取最近 7 天分钟 K 到 `intraday_bars`（幂等 upsert）。
 - 板块：`sync --sectors` 一键同步 11 个 GICS 板块 ETF（XLC..XLU）+ SPY 基准的行情与 `topHoldings` 成分股，`get_sector_performance` 输出板块轮动排名。
 - 期权行情：`get_options` 读取同步入库的快照；`get_option_quote` 每次直接从 Yahoo 按需拉取最新报价（含标的现价、可选到期日、行权价、方向过滤），无需先执行同步。

@@ -205,7 +205,7 @@ For the "watch the market, position early" use case, the following dimensions ar
 ## Notes
 
 - Full sync: pulls all daily bars from `YAHOO_STOCK_MCP_BARS_START_DATE` (default `2000-01-01`) + all fundamentals + an options snapshot + news + the data checklist (events/insiders/analysts/earnings trend/short interest/funds, etc.).
-- Incremental sync: only pulls new bars since `sync_state.last_bar_date`, and refreshes quotes, ratios, estimates, news, the options snapshot and the data checklist.
+- Incremental sync: replays a small recent daily-bar window around `sync_state.last_bar_date` so partial current-day candles/provider corrections are refreshed, then upserts the results; it also refreshes quotes, ratios, estimates, news, the options snapshot and the data checklist.
 - Minute bars: `--intraday <1m|5m|15m|30m|60m>` pulls the last 7 days of minute bars into `intraday_bars` (idempotent upsert).
 - Sectors: `sync --sectors` syncs the 11 GICS sector ETFs (XLC..XLU) + SPY benchmark quotes and `topHoldings` constituents in one go; `get_sector_performance` returns the rotation ranking.
 - Options: `get_options` reads the snapshot synced to the DB; `get_option_quote` fetches the latest quotes directly from Yahoo on demand (incl. underlying price, optional expiry, strike, and direction filters) — no prior sync required.
