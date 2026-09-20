@@ -1,7 +1,22 @@
 import { query } from "../db.js";
+import { config } from "../config.js";
 
 function rows<T = any>(r: T): T {
   return r;
+}
+
+async function resolveBarSource(instrumentId: number): Promise<"yahoo" | "investing" | null> {
+  const preferred = config.barsProvider === "investing" ? "investing" : "yahoo";
+  const rows = await query<Array<{ source: "yahoo" | "investing" }>>(
+    `SELECT source
+     FROM daily_bars
+     WHERE instrument_id = ?
+     GROUP BY source
+     ORDER BY (source = ?) DESC, MAX(trade_date) DESC, source
+     LIMIT 1`,
+    [instrumentId, preferred]
+  );
+  return rows[0]?.source ?? null;
 }
 
 export async function getInstrument(symbol: string) {
@@ -15,10 +30,13 @@ export async function getInstrument(symbol: string) {
 export async function getQuote(symbol: string) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const [bar] = await query<any[]>(
-    "SELECT * FROM daily_bars WHERE instrument_id = ? ORDER BY trade_date DESC LIMIT 1",
-    [inst.id]
-  );
+  const barSource = await resolveBarSource(inst.id);
+  const [bar] = barSource
+    ? await query<any[]>(
+        "SELECT * FROM daily_bars WHERE instrument_id = ? AND source = ? ORDER BY trade_date DESC LIMIT 1",
+        [inst.id, barSource]
+      )
+    : [];
   const [divSummary] = await query<any[]>(
     "SELECT * FROM dividends_summary WHERE instrument_id = ?",
     [inst.id]
@@ -134,8 +152,10 @@ export async function getIndicatorBars(
 ): Promise<IndicatorBarRow[] | null> {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const cond = ["instrument_id = ?"];
-  const params: any[] = [inst.id];
+  const barSource = await resolveBarSource(inst.id);
+  if (!barSource) return [];
+  const cond = ["instrument_id = ?", "source = ?"];
+  const params: any[] = [inst.id, barSource];
   if (from) { cond.push("trade_date >= ?"); params.push(from); }
   if (to) { cond.push("trade_date <= ?"); params.push(to); }
   const wanted = Math.max(1, Math.min(limit, 10000));
@@ -172,11 +192,13 @@ export async function getIndicatorBars(
 export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", from?: string, to?: string, limit = 1000) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const cond = [];
-  const params: any[] = [inst.id];
+  const barSource = await resolveBarSource(inst.id);
+  if (!barSource) return [];
+  const cond = ["source = ?"];
+  const params: any[] = [inst.id, barSource];
   if (from) { cond.push("trade_date >= ?"); params.push(from); }
   if (to) { cond.push("trade_date <= ?"); params.push(to); }
-  const where = cond.length ? `AND ${cond.join(" AND ")}` : "";
+  const where = `AND ${cond.join(" AND ")}`;
   const bars = await query<any[]>(
     `SELECT trade_date, open, high, low, close, adj_close, volume, source
      FROM daily_bars WHERE instrument_id = ? ${where} ORDER BY trade_date ASC LIMIT ${Math.max(1, Math.min(limit, 10000))}`,
