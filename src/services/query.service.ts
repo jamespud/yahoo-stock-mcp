@@ -27,6 +27,21 @@ async function getBarSource(instrumentId: number): Promise<string | null> {
   return rows[0]?.source ?? null;
 }
 
+async function latestRatios(instrumentId: number) {
+  return query<any[]>(
+    `SELECT metric, value, as_of, source
+     FROM (
+       SELECT metric, value, as_of, source,
+              ROW_NUMBER() OVER (PARTITION BY metric ORDER BY as_of DESC, source ASC) AS rn
+       FROM ratios
+       WHERE instrument_id = ?
+     ) ranked
+     WHERE rn = 1
+     ORDER BY metric`,
+    [instrumentId]
+  );
+}
+
 export async function getQuote(symbol: string) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
@@ -41,12 +56,7 @@ export async function getQuote(symbol: string) {
     "SELECT * FROM dividends_summary WHERE instrument_id = ?",
     [inst.id]
   );
-  const ratios = await query<any[]>(
-    `SELECT metric, value, as_of FROM ratios r
-     WHERE instrument_id = ? AND as_of = (SELECT MAX(as_of) FROM ratios WHERE instrument_id = r.instrument_id)
-     ORDER BY metric`,
-    [inst.id]
-  );
+  const ratios = await latestRatios(inst.id);
   const ratioMap: Record<string, number | null> = {};
   for (const rr of ratios) ratioMap[rr.metric] = rr.value;
   return {
@@ -270,13 +280,12 @@ export async function getFinancials(symbol: string, statementType?: string, peri
 export async function getRatios(symbol: string) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
-  const rows = await query<any[]>(
-    `SELECT metric, value, as_of, source FROM ratios r
-     WHERE instrument_id = ? AND as_of = (SELECT MAX(as_of) FROM ratios WHERE instrument_id = r.instrument_id)
-     ORDER BY metric`,
-    [inst.id]
-  );
-  return { symbol: inst.symbol, asOf: rows[0]?.as_of ?? null, ratios: rows };
+  const rows = await latestRatios(inst.id);
+  const newestAsOf = rows.reduce<string | null>((max, row) => {
+    const d = row.as_of == null ? null : String(row.as_of).slice(0, 10);
+    return d && (!max || d > max) ? d : max;
+  }, null);
+  return { symbol: inst.symbol, asOf: newestAsOf, ratios: rows };
 }
 
 export async function getDividends(symbol: string) {
