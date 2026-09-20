@@ -51,7 +51,8 @@
     "prepublishOnly": "npm run build:all",
     "test:cli": "tsx scripts/test-cli.ts",
     "test:providers": "tsx scripts/test-providers.ts",
-    "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts"
+    "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts",
+    "db:migrate": "tsx src/cli.ts db:migrate"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
