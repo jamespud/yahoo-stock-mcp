@@ -174,8 +174,10 @@ ID 中带 `_pct_` 的指标统一按“百分点”存储，例如 `25.3` 表示
 
 ### 数据源优先级
 
-默认以 **Yahoo 为权威源**：同一行数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
-investing 只补 Yahoo 没给的。设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` 可把优先级翻过来。
+默认以 **Yahoo 为权威源**：同一条 canonical 数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
+investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，前瞻事件按 `(instrument, event_type)` 唯一；
+`source` 只保留来源信息，不再参与这两类业务键。对这些 canonical 行，主数据源的 NULL 不会抹掉副数据源已经补齐的有效字段。
+设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` 可把优先级翻过来。
 新建标的时若 Yahoo 已经给出标的身份，就不再调用 investing —— 新增一只股票或整轮板块同步都不会再
 等 investing 的 403 重试。
 
