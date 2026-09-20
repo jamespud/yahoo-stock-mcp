@@ -31,8 +31,11 @@ yahoo-stock-mcp --help           # print usage (also: yahoo-stock-mcp help sync)
 #    For a local dev database you can spin one up with deploy/docker-compose.mysql.yml:
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 2. Initialise the schema in the configured database
+# 2. Initialise a new/empty database (bootstrap schema + all migrations)
 yahoo-stock-mcp db:init
+
+# Existing installation: apply only pending migrations
+yahoo-stock-mcp db:migrate
 
 # 3. Full sync of one stock (pull history from 2000-01-01 + all fundamentals)
 yahoo-stock-mcp sync --symbol NVDA --full
@@ -60,7 +63,8 @@ Usage: yahoo-stock-mcp <command> [options]
 
 Commands:
   server                 Start the MCP server over stdio (default with no arguments)
-  db:init                Create the MySQL schema in the configured database
+  db:init                Create the bootstrap schema and apply all migrations
+  db:migrate             Apply pending migrations to an existing database
   sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
   version                Print the version number
   help [command]         Show general help, or help for a specific command
@@ -79,7 +83,16 @@ Run `yahoo-stock-mcp help sync` (or `yahoo-stock-mcp sync --help`) for sync opti
 npm install
 npm run build:all   # TypeScript + Go sidecar
 npm run server      # stdio; use npm run sync -- ... or npm run dev for other commands
+npm run db:migrate  # apply pending database migrations
 ```
+
+## Database migrations
+
+`db/schema.sql` is the bootstrap baseline. Released schema changes are immutable, ordered files under
+`db/migrations/`; applied versions and SHA-256 checksums are stored in `schema_migrations`.
+Use `db:init` for a new database and `db:migrate` when upgrading an existing installation.
+Migration execution is serialized with a MySQL advisory lock. Because MySQL implicitly commits many
+DDL statements, migrations should keep structural changes small and forward-only.
 
 ## Tests
 
