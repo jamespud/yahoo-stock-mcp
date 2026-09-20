@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { query, replaceBatch, runBatch } from "../db.js";
-import { fetchInvestingBars, fetchInvestingSnapshot } from "../providers/investing.js";
-import { needsInvestingIdentity, preferPrimary, priorityUpdate, type Provider } from "../providers/priority.js";
+import { fetchInvestingBars, fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
+import { needsInvestingIdentity, priorityUpdate, type Provider } from "../providers/priority.js";
 import {
   extractCalendarEvents,
   extractDividendsFromSummary,
@@ -96,6 +96,104 @@ export async function persistSyncState(
   );
 }
 
+export interface CanonicalInstrumentProfile {
+  name: string | null;
+  exchange: string | null;
+  currency: string | null;
+  yahooSymbol: string | null;
+  investingId: number | null;
+  sector: string | null;
+  industry: string | null;
+  businessSummary: string | null;
+  employees: number | null;
+  website: string | null;
+  streetAddress: string | null;
+  city: string | null;
+  country: string | null;
+  phone: string | null;
+}
+
+export function mergeInstrumentProfile(
+  primary: Provider,
+  yahooModules: Record<string, any> | null | undefined,
+  investing: InvestingSnapshot | null | undefined,
+  existing: Partial<CanonicalInstrumentProfile> = {}
+): CanonicalInstrumentProfile {
+  const assetProfile = yahooModules?.assetProfile ?? {};
+  const price = yahooModules?.price ?? {};
+  const quoteType = yahooModules?.quoteType ?? {};
+  const inv = investing?.profile ?? ({} as InvestingSnapshot["profile"]);
+  const pick = <T>(
+    current: T | null | undefined,
+    yahooValue: T | null | undefined,
+    investingValue: T | null | undefined
+  ): T | null => {
+    const [primaryValue, fallbackValue] =
+      primary === "yahoo" ? [yahooValue, investingValue] : [investingValue, yahooValue];
+    return primaryValue ?? current ?? fallbackValue ?? null;
+  };
+  return {
+    name: pick(existing.name, price.longName ?? quoteType.longName, investing?.identity.name),
+    exchange: pick(existing.exchange, price.exchangeName, investing?.identity.exchange),
+    currency: price.currency ?? existing.currency ?? null,
+    yahooSymbol: price.symbol ?? existing.yahooSymbol ?? null,
+    investingId: investing?.identity.investingId ?? existing.investingId ?? null,
+    sector: pick(existing.sector, assetProfile.sector, inv.sector),
+    industry: pick(existing.industry, assetProfile.industry, inv.industry),
+    businessSummary: pick(existing.businessSummary, assetProfile.longBusinessSummary, inv.businessSummary),
+    employees: pick(existing.employees, assetProfile.fullTimeEmployees?.raw ?? assetProfile.fullTimeEmployees, inv.employees),
+    website: pick(existing.website, assetProfile.website, inv.web),
+    streetAddress: pick(existing.streetAddress, assetProfile.address1, inv.streetAddress),
+    city: pick(existing.city, assetProfile.city, inv.city),
+    country: pick(existing.country, assetProfile.country, inv.country),
+    phone: pick(existing.phone, assetProfile.phone, inv.phone),
+  };
+}
+
+export async function applyInstrumentProfile(
+  instrumentId: number,
+  yahooModules: Record<string, any> | null | undefined,
+  investing: InvestingSnapshot | null | undefined,
+  primary: Provider = config.primaryProvider
+): Promise<void> {
+  const rows = await query<any[]>(
+    `SELECT name, exchange, currency, yahoo_symbol, investing_id, sector, industry, business_summary,
+            employees, website, street_address, city, country, phone
+     FROM instruments WHERE id = ?`,
+    [instrumentId]
+  );
+  const row = rows[0] ?? {};
+  const existing: Partial<CanonicalInstrumentProfile> = {
+    name: row.name ?? null,
+    exchange: row.exchange ?? null,
+    currency: row.currency ?? null,
+    yahooSymbol: row.yahoo_symbol ?? null,
+    investingId: row.investing_id ?? null,
+    sector: row.sector ?? null,
+    industry: row.industry ?? null,
+    businessSummary: row.business_summary ?? null,
+    employees: row.employees ?? null,
+    website: row.website ?? null,
+    streetAddress: row.street_address ?? null,
+    city: row.city ?? null,
+    country: row.country ?? null,
+    phone: row.phone ?? null,
+  };
+  const p = mergeInstrumentProfile(primary, yahooModules, investing, existing);
+  await query(
+    `UPDATE instruments SET
+       name = ?, exchange = ?, currency = ?, yahoo_symbol = ?, investing_id = ?,
+       sector = ?, industry = ?, business_summary = ?, employees = ?, website = ?,
+       street_address = ?, city = ?, country = ?, phone = ?, updated_at = NOW()
+     WHERE id = ?`,
+    [
+      p.name, p.exchange, p.currency, p.yahooSymbol, p.investingId,
+      p.sector, p.industry, p.businessSummary, p.employees, p.website,
+      p.streetAddress, p.city, p.country, p.phone, instrumentId,
+    ]
+  );
+}
+
 // ── instrument resolution ───────────────────────────────────────
 
 export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
@@ -112,13 +210,7 @@ export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
     ? await fetchInvestingSnapshot(symbol).catch(() => null)
     : null;
 
-  const profile: any = investing?.profile ?? {};
-  const assetProfile = yahoo?.modules.assetProfile ?? {};
-  const price = yahoo?.modules.price ?? {};
-  const companyName =
-    preferPrimary(primary, price.longName ?? yahoo?.modules.quoteType?.longName, investing?.identity.name) ?? symbol;
-  const exchange = preferPrimary(primary, price.exchangeName, investing?.identity.exchange);
-  const currency = price.currency ?? null;
+  const canonical = mergeInstrumentProfile(primary, yahoo?.modules, investing);
 
   const res = await query<{ insertId: number }>(
     `INSERT INTO instruments (symbol, name, exchange, currency, yahoo_symbol, investing_id, sector, industry, business_summary, employees, website, street_address, city, country, phone)
@@ -129,18 +221,18 @@ export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
        website = VALUES(website), street_address = VALUES(street_address), city = VALUES(city),
        country = VALUES(country), phone = VALUES(phone)`,
     [
-      symbol, companyName, exchange, currency,
-      yahoo?.modules.price?.symbol ?? symbol,
-      investing?.identity.investingId ?? null,
-      preferPrimary(primary, assetProfile.sector, profile.sector),
-      preferPrimary(primary, assetProfile.industry, profile.industry),
-      preferPrimary(primary, assetProfile.longBusinessSummary, profile.businessSummary),
-      preferPrimary(primary, assetProfile.fullTimeEmployees?.raw ?? null, profile.employees),
-      preferPrimary(primary, assetProfile.website, profile.web),
-      preferPrimary(primary, assetProfile.address1, profile.streetAddress),
-      preferPrimary(primary, assetProfile.city, profile.city),
-      preferPrimary(primary, assetProfile.country, profile.country),
-      preferPrimary(primary, assetProfile.phone, profile.phone),
+      symbol, canonical.name ?? symbol, canonical.exchange, canonical.currency,
+      canonical.yahooSymbol ?? symbol,
+      canonical.investingId,
+      canonical.sector,
+      canonical.industry,
+      canonical.businessSummary,
+      canonical.employees,
+      canonical.website,
+      canonical.streetAddress,
+      canonical.city,
+      canonical.country,
+      canonical.phone,
     ]
   );
   const row = await query<InstrumentRow[]>(
