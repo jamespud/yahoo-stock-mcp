@@ -18,7 +18,7 @@ Requires Node.js >= 20 and an external MySQL (see the `.env` config below).
 
 ## Quick start (npm global install)
 
-The package already ships the compiled `dist/` and the Go sidecar `bin/gqlproxy`, so no build step is needed — just use the `yahoo-stock-mcp` command:
+The package already ships compiled `dist/` plus platform-specific Go sidecars for Linux, macOS, and Windows (x64/arm64), so no local Go build is needed — just use the `yahoo-stock-mcp` command:
 
 ```bash
 
@@ -233,18 +233,28 @@ For the "watch the market, position early" use case, the following dimensions ar
 
 ## About investing.com's TLS interception
 
-investing.com blocks Node.js requests via Cloudflare **TLS fingerprinting** (HTTP 403), while a Go client can access it normally. That's why the project bundles a tiny Go transport proxy `cmd/gqlproxy` (~200 lines, stdlib only):
+investing.com blocks Node.js requests via Cloudflare **TLS fingerprinting** (HTTP 403), while a Go client can access it normally. That's why the project bundles a tiny Go transport proxy `cmd/gqlproxy` (~200 lines, stdlib only).
 
-```bash
-npm run build:sidecar   # produces bin/gqlproxy
+Published npm packages include platform-specific binaries selected from `process.platform/process.arch`:
+
+```text
+bin/gqlproxy-linux-x64
+bin/gqlproxy-linux-arm64
+bin/gqlproxy-darwin-x64
+bin/gqlproxy-darwin-arm64
+bin/gqlproxy-win32-x64.exe
+bin/gqlproxy-win32-arm64.exe
 ```
 
-The TS data-source layer tries Node `fetch` first, and automatically switches to that proxy on a 403 (with a persistent cookie session that handles the Cloudflare challenge). From networks that aren't fingerprint-blocked the proxy is unnecessary; set `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` to force pure Node.
+The TS data-source layer tries Node `fetch` first, and automatically switches to the matching proxy on a 403 (with a persistent cookie session that handles the Cloudflare challenge). From networks that aren't fingerprint-blocked the proxy is unnecessary; set `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` to force pure Node. `YAHOO_STOCK_MCP_GQLPROXY_PATH` still overrides bundled sidecar discovery.
 
 ```bash
-# Full build (TypeScript + Go sidecar)
-npm run build:all
+npm run build:sidecar   # build only the current platform/arch
+npm run build:sidecars  # cross-compile all six release targets
+npm run build:all       # TypeScript + all release sidecars
 ```
+
+Unsupported platform/architecture pairs fail with an explicit message instead of attempting to execute a binary for the wrong OS.
 
 ## Environment variables
 

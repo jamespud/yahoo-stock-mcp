@@ -15,16 +15,49 @@ type Transport = "auto" | "node" | "go";
 let transport: Transport = (env("INVESTING_TRANSPORT") as Transport) ?? "auto";
 let sidecarPath: string | null = null;
 
+const SIDECAR_FILES: Record<string, string> = {
+  "linux/x64": "gqlproxy-linux-x64",
+  "linux/arm64": "gqlproxy-linux-arm64",
+  "darwin/x64": "gqlproxy-darwin-x64",
+  "darwin/arm64": "gqlproxy-darwin-arm64",
+  "win32/x64": "gqlproxy-win32-x64.exe",
+  "win32/arm64": "gqlproxy-win32-arm64.exe",
+};
+
+export function sidecarBinaryName(platform = process.platform, arch = process.arch): string | null {
+  return SIDECAR_FILES[`${platform}/${arch}`] ?? null;
+}
+
 function findSidecar(): string | null {
+  const configured = env("GQLPROXY_PATH");
+  if (configured) return existsSync(configured) ? configured : null;
+
+  const binary = sidecarBinaryName();
+  const legacy = process.platform === "win32" ? "gqlproxy.exe" : "gqlproxy";
   const candidates = [
-    env("GQLPROXY_PATH"),
-    resolve(PROJECT_ROOT, "bin", "gqlproxy"),
-    resolve(process.cwd(), "bin", "gqlproxy"),
+    binary ? resolve(PROJECT_ROOT, "bin", binary) : null,
+    binary ? resolve(process.cwd(), "bin", binary) : null,
+    resolve(PROJECT_ROOT, "bin", legacy),
+    resolve(process.cwd(), "bin", legacy),
   ];
   for (const c of candidates) {
     if (c && existsSync(c)) return c;
   }
   return null;
+}
+
+function sidecarMissingMessage(): string {
+  const configured = env("GQLPROXY_PATH");
+  if (configured) {
+    return `investing: configured gqlproxy sidecar not found: ${configured}`;
+  }
+  const binary = sidecarBinaryName();
+  if (!binary) {
+    return `investing: gqlproxy does not support this platform: ${process.platform}/${process.arch}. ` +
+      "Set YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node or provide YAHOO_STOCK_MCP_GQLPROXY_PATH.";
+  }
+  return `investing: Node transport is TLS-fingerprint blocked (HTTP 403) and the ${process.platform}/${process.arch} ` +
+    `gqlproxy sidecar is missing (expected bin/${binary}). Reinstall the npm package or run npm run build:sidecar.`;
 }
 
 async function sidecarRequest(
@@ -35,10 +68,7 @@ async function sidecarRequest(
 ): Promise<{ status: number; text: string }> {
   sidecarPath ??= findSidecar();
   if (!sidecarPath) {
-    throw new Error(
-      "investing: Node transport is TLS-fingerprint blocked (HTTP 403) and the gqlproxy sidecar is missing. " +
-        "Build it with: go build -o bin/gqlproxy ./cmd/gqlproxy"
-    );
+    throw new Error(sidecarMissingMessage());
   }
   const fullHeaders = { "user-agent": config.userAgent, ...headers };
   const payload = JSON.stringify({ method, headers: fullHeaders, body: body ?? "" });

@@ -56,11 +56,14 @@ jobs:
           go test ./...
           go vet ./...
 
-      - name: Build release artifacts once
+      - name: Build TypeScript + cross-platform gqlproxy sidecars
         run: npm run build:all
 
+      - name: Verify sidecar artifacts
+        run: npm run verify:sidecars
+
       - name: Verify package contents
-        run: npm pack --dry-run --ignore-scripts
+        run: npm run verify:package
 
       - name: Publish
         run: npm publish --ignore-scripts

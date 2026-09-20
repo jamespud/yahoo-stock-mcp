@@ -1,0 +1,65 @@
+name: Sidecar platforms
+
+on:
+  pull_request:
+    paths:
+      - "cmd/gqlproxy/**"
+      - "src/providers/investing.ts"
+      - "scripts/build-sidecars.mjs"
+      - "scripts/verify-sidecar.mjs"
+      - "package.json"
+      - ".github/workflows/sidecar-platforms.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "cmd/gqlproxy/**"
+      - "src/providers/investing.ts"
+      - "scripts/build-sidecars.mjs"
+      - "scripts/verify-sidecar.mjs"
+      - "package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  current-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - run: npm ci
+      - run: npm run build:sidecar
+      - run: npm run verify:sidecar
+
+  release-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - run: npm ci
+      - run: npm run build:sidecars
+      - run: npm run verify:sidecars
+      - run: npm run verify:package
