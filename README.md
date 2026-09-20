@@ -142,6 +142,12 @@ Tests use a dedicated `ZZTEST` symbol and clean up automatically, so they never 
 | `get_sector_members` | Sector constituents (sector ETF `topHoldings`, incl. weights) |
 | `sync_sectors` | Sync all sector ETF quotes (~30 days of bars) and constituents |
 
+## Canonical ratio metrics
+
+Yahoo and Investing.com use different field names and, for some percentages, different units. The sync/query layer normalizes common aliases to stable public metric IDs before applying provider priority. Examples include `pe_ttm`, `pe_forward`, `ps_ttm`, `pb_mrq`, `net_margin_pct_ttm`, `gross_margin_pct_ttm`, `operating_margin_pct_ttm`, `roe_pct_ttm`, `roa_pct_ttm`, `dividend_yield_pct_ann`, and `payout_ratio_pct_ttm`.
+
+Percentage metrics with `_pct_` in the ID are stored as percentage points (for example, `25.3` means 25.3%). Existing databases that still contain legacy provider field names are normalized on read; within the configured primary provider the newest observation wins, while the fallback provider only fills a missing canonical metric.
+
 ## Technical indicators
 
 `get_indicators` computes everything locally from `daily_bars` / `intraday_bars` — no extra data source,
