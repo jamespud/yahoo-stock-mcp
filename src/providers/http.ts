@@ -3,24 +3,37 @@ import { ProxyAgent } from "undici";
 
 const dispatcher: any = config.proxyUrl ? new ProxyAgent(config.proxyUrl) : undefined;
 
-/** Node fetch with the optional HTTP(S) proxy applied. */
-export function httpFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(url, { ...init, dispatcher });
-}
+/**
+ * Process-wide reservation-based rate limiter.
+ *
+ * Each waiter atomically reserves the next send slot before yielding, so concurrent callers cannot
+ * observe the same timestamp and wake together. The limiter spaces request starts; it does not hold
+ * a lock while the network request is in flight.
+ */
+export class RateLimiter {
+  private nextAt = 0;
 
-/** Minimal rate limiter: guarantees at least `intervalMs` between requests. */
-class RateLimiter {
-  private last = 0;
   constructor(private intervalMs: number) {}
+
   async wait(): Promise<void> {
     const now = Date.now();
-    const wait = Math.max(0, this.last + this.intervalMs - now);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    this.last = Date.now();
+    const scheduledAt = Math.max(now, this.nextAt);
+    this.nextAt = scheduledAt + Math.max(0, this.intervalMs);
+    const delay = scheduledAt - now;
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
   }
 }
 
 const limiter = new RateLimiter(config.requestDelayMs);
+
+/**
+ * Node fetch with the optional HTTP(S) proxy and the process-wide request limiter applied.
+ * Yahoo and Investing Node transport therefore share the same request-start spacing.
+ */
+export async function httpFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  await limiter.wait();
+  return fetch(url, { ...init, dispatcher });
+}
 
 export interface HttpOptions {
   method?: "GET" | "POST";
@@ -44,7 +57,7 @@ export async function httpJson<T = any>(url: string, opts: HttpOptions = {}): Pr
 
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    await limiter.wait();
+    // Back off first, then reserve a rate-limit slot immediately before the actual retry request.
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, attempt * attempt * 1000));
     }
@@ -99,7 +112,6 @@ export async function httpText(url: string, opts: HttpOptions = {}): Promise<str
 
 async function rawFetch(url: string, opts: HttpOptions): Promise<string> {
   const { method = "GET", headers = {}, body, timeoutMs = 30000 } = opts;
-  await limiter.wait();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
