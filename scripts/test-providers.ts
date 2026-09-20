@@ -7,6 +7,7 @@ import {
   priorityUpdate,
   shouldOverride,
 } from "../src/providers/priority.js";
+import { extractCalendarEvents } from "../src/providers/yahoo.js";
 
 // ── shouldOverride: the primary always wins, otherwise the later writer fills in ──
 
@@ -79,5 +80,37 @@ assert.equal(
   "multi column clause keeps the source assignment last"
 );
 assert.deepEqual(multi.params, ["investing", "investing", "investing", "investing", "investing", "investing"]);
+
+// ── calendar events: earnings and earnings-call dates are independent ──
+
+const earningsTs = Date.UTC(2026, 9, 28) / 1000;
+const callTs = Date.UTC(2026, 9, 29) / 1000;
+
+assert.deepEqual(
+  extractCalendarEvents({ calendarEvents: { earnings: { earningsDate: [earningsTs], isEarningsDateEstimate: true } } }),
+  [{ eventType: "EARNINGS", eventDate: "2026-10-28", details: "estimate", source: "yahoo" }],
+  "earnings-only input emits EARNINGS"
+);
+
+assert.deepEqual(
+  extractCalendarEvents({ calendarEvents: { earnings: { earningsCallDate: [callTs] } } }),
+  [{ eventType: "EARNINGS_CALL", eventDate: "2026-10-29", details: null, source: "yahoo" }],
+  "call-only input emits EARNINGS_CALL rather than EARNINGS"
+);
+
+assert.deepEqual(
+  extractCalendarEvents({ calendarEvents: { earnings: { earningsDate: [earningsTs], earningsCallDate: [callTs] } } }),
+  [
+    { eventType: "EARNINGS", eventDate: "2026-10-28", details: null, source: "yahoo" },
+    { eventType: "EARNINGS_CALL", eventDate: "2026-10-29", details: null, source: "yahoo" },
+  ],
+  "earnings and call dates can both be emitted"
+);
+
+assert.deepEqual(
+  extractCalendarEvents({ calendarEvents: { earnings: {} } }),
+  [],
+  "missing earnings dates emit no earnings events"
+);
 
 console.log("provider priority tests OK");
