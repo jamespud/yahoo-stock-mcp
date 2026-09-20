@@ -6,6 +6,8 @@ import {
   applyInstrumentProfile,
   mergeInstrumentProfile,
   persistSyncState,
+  saveCompanyEvents,
+  saveDividends,
   summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
@@ -32,6 +34,64 @@ async function main() {
     assert.deepEqual(await migrateSchema(), [], "rerunning migrations should not replay applied versions");
     const appliedAfter = await query<any[]>("SELECT version FROM schema_migrations ORDER BY version");
     assert.equal(appliedAfter.length, appliedBefore.length, "migration rerun must not add duplicate rows");
+
+    assert.ok(
+      migrations.some((m) => m.version === "0002_canonical_provider_rows"),
+      "canonical provider-row migration should be packaged"
+    );
+
+    // Simulate an existing pre-0002 database, add cross-provider duplicates, then replay 0002.
+    await query("ALTER TABLE dividends DROP PRIMARY KEY, ADD PRIMARY KEY (instrument_id, ex_date, source)");
+    await query("ALTER TABLE company_events DROP PRIMARY KEY, ADD PRIMARY KEY (instrument_id, event_type, source)");
+    await query(
+      `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
+       VALUES (?, '2026-06-01', 0.11, NULL, 0.44, 0.55, 'yahoo')`,
+      [id]
+    );
+    await query(
+      `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
+       VALUES (?, 'EARNINGS', '2026-08-21', 'fallback detail', 'investing')`,
+      [id]
+    );
+    await query("DELETE FROM schema_migrations WHERE version = '0002_canonical_provider_rows'");
+    assert.deepEqual(
+      await migrateSchema(),
+      ["0002_canonical_provider_rows"],
+      "existing database should upgrade through the canonical-row migration"
+    );
+
+    const migratedDividendRows = await query<any[]>(
+      "SELECT amount, pay_date, ttm_dividend, yield_pct, source FROM dividends WHERE instrument_id = ? AND ex_date = '2026-06-01'",
+      [id]
+    );
+    assert.equal(migratedDividendRows.length, 1);
+    assert.equal(migratedDividendRows[0].source, "yahoo", "configured/default primary wins duplicate migration");
+    assert.equal(
+      new Date(migratedDividendRows[0].pay_date).toISOString().slice(0, 10),
+      "2026-06-15",
+      "migration should preserve useful fallback fields"
+    );
+
+    const migratedEventRows = await query<any[]>(
+      "SELECT event_date, details, source FROM company_events WHERE instrument_id = ? AND event_type = 'EARNINGS'",
+      [id]
+    );
+    assert.equal(migratedEventRows.length, 1);
+    assert.equal(migratedEventRows[0].source, "yahoo");
+    assert.equal(new Date(migratedEventRows[0].event_date).toISOString().slice(0, 10), "2026-08-20");
+    assert.equal(migratedEventRows[0].details, "fallback detail");
+
+    for (const [table, expected] of [
+      ["dividends", ["instrument_id", "ex_date"]],
+      ["company_events", ["instrument_id", "event_type"]],
+    ] as const) {
+      const indexes = await query<any[]>(`SHOW INDEX FROM ${table} WHERE Key_name = 'PRIMARY'`);
+      assert.deepEqual(
+        indexes.sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index)).map((x) => x.Column_name),
+        expected,
+        `${table} primary key should be provider-independent after migration`
+      );
+    }
 
 
     assert.equal(
@@ -287,6 +347,75 @@ async function main() {
       "DELETE FROM ratios WHERE instrument_id = ? AND metric IN ('trailing_pe', 'pe_ratio_ttm')",
       [id]
     );
+
+    // --- canonical dividends/events: both provider priorities + null-aware gap filling ---
+    await saveDividends(id, [{
+      exDate: "2026-10-01", amount: 1, payDate: "2026-10-15", ttmDividend: 4, yieldPct: 1, source: "investing",
+    }], "yahoo");
+    await saveDividends(id, [{
+      exDate: "2026-10-01", amount: 2, payDate: null, ttmDividend: null, yieldPct: 2, source: "yahoo",
+    }], "yahoo");
+    await saveDividends(id, [{
+      exDate: "2026-10-01", amount: 3, payDate: "2026-10-20", ttmDividend: 6, yieldPct: 3, source: "investing",
+    }], "yahoo");
+    const yahooDividend = (await query<any[]>(
+      "SELECT amount, pay_date, ttm_dividend, yield_pct, source FROM dividends WHERE instrument_id = ? AND ex_date = '2026-10-01'",
+      [id]
+    ))[0];
+    assert.equal(Number(yahooDividend.amount), 2);
+    assert.equal(new Date(yahooDividend.pay_date).toISOString().slice(0, 10), "2026-10-15");
+    assert.equal(Number(yahooDividend.ttm_dividend), 4);
+    assert.equal(Number(yahooDividend.yield_pct), 2);
+    assert.equal(yahooDividend.source, "yahoo");
+
+    await saveDividends(id, [{
+      exDate: "2026-10-02", amount: 4, payDate: "2026-10-16", ttmDividend: 7, yieldPct: 4, source: "yahoo",
+    }], "investing");
+    await saveDividends(id, [{
+      exDate: "2026-10-02", amount: 5, payDate: null, ttmDividend: null, yieldPct: 5, source: "investing",
+    }], "investing");
+    const investingDividend = (await query<any[]>(
+      "SELECT amount, pay_date, ttm_dividend, yield_pct, source FROM dividends WHERE instrument_id = ? AND ex_date = '2026-10-02'",
+      [id]
+    ))[0];
+    assert.equal(Number(investingDividend.amount), 5);
+    assert.equal(new Date(investingDividend.pay_date).toISOString().slice(0, 10), "2026-10-16");
+    assert.equal(Number(investingDividend.ttm_dividend), 7);
+    assert.equal(investingDividend.source, "investing");
+
+    await saveCompanyEvents(id, [{
+      eventType: "EARNINGS_CALL", eventDate: "2026-10-12", details: "fallback detail", source: "investing",
+    }], "yahoo");
+    await saveCompanyEvents(id, [{
+      eventType: "EARNINGS_CALL", eventDate: "2026-10-10", details: null, source: "yahoo",
+    }], "yahoo");
+    await saveCompanyEvents(id, [{
+      eventType: "EARNINGS_CALL", eventDate: "2026-10-14", details: "later fallback", source: "investing",
+    }], "yahoo");
+    const yahooEvent = (await query<any[]>(
+      "SELECT event_date, details, source FROM company_events WHERE instrument_id = ? AND event_type = 'EARNINGS_CALL'",
+      [id]
+    ))[0];
+    assert.equal(new Date(yahooEvent.event_date).toISOString().slice(0, 10), "2026-10-10");
+    assert.equal(yahooEvent.details, "fallback detail");
+    assert.equal(yahooEvent.source, "yahoo");
+
+    await saveCompanyEvents(id, [{
+      eventType: "DIVIDEND_PAY", eventDate: "2026-11-15", details: "Yahoo detail", source: "yahoo",
+    }], "investing");
+    await saveCompanyEvents(id, [{
+      eventType: "DIVIDEND_PAY", eventDate: "2026-11-12", details: null, source: "investing",
+    }], "investing");
+    const investingEvent = (await query<any[]>(
+      "SELECT event_date, details, source FROM company_events WHERE instrument_id = ? AND event_type = 'DIVIDEND_PAY'",
+      [id]
+    ))[0];
+    assert.equal(new Date(investingEvent.event_date).toISOString().slice(0, 10), "2026-11-12");
+    assert.equal(investingEvent.details, "Yahoo detail");
+    assert.equal(investingEvent.source, "investing");
+
+    await query("DELETE FROM dividends WHERE instrument_id = ? AND ex_date IN ('2026-10-01','2026-10-02')", [id]);
+    await query("DELETE FROM company_events WHERE instrument_id = ? AND event_type IN ('EARNINGS_CALL','DIVIDEND_PAY')", [id]);
 
     // --- holders / news / options ---
     assert.equal((await q.getHolders(TEST_SYMBOL, 10))?.holders.length, 1);
