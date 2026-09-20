@@ -42,6 +42,60 @@ export function incrementalBarsFrom(lastBarDate: unknown, nowMs = Date.now()): s
   return anchor.toISOString().slice(0, 10);
 }
 
+export type SyncComponentStatus = "ok" | "failed" | "skipped";
+export interface SyncComponentResult {
+  status: SyncComponentStatus;
+  count?: number;
+  error?: string;
+}
+export type SyncStatus = "success" | "partial" | "failed";
+
+export function summarizeSyncStatus(components: Record<string, SyncComponentResult>): SyncStatus {
+  const attempted = Object.values(components).filter((c) => c.status !== "skipped");
+  const failed = attempted.filter((c) => c.status === "failed").length;
+  if (failed === 0) return "success";
+  return failed === attempted.length ? "failed" : "partial";
+}
+
+export async function persistSyncState(
+  instrumentId: number,
+  full: boolean,
+  lastBarDate: unknown,
+  warnings: string[],
+  quoteSucceeded: boolean
+): Promise<void> {
+  const errorCount = warnings.length;
+  const lastError = warnings.length ? warnings[warnings.length - 1] : null;
+  if (full) {
+    await query(
+      `INSERT INTO sync_state
+         (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
+       VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)
+       ON DUPLICATE KEY UPDATE
+         full_synced = 1,
+         last_full_sync_at = NOW(),
+         last_bar_date = VALUES(last_bar_date),
+         last_quote_at = IF(?, NOW(), last_quote_at),
+         error_count = VALUES(error_count),
+         last_error = VALUES(last_error)`,
+      [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+    );
+    return;
+  }
+  await query(
+    `INSERT INTO sync_state
+       (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
+     VALUES (?, 0, NULL, NOW(), ?, IF(?, NOW(), NULL), ?, ?)
+     ON DUPLICATE KEY UPDATE
+       last_incremental_at = NOW(),
+       last_bar_date = VALUES(last_bar_date),
+       last_quote_at = IF(?, NOW(), last_quote_at),
+       error_count = VALUES(error_count),
+       last_error = VALUES(last_error)`,
+    [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+  );
+}
+
 // ── instrument resolution ───────────────────────────────────────
 
 export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
@@ -321,30 +375,62 @@ async function syncIntradayBars(instrument: InstrumentRow, interval: IntradayInt
 export async function syncOne(
   symbol: string,
   opts: { full: boolean; intraday?: IntradayInterval | null }
-): Promise<{ symbol: string; bars: number; news: number; options: number; intraday: number }> {
+): Promise<{
+  symbol: string;
+  status: SyncStatus;
+  bars: number;
+  news: number;
+  options: number;
+  intraday: number;
+  components: Record<string, SyncComponentResult>;
+  warnings: string[];
+}> {
   const instrument = await ensureInstrument(symbol);
   const today = new Date().toISOString().slice(0, 10);
+  const warnings: string[] = [];
+  const components: Record<string, SyncComponentResult> = {
+    bars: { status: "skipped" },
+    yahooSummary: { status: "skipped" },
+    investingSnapshot: { status: "skipped" },
+    yahooFundamentals: { status: "skipped" },
+    news: { status: "skipped" },
+    options: { status: "skipped" },
+    intraday: { status: "skipped" },
+  };
   const result = { symbol, bars: 0, news: 0, options: 0, intraday: 0 };
+  const failed = (component: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    components[component] = { status: "failed", error: message };
+    warnings.push(`${component}: ${message}`);
+    console.warn(`[${symbol}] ${component} failed: ${message}`);
+  };
 
   // 1. bars
-  if (opts.full) {
-    result.bars = await syncBars(instrument, config.barsStartDate, today);
-  } else {
-    const state = await query<any[]>(
-      "SELECT last_bar_date FROM sync_state WHERE instrument_id = ?",
-      [instrument.id]
-    );
-    const from = incrementalBarsFrom(state[0]?.last_bar_date);
-    result.bars = await syncBars(instrument, from, today);
+  try {
+    if (opts.full) {
+      result.bars = await syncBars(instrument, config.barsStartDate, today);
+    } else {
+      const state = await query<any[]>(
+        "SELECT last_bar_date FROM sync_state WHERE instrument_id = ?",
+        [instrument.id]
+      );
+      const from = incrementalBarsFrom(state[0]?.last_bar_date);
+      result.bars = await syncBars(instrument, from, today);
+    }
+    components.bars = { status: "ok", count: result.bars };
+  } catch (e) {
+    failed("bars", e);
   }
 
   // 2. yahoo summary (quote, ratios, dividends, forecast, holders)
-  const summary = await fetchYahooSummary(instrument.yahoo_symbol ?? symbol).catch((e) => {
-    console.warn(`[${symbol}] yahoo summary failed: ${e.message}`);
-    return null;
-  });
+  const summary = await fetchYahooSummary(instrument.yahoo_symbol ?? symbol)
+    .catch((e) => {
+      failed("yahooSummary", e);
+      return null;
+    });
   if (summary) {
-    const modules = summary.modules;
+    try {
+      const modules = summary.modules;
     const price = modules.price ?? {};
     const px = yahooNum(price.regularMarketPrice);
     // Only let Yahoo overwrite the stored name/exchange/currency when Yahoo is the primary source
@@ -412,20 +498,26 @@ export async function syncOne(
 
     // data checklist: short interest / holder breakdown / insiders / analyst actions /
     // forward events / earnings trend / recommendation trend / fund holders
-    try {
-      await syncYahooChecklist(instrument, modules);
-    } catch (e: any) {
-      console.warn(`[${symbol}] yahoo checklist failed: ${e.message}`);
+      try {
+        await syncYahooChecklist(instrument, modules);
+      } catch (e: any) {
+        console.warn(`[${symbol}] yahoo checklist failed: ${e.message}`);
+      }
+      components.yahooSummary = { status: "ok" };
+    } catch (e) {
+      failed("yahooSummary", e);
     }
   }
 
   // 3. investing snapshot (financials, ratios, dividends, forecast, profile, holders, earnings)
-  const snapshot = await fetchInvestingSnapshot(instrument.yahoo_symbol ?? symbol).catch((e) => {
-    console.warn(`[${symbol}] investing snapshot failed: ${e.message}`);
-    return null;
-  });
+  const snapshot = await fetchInvestingSnapshot(instrument.yahoo_symbol ?? symbol)
+    .catch((e) => {
+      failed("investingSnapshot", e);
+      return null;
+    });
   if (snapshot) {
-    const divKeepInv = priorityUpdate(config.primaryProvider, ["amount", "pay_date"]);
+    try {
+      const divKeepInv = priorityUpdate(config.primaryProvider, ["amount", "pay_date"]);
     await saveFinancials(instrument.id, snapshot.financials);
     await saveRatios(instrument.id, snapshot.ratios);
 
@@ -517,8 +609,12 @@ export async function syncOne(
     ]);
     if (earnStmts.length) await runBatch(earnStmts);
 
-    // forward calendar: next earnings date from investing
-    await syncInvestingCalendar(instrument, snapshot.nextEarningsDate);
+      // forward calendar: next earnings date from investing
+      await syncInvestingCalendar(instrument, snapshot.nextEarningsDate);
+      components.investingSnapshot = { status: "ok" };
+    } catch (e) {
+      failed("investingSnapshot", e);
+    }
   }
 
   // 4. financial statements from yahoo fundamentals (unauthenticated, structured)
@@ -530,8 +626,9 @@ export async function syncOne(
       "quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyTotalAssets",
     ]);
     await saveFinancials(instrument.id, yahooFinancials);
-  } catch (e: any) {
-    console.warn(`[${symbol}] yahoo fundamentals failed: ${e.message}`);
+    components.yahooFundamentals = { status: "ok", count: yahooFinancials.length };
+  } catch (e) {
+    failed("yahooFundamentals", e);
   }
 
   // 5. news
@@ -544,8 +641,9 @@ export async function syncOne(
     ]);
     if (newsStmts.length) await runBatch(newsStmts);
     result.news = news.length;
-  } catch (e: any) {
-    console.warn(`[${symbol}] news failed: ${e.message}`);
+    components.news = { status: "ok", count: result.news };
+  } catch (e) {
+    failed("news", e);
   }
 
   // 6. options (snapshot of near-term chain)
@@ -562,16 +660,18 @@ export async function syncOne(
       for (let i = 0; i < optStmts.length; i += 500) await runBatch(optStmts.slice(i, i + 500));
       result.options = legs.length;
     }
-  } catch (e: any) {
-    console.warn(`[${symbol}] options failed: ${e.message}`);
+    components.options = { status: "ok", count: result.options };
+  } catch (e) {
+    failed("options", e);
   }
 
   // 6.5 intraday bars (optional)
   if (opts.intraday) {
     try {
       result.intraday = await syncIntradayBars(instrument, opts.intraday);
-    } catch (e: any) {
-      console.warn(`[${symbol}] intraday sync failed: ${e.message}`);
+      components.intraday = { status: "ok", count: result.intraday };
+    } catch (e) {
+      failed("intraday", e);
     }
   }
 
@@ -580,16 +680,20 @@ export async function syncOne(
     "SELECT MAX(trade_date) AS d FROM daily_bars WHERE instrument_id = ? AND source = ?",
     [instrument.id, barsSource()]
   );
-  await query(
-    `INSERT INTO sync_state (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count)
-     VALUES (?, ?, NOW(), NOW(), ?, NOW(), 0)
-     ON DUPLICATE KEY UPDATE full_synced = VALUES(full_synced), last_full_sync_at = VALUES(last_full_sync_at),
-       last_incremental_at = VALUES(last_incremental_at), last_bar_date = VALUES(last_bar_date),
-       last_quote_at = VALUES(last_quote_at)`,
-    [instrument.id, opts.full ? 1 : 0, lastBarDate[0]?.d ?? null]
+  await persistSyncState(
+    instrument.id,
+    opts.full,
+    lastBarDate[0]?.d ?? null,
+    warnings,
+    components.yahooSummary.status === "ok"
   );
 
-  return result;
+  return {
+    ...result,
+    status: summarizeSyncStatus(components),
+    components,
+    warnings,
+  };
 }
 
 function barsSource(): string {
