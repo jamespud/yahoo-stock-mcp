@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { closeDb, initSchema } from "./db.js";
+import { closeDb, initSchema, migrateSchema } from "./db.js";
 import { syncAll, syncOne, syncSectors, type IntradayInterval } from "./services/sync.service.js";
 import { startMcpServer } from "./mcp/server.js";
 
@@ -22,7 +22,8 @@ Usage:
 
 Commands:
   server                 Start the MCP server over stdio (default with no arguments)
-  db:init                Create the MySQL schema in the configured database
+  db:init                Create the bootstrap schema and apply all migrations
+  db:migrate             Apply pending schema migrations to an existing database
   sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
   version                Print the version number
   help [command]         Show general help, or help for a specific command
@@ -78,12 +79,21 @@ YAHOO_STOCK_MCP_DB_* variables (host/port/user/password/name).
 Usage:
   ${NAME} db:init`;
 
+const DBMIGRATE_HELP = `Apply pending versioned migrations to an existing database.
+
+Use db:init for a new/empty database. Migration files are loaded from db/migrations
+and verified against the checksums stored in schema_migrations.
+
+Usage:
+  ${NAME} db:migrate`;
+
 const HELP_TOPICS: Record<string, string> = {
   "": GENERAL_HELP,
   help: GENERAL_HELP,
   sync: SYNC_HELP,
   server: SERVER_HELP,
   "db:init": DBINIT_HELP,
+  "db:migrate": DBMIGRATE_HELP,
 };
 
 function printHelp(topic = ""): void {
@@ -171,6 +181,14 @@ async function main() {
         return;
       }
       await initSchema();
+      break;
+
+    case "db:migrate":
+      if (help) {
+        printHelp("db:migrate");
+        return;
+      }
+      await migrateSchema();
       break;
 
     case "sync":
