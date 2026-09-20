@@ -484,6 +484,7 @@ export async function syncOne(
     bars: { status: "skipped" },
     yahooSummary: { status: "skipped" },
     investingSnapshot: { status: "skipped" },
+    profile: { status: "skipped" },
     yahooFundamentals: { status: "skipped" },
     news: { status: "skipped" },
     options: { status: "skipped" },
@@ -523,15 +524,6 @@ export async function syncOne(
   if (summary) {
     try {
       const modules = summary.modules;
-    const price = modules.price ?? {};
-    const px = yahooNum(price.regularMarketPrice);
-    // Only let Yahoo overwrite the stored name/exchange/currency when Yahoo is the primary source
-    if (px != null && config.primaryProvider === "yahoo") {
-      await query(
-        `UPDATE instruments SET name = COALESCE(?, name), exchange = COALESCE(?, exchange), currency = COALESCE(?, currency), updated_at = NOW() WHERE id = ?`,
-        [price.longName ?? null, price.exchangeName ?? null, price.currency ?? null, instrument.id]
-      );
-    }
     await saveRatios(instrument.id, extractRatiosFromSummary(modules, symbol, today));
 
     // dividends from yahoo
@@ -658,22 +650,6 @@ export async function syncOne(
       );
     }
 
-    const prof = snapshot.profile;
-    await query(
-      `UPDATE instruments SET name = COALESCE(?, name), sector = COALESCE(?, sector), industry = COALESCE(?, industry),
-         business_summary = COALESCE(?, business_summary), employees = COALESCE(?, employees),
-         website = COALESCE(?, website), street_address = COALESCE(?, street_address),
-         city = COALESCE(?, city), country = COALESCE(?, country), phone = COALESCE(?, phone),
-         investing_id = COALESCE(?, investing_id), updated_at = NOW() WHERE id = ?`,
-      [
-        prof.businessSummary ? snapshot.identity.name : null,
-        prof.sector, prof.industry, prof.businessSummary, prof.employees,
-        prof.web, prof.streetAddress, prof.city, prof.country, prof.phone,
-        snapshot.identity.investingId,
-        instrument.id,
-      ]
-    );
-
     const holderStmts2 = snapshot.holders.map((h): [string, any[]] => [
       `INSERT INTO holders (instrument_id, holding_date, owner_name, shares_held, percent_of_shares, percent_of_portfolio, shares_changed, total_value, source)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing')
@@ -706,6 +682,16 @@ export async function syncOne(
       components.investingSnapshot = { status: "ok" };
     } catch (e) {
       failed("investingSnapshot", e);
+    }
+  }
+
+  // Apply one canonical profile refresh after both provider payloads are known.
+  if (summary || snapshot) {
+    try {
+      await applyInstrumentProfile(instrument.id, summary?.modules, snapshot, config.primaryProvider);
+      components.profile = { status: "ok" };
+    } catch (e) {
+      failed("profile", e);
     }
   }
 
