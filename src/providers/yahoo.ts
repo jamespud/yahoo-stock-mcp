@@ -198,7 +198,6 @@ export async function fetchYahooOptions(symbol: string, dateUnix?: number): Prom
   }
   return legs;
 }
-
 /** Live options chain from Yahoo (on-demand, no DB): underlying quote, expirations, strikes and per-contract quotes. */
 export async function fetchYahooOptionChain(symbol: string, dateUnix?: number): Promise<OptionChain> {
   const r = await fetchYahooOptionChainRaw(symbol, dateUnix);
@@ -397,8 +396,7 @@ export function extractShortInterest(modules: Record<string, any>): ShortInteres
     asOf,
     sharesShort,
     sharesShortPriorMonth: num(dks.sharesShortPriorMonth),
-    shortRatio: num(dks.shortRatio),
-    shortPercentOfFloat: num(dks.shortPercentOfFloat),
+    shortRatio: num(dks.shortRatio),    shortPercentOfFloat: num(dks.shortPercentOfFloat),
     sharesPercentSharesOut: num(dks.sharesPercentSharesOut),
     shortDate: unixToDate(dks.dateShortInterest),
     source: "yahoo",
@@ -450,13 +448,14 @@ export function extractCalendarEvents(modules: Record<string, any>): CompanyEven
   const earn = ce.earnings ?? {};
   const earnDates: number[] = Array.isArray(earn.earningsDate) ? earn.earningsDate : [];
   const callDates: number[] = Array.isArray(earn.earningsCallDate) ? earn.earningsCallDate : [];
-  const nextEarn = earnDates[0] ?? callDates[0];
+  const nextEarn = earnDates[0];
   if (nextEarn != null) {
     const d = new Date(nextEarn * 1000).toISOString().slice(0, 10);
     out.push({ eventType: "EARNINGS", eventDate: d, details: earn.isEarningsDateEstimate ? "estimate" : null, source: "yahoo" });
   }
-  if (callDates[0] != null && nextEarn == null) {
-    const d = new Date(callDates[0] * 1000).toISOString().slice(0, 10);
+  const nextCall = callDates[0];
+  if (nextCall != null) {
+    const d = new Date(nextCall * 1000).toISOString().slice(0, 10);
     out.push({ eventType: "EARNINGS_CALL", eventDate: d, details: null, source: "yahoo" });
   }
   if (ce.exDividendDate != null) {
@@ -596,7 +595,6 @@ export async function fetchYahooIntradayBars(
   for (const b of out) byTs.set(b.ts, b);
   return [...byTs.values()];
 }
-
 
 // ── sector data (ETF topHoldings) ──────────────────────────────
 
