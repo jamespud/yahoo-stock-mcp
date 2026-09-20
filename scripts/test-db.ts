@@ -34,7 +34,12 @@ async function main() {
 
     // --- bars ---
     assert.equal((await q.getBars(TEST_SYMBOL, "1d", undefined, undefined, 100))?.length, 3);
-    assert.equal((await q.getBars(TEST_SYMBOL, "1d", undefined, undefined, 1))?.length, 1);
+    const latestDaily = await q.getBars(TEST_SYMBOL, "1d", undefined, undefined, 1);
+    assert.equal(latestDaily?.length, 1);
+    assert.equal(latestDaily?.[0].trade_date, "2026-08-03", "daily limit should take the latest bar");
+    const latestWeekly = await q.getBars(TEST_SYMBOL, "1wk", undefined, undefined, 1);
+    assert.equal(latestWeekly?.length, 1);
+    assert.equal(latestWeekly?.[0].close, "12.5000", "weekly limit should keep the latest aggregate bucket");
     assert.equal((await q.getBars(TEST_SYMBOL, "1wk"))?.length, 2);
     assert.equal((await q.getBars(TEST_SYMBOL, "1mo"))?.length, 1);
     assert.equal(await q.getBars("QQQQNOPE", "1d"), null);
@@ -154,12 +159,16 @@ async function main() {
         [id, ts, last - 0.2, last + 0.2, last - 0.4, last]
       );
     }
-    // the existing get_intraday_bars semantics stay unchanged: the default still takes the earliest `limit` bars
-    const intraAsc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2);
-    assert.equal(intraAsc?.bars.length, 2);
+    // the default takes the latest `limit` bars and returns them ascending
+    const intraLatest = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2);
+    assert.equal(intraLatest?.bars.length, 2);
+    assert.equal(isoMinute(intraLatest?.bars[0].ts), "2026-08-03T15:00");
+    assert.equal(isoMinute(intraLatest?.bars[1].ts), "2026-08-03T15:15");
+    // callers can still explicitly request the earliest window
+    const intraAsc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2, "asc");
     assert.equal(isoMinute(intraAsc?.bars[0].ts), "2026-08-03T14:30");
     assert.equal(isoMinute(intraAsc?.bars[1].ts), "2026-08-03T14:45");
-    // the indicator-engine path takes the last `limit` bars and still returns them ascending
+    // the indicator-engine path keeps requesting the last `limit` bars explicitly
     const intraDesc = await q.getIntradayBars(TEST_SYMBOL, "15m", undefined, undefined, 2, "desc");
     assert.equal(intraDesc?.bars.length, 2);
     assert.equal(isoMinute(intraDesc?.bars[0].ts), "2026-08-03T15:00");
