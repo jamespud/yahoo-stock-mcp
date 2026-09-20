@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { query, runBatch } from "../db.js";
+import { query, replaceBatch, runBatch } from "../db.js";
 import { fetchInvestingBars, fetchInvestingSnapshot } from "../providers/investing.js";
 import { needsInvestingIdentity, preferPrimary, priorityUpdate, type Provider } from "../providers/priority.js";
 import {
@@ -650,14 +650,16 @@ export async function syncOne(
   try {
     const legs = await fetchYahooOptions(instrument.yahoo_symbol ?? symbol);
     if (legs.length) {
-      await query("DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [instrument.id]);
       const optStmts = legs.map((l): [string, any[]] => [
         `INSERT INTO options (instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`,
         [instrument.id, l.contractSymbol, l.expiration, l.optionType, l.strike, l.lastPrice, l.bid, l.ask,
          l.volume, l.openInterest, l.impliedVol, l.inTheMoney ? 1 : 0, l.currency],
       ]);
-      for (let i = 0; i < optStmts.length; i += 500) await runBatch(optStmts.slice(i, i + 500));
+      await replaceBatch(
+        ["DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [instrument.id]],
+        optStmts
+      );
       result.options = legs.length;
     }
     components.options = { status: "ok", count: result.options };
@@ -766,14 +768,16 @@ async function syncSectorEtf(
   if (opts.members && summary) {
     const members = extractTopHoldings(summary.modules);
     if (members.length) {
-      await query("DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sector.sector_code]);
       const stmts = members.map((m): [string, any[]] => [
         `INSERT INTO sector_members (sector_code, symbol, name, weight, source)
          VALUES (?, ?, ?, ?, 'yahoo')
          ON DUPLICATE KEY UPDATE name = VALUES(name), weight = VALUES(weight)`,
         [sector.sector_code, m.symbol, m.name, m.weight],
       ]);
-      await runBatch(stmts);
+      await replaceBatch(
+        ["DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sector.sector_code]],
+        stmts
+      );
       membersN = members.length;
     }
   }
