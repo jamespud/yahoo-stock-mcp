@@ -208,7 +208,7 @@ For the "watch the market, position early" use case, the following dimensions ar
 - Sectors: `sync --sectors` syncs the 11 GICS sector ETFs (XLC..XLU) + SPY benchmark quotes and `topHoldings` constituents in one go; `get_sector_performance` returns the rotation ranking.
 - Options: `get_options` reads the snapshot synced to the DB; `get_option_quote` fetches the latest quotes directly from Yahoo on demand (incl. underlying price, optional expiry, strike, and direction filters) — no prior sync required.
 - All writes are idempotent upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and can be re-run safely.
-- Rate limiting is built in (default 300ms/request); Yahoo crumb cache 25 min, TVC token cache 25 min.
+- Rate limiting is process-wide for Node HTTP requests (default 300ms between request starts, shared by Yahoo and Investing Node transport); concurrent callers reserve distinct send slots. Yahoo crumb cache 25 min, TVC token cache 25 min.
 
 ## About investing.com's TLS interception
 
