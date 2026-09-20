@@ -76,19 +76,41 @@ export async function closeDb(): Promise<void> {
   }
 }
 
-/** Batch upsert helper: rows as [sql, params][] executed sequentially. */
-export async function runBatch(statements: Array<[string, any[]]>): Promise<void> {
+export async function withTransaction<T>(
+  fn: (conn: mysql.PoolConnection) => Promise<T>
+): Promise<T> {
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
-    for (const [sql, params] of statements) {
-      await conn.execute(sql, params);
-    }
+    const result = await fn(conn);
     await conn.commit();
+    return result;
   } catch (err) {
     await conn.rollback();
     throw err;
   } finally {
     conn.release();
   }
+}
+
+/** Batch helper: rows as [sql, params][] executed sequentially in one transaction. */
+export async function runBatch(statements: Array<[string, any[]]>): Promise<void> {
+  await withTransaction(async (conn) => {
+    for (const [sql, params] of statements) {
+      await conn.query(sql, params);
+    }
+  });
+}
+
+/** Delete an existing snapshot and insert its replacement atomically on one connection. */
+export async function replaceBatch(
+  deleteStatement: [string, any[]],
+  insertStatements: Array<[string, any[]]>
+): Promise<void> {
+  await withTransaction(async (conn) => {
+    await conn.query(deleteStatement[0], deleteStatement[1]);
+    for (const [sql, params] of insertStatements) {
+      await conn.query(sql, params);
+    }
+  });
 }

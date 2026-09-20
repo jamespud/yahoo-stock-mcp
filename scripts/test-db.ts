@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { closeDb, initSchema, query } from "../src/db.js";
+import { closeDb, initSchema, query, replaceBatch } from "../src/db.js";
 import * as q from "../src/services/query.service.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
 import { persistSyncState, summarizeSyncStatus } from "../src/services/sync.service.js";
@@ -172,6 +172,28 @@ async function main() {
     assert.equal((await q.getNews(TEST_SYMBOL, 0))?.news.length, 1, "limit should be clamped to >= 1");
     const opts = await q.getOptions(TEST_SYMBOL);
     assert.equal(opts?.expirations.length, 1);
+    const beforeContracts = (await query<any[]>(
+      "SELECT contract_symbol FROM options WHERE instrument_id = ? ORDER BY contract_symbol",
+      [id]
+    )).map((r) => r.contract_symbol);
+    await assert.rejects(
+      replaceBatch(
+        ["DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [id]],
+        [
+          [
+            `INSERT INTO options (instrument_id, contract_symbol, expiration, option_type, strike, source)
+             VALUES (?, 'ZZTEST-REPLACEMENT', '2026-10-01', 'CALL', 100, 'yahoo')`,
+            [id],
+          ],
+          ["INSERT INTO definitely_missing_snapshot_table (x) VALUES (1)", []],
+        ]
+      )
+    );
+    const afterContracts = (await query<any[]>(
+      "SELECT contract_symbol FROM options WHERE instrument_id = ? ORDER BY contract_symbol",
+      [id]
+    )).map((r) => r.contract_symbol);
+    assert.deepEqual(afterContracts, beforeContracts, "failed options replacement must roll back to the previous snapshot");
     assert.equal(opts?.legs.length, 2);
     assert.ok(opts?.legs[0]?.contract_symbol, "options legs should include contract_symbol");
     assert.equal((await q.getOptions(TEST_SYMBOL, "2026-09-19"))?.legs.length, 2);
@@ -262,6 +284,22 @@ async function main() {
     const mem = await q.getSectorMembers("ZZSEC", 5);
     assert.equal(mem?.members.length, 1);
     assert.equal(mem?.members[0].symbol, "ZZTEST");
+    await assert.rejects(
+      replaceBatch(
+        ["DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", ["ZZSEC"]],
+        [
+          [
+            `INSERT INTO sector_members (sector_code, symbol, name, weight, source)
+             VALUES ('ZZSEC', 'BROKEN', 'Broken Replacement', 1, 'yahoo')`,
+            [],
+          ],
+          ["INSERT INTO definitely_missing_snapshot_table (x) VALUES (1)", []],
+        ]
+      )
+    );
+    const memAfterRollback = await q.getSectorMembers("ZZSEC", 5);
+    assert.equal(memAfterRollback?.members.length, 1);
+    assert.equal(memAfterRollback?.members[0].symbol, "ZZTEST", "failed member replacement must preserve the old snapshot");
     assert.equal(await q.getSectorMembers("QQQQNOPE"), null);
 
     console.log("db tests OK");
