@@ -177,15 +177,18 @@ export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", fr
   if (from) { cond.push("trade_date >= ?"); params.push(from); }
   if (to) { cond.push("trade_date <= ?"); params.push(to); }
   const where = cond.length ? `AND ${cond.join(" AND ")}` : "";
+  const wanted = Math.max(1, Math.min(limit, 10000));
+  const rawLimit = interval === "1d" ? wanted : Math.min(20000, wanted * (interval === "1wk" ? 8 : 24));
   const bars = await query<any[]>(
     `SELECT trade_date, open, high, low, close, adj_close, volume, source
-     FROM daily_bars WHERE instrument_id = ? ${where} ORDER BY trade_date ASC LIMIT ${Math.max(1, Math.min(limit, 10000))}`,
+     FROM daily_bars WHERE instrument_id = ? ${where} ORDER BY trade_date DESC LIMIT ${rawLimit}`,
     params
   );
+  bars.reverse();
   if (interval === "1d") {
     return bars.map((b) => ({ ...b, trade_date: toDateStr(b.trade_date) }));
   }
-  // aggregate weekly / monthly in JS
+  // aggregate weekly / monthly in JS, then keep the latest requested buckets
   const out = aggregateRows(bars, interval).map((b) => ({
     period: b.period,
     open: b.open,
@@ -196,7 +199,7 @@ export async function getBars(symbol: string, interval: "1d" | "1wk" | "1mo", fr
     volume: b.volume,
     count: b.count,
   }));
-  return out;
+  return out.slice(-wanted);
 }
 
 export async function getProfile(symbol: string) {
@@ -447,9 +450,8 @@ export async function getHolderBreakdown(symbol: string) {
 }
 
 /**
- * Intraday bar query. By default it takes the earliest `limit` bars in ascending order (the existing
- * get_intraday_bars behaviour); `order: "desc"` takes the last `limit` bars and flips them back to
- * ascending, which is the window semantics the indicator engine needs.
+ * Intraday bar query. By default it takes the latest `limit` bars and returns them in ascending
+ * timestamp order. `order: "asc"` remains available for callers that explicitly need the earliest window.
  */
 export async function getIntradayBars(
   symbol: string,
@@ -457,7 +459,7 @@ export async function getIntradayBars(
   from?: string,
   to?: string,
   limit = 5000,
-  order: "asc" | "desc" = "asc"
+  order: "asc" | "desc" = "desc"
 ) {
   const inst = await instOrNull(symbol);
   if (!inst) return null;
