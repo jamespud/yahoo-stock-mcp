@@ -1,6 +1,7 @@
 // Data-source priority: pure-function tests (no DB, no network).
 import assert from "node:assert/strict";
 import { RateLimiter } from "../src/providers/http.js";
+import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
 import {
   needsInvestingIdentity,
   parsePrimaryProvider,
@@ -9,6 +10,65 @@ import {
   shouldOverride,
 } from "../src/providers/priority.js";
 import { extractCalendarEvents } from "../src/providers/yahoo.js";
+
+// ── canonical ratio vocabulary / units ──
+
+assert.deepEqual(canonicalizeRatio("trailing_pe", 21.5), { metric: "pe_ttm", value: 21.5 });
+assert.deepEqual(canonicalizeRatio("pe_ratio_ttm", 21.5), { metric: "pe_ttm", value: 21.5 });
+assert.deepEqual(canonicalizeRatio("price_to_sales", 8.2), { metric: "ps_ttm", value: 8.2 });
+assert.deepEqual(canonicalizeRatio("price_to_sales_ttm", 8.2), { metric: "ps_ttm", value: 8.2 });
+assert.deepEqual(
+  canonicalizeRatio("profit_margin", 0.253),
+  { metric: "net_margin_pct_ttm", value: 25.3 },
+  "Yahoo fraction should normalize to percentage points"
+);
+assert.deepEqual(
+  canonicalizeRatio("net_profit_margin_ttm", 25.3),
+  { metric: "net_margin_pct_ttm", value: 25.3 },
+  "Investing percentage points should keep their unit"
+);
+assert.deepEqual(canonicalizeRatio("return_on_equity", 0.42), { metric: "roe_pct_ttm", value: 42 });
+assert.deepEqual(canonicalizeRatio("return_on_equity_ttm", 42), { metric: "roe_pct_ttm", value: 42 });
+assert.deepEqual(canonicalizeRatio("unknown_provider_metric", 7), { metric: "unknown_provider_metric", value: 7 });
+
+const primaryRows = canonicalizeStoredRatioRows(
+  [
+    { metric: "pe_ttm", value: "99", as_of: "2026-09-03", source: "investing" },
+    { metric: "trailing_pe", value: "20", as_of: "2026-09-01", source: "yahoo" },
+  ],
+  "yahoo"
+);
+assert.equal(
+  primaryRows.find((r) => r.metric === "pe_ttm")?.value,
+  20,
+  "primary provider remains authoritative even when fallback has a newer observation"
+);
+
+const freshSameProvider = canonicalizeStoredRatioRows(
+  [
+    { metric: "trailing_pe", value: "18", as_of: "2026-08-01", source: "yahoo" },
+    { metric: "pe_ratio_ttm", value: "21", as_of: "2026-09-01", source: "yahoo" },
+  ],
+  "yahoo"
+);
+assert.equal(
+  freshSameProvider.find((r) => r.metric === "pe_ttm")?.value,
+  21,
+  "within one provider, the newest legacy alias observation wins"
+);
+
+const canonicalTie = canonicalizeStoredRatioRows(
+  [
+    { metric: "profit_margin", value: "0.99", as_of: "2026-09-01", source: "yahoo" },
+    { metric: "net_margin_pct_ttm", value: "25.3", as_of: "2026-09-01", source: "yahoo" },
+  ],
+  "yahoo"
+);
+assert.equal(
+  canonicalTie.find((r) => r.metric === "net_margin_pct_ttm")?.value,
+  25.3,
+  "canonical ID wins a same-provider same-date tie over a legacy alias"
+);
 
 // ── RateLimiter: concurrent callers reserve distinct send slots ──
 
