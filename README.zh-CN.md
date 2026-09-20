@@ -85,10 +85,12 @@ npm run server      # stdio；其余命令用 npm run sync -- ... 或 npm run de
 
 ```bash
 # 需要本地 MySQL（默认 127.0.0.1:3306，见 deploy/docker-compose.mysql.yml）且已初始化表结构
-npm run test:cli   # CLI 行为：version / help / 未知命令处理（无需数据库）
-npm run test:db    # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
-npm run test:mcp   # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
-npm test           # 三者一起
+npm run test:cli        # CLI 行为：version / help / 未知命令处理（无需数据库）
+npm run test:providers  # 数据源优先级与 provider 提取逻辑（无需数据库）
+npm run test:indicators # 技术指标 fixtures 与边界情况（无需数据库）
+npm run test:db         # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
+npm run test:mcp        # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
+npm test                # 五组测试全部执行
 ```
 
 测试使用独立的 `ZZTEST` 标的，跑完自动清理，不会动已有数据。
