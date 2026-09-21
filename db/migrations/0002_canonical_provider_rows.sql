@@ -1,9 +1,7 @@
 -- Canonicalize dividends/company_events across providers.
 -- db.ts sets @yahoo_stock_mcp_primary_provider from runtime config; default to Yahoo
 -- when this file is executed manually.
-SET @canonical_primary_provider =
-  CONVERT(COALESCE(@yahoo_stock_mcp_primary_provider, 'yahoo') USING utf8mb4)
-  COLLATE utf8mb4_unicode_ci;
+SET @canonical_primary_provider = COALESCE(@yahoo_stock_mcp_primary_provider, 'yahoo');
 
 -- Preserve useful nullable dividend fields from the fallback row before removing it.
 UPDATE dividends p
@@ -15,16 +13,16 @@ SET
   p.pay_date = COALESCE(p.pay_date, f.pay_date),
   p.ttm_dividend = COALESCE(p.ttm_dividend, f.ttm_dividend),
   p.yield_pct = COALESCE(p.yield_pct, f.yield_pct)
-WHERE p.source = @canonical_primary_provider
-  AND f.source <> @canonical_primary_provider;
+WHERE CAST(p.source AS BINARY) = CAST(@canonical_primary_provider AS BINARY)
+  AND CAST(f.source AS BINARY) <> CAST(@canonical_primary_provider AS BINARY);
 
 DELETE loser
 FROM dividends loser
 JOIN dividends winner
   ON winner.instrument_id = loser.instrument_id
  AND winner.ex_date = loser.ex_date
- AND winner.source = @canonical_primary_provider
-WHERE loser.source <> @canonical_primary_provider;
+ AND CAST(winner.source AS BINARY) = CAST(@canonical_primary_provider AS BINARY)
+WHERE CAST(loser.source AS BINARY) <> CAST(@canonical_primary_provider AS BINARY);
 
 -- Defensive cleanup for unexpected legacy source tags when no configured-primary row exists.
 DELETE later
@@ -46,16 +44,16 @@ JOIN company_events f
  AND f.event_type = p.event_type
  AND f.source <> p.source
 SET p.details = COALESCE(p.details, f.details)
-WHERE p.source = @canonical_primary_provider
-  AND f.source <> @canonical_primary_provider;
+WHERE CAST(p.source AS BINARY) = CAST(@canonical_primary_provider AS BINARY)
+  AND CAST(f.source AS BINARY) <> CAST(@canonical_primary_provider AS BINARY);
 
 DELETE loser
 FROM company_events loser
 JOIN company_events winner
   ON winner.instrument_id = loser.instrument_id
  AND winner.event_type = loser.event_type
- AND winner.source = @canonical_primary_provider
-WHERE loser.source <> @canonical_primary_provider;
+ AND CAST(winner.source AS BINARY) = CAST(@canonical_primary_provider AS BINARY)
+WHERE CAST(loser.source AS BINARY) <> CAST(@canonical_primary_provider AS BINARY);
 
 DELETE later
 FROM company_events later
