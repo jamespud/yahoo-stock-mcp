@@ -31,7 +31,8 @@ yahoo-stock-mcp --help           # 打印使用说明（也可用：yahoo-stock-
 #    本地临时开发库可用 deploy/docker-compose.mysql.yml 起一个：
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 2. 初始化新的/空数据库（bootstrap schema + 全部迁移）
+# 2. 初始化配置的数据库。
+#    如果目标库不存在且当前账号拥有 CREATE DATABASE 权限，db:init 会先创建数据库。
 yahoo-stock-mcp db:init
 
 # 已有数据库升级：只执行尚未应用的迁移
@@ -63,7 +64,7 @@ Usage: yahoo-stock-mcp <command> [options]
 
 Commands:
   server                启动 MCP server（stdio，无参数时默认执行）
-  db:init               创建 bootstrap schema 并执行全部迁移
+  db:init               缺库时先创建，再安装 bootstrap schema 与全部迁移
   db:migrate            对已有数据库执行尚未应用的迁移
   sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 MySQL
   version               打印版本号
@@ -90,7 +91,8 @@ npm run db:migrate  # 执行尚未应用的数据库迁移
 
 `db/schema.sql` 是 bootstrap baseline。之后发布的结构变更放在 `db/migrations/` 下，按编号顺序执行且发布后不可修改；
 已应用版本和 SHA-256 checksum 记录在 `schema_migrations`。新数据库使用 `db:init`，已有安装升级使用
-`db:migrate`。迁移通过 MySQL advisory lock 串行化。由于 MySQL 的很多 DDL 会隐式提交，迁移文件应尽量保持
+`db:migrate`。如果配置的数据库不存在，`db:init` 会先尝试创建；只有首次创建缺失数据库时需要
+`CREATE DATABASE` 权限，目标库已经存在时不需要。bootstrap 接受的数据库名限制为 1–64 位 ASCII 字母、数字或下划线。迁移通过 MySQL advisory lock 串行化。由于 MySQL 的很多 DDL 会隐式提交，迁移文件应尽量保持
 单一、前向且小粒度的结构变更。
 
 ## 测试
@@ -101,6 +103,7 @@ npm run test:cli        # CLI 行为：version / help / 未知命令处理（无
 npm run test:providers  # 数据源优先级与 provider 提取逻辑（无需数据库）
 npm run test:indicators # 技术指标 fixtures 与边界情况（无需数据库）
 npm run test:db         # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
+npm run test:db-bootstrap # 可选缺失数据库 bootstrap 集成测试（需 YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL）
 npm run test:mcp        # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
 npm test                # 五组测试全部执行
 ```

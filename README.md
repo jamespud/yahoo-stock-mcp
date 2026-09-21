@@ -31,7 +31,8 @@ yahoo-stock-mcp --help           # print usage (also: yahoo-stock-mcp help sync)
 #    For a local dev database you can spin one up with deploy/docker-compose.mysql.yml:
 #    docker compose -f deploy/docker-compose.mysql.yml up -d
 
-# 2. Initialise a new/empty database (bootstrap schema + all migrations)
+# 2. Initialise the configured database.
+#    If it does not exist, db:init creates it first when the configured user has CREATE DATABASE privilege.
 yahoo-stock-mcp db:init
 
 # Existing installation: apply only pending migrations
@@ -63,7 +64,7 @@ Usage: yahoo-stock-mcp <command> [options]
 
 Commands:
   server                 Start the MCP server over stdio (default with no arguments)
-  db:init                Create the bootstrap schema and apply all migrations
+  db:init                Create the database if missing, then bootstrap schema + migrations
   db:migrate             Apply pending migrations to an existing database
   sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
   version                Print the version number
@@ -90,7 +91,7 @@ npm run db:migrate  # apply pending database migrations
 
 `db/schema.sql` is the bootstrap baseline. Released schema changes are immutable, ordered files under
 `db/migrations/`; applied versions and SHA-256 checksums are stored in `schema_migrations`.
-Use `db:init` for a new database and `db:migrate` when upgrading an existing installation.
+Use `db:init` for a new database and `db:migrate` when upgrading an existing installation. If the configured database is missing, `db:init` attempts to create it first; that initial creation requires `CREATE DATABASE` privilege, while initializing an already-existing database does not. Database names accepted by the bootstrap path are limited to 1–64 ASCII letters, digits, or underscores.
 Migration execution is serialized with a MySQL advisory lock. Because MySQL implicitly commits many
 DDL statements, migrations should keep structural changes small and forward-only.
 
@@ -102,6 +103,7 @@ npm run test:cli        # CLI behaviour: version / help / unknown-command handli
 npm run test:providers  # provider-priority and provider extraction tests (no DB required)
 npm run test:indicators # technical-indicator fixtures and edge cases (no DB required)
 npm run test:db         # query layer: all query functions, LIMIT binding regression, edge params
+npm run test:db-bootstrap # optional missing-database bootstrap integration (needs YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL)
 npm run test:mcp        # protocol layer: initialize/tools/list/tools/call end-to-end + stdin close exit
 npm test                # all five groups
 ```

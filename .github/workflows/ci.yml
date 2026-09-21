@@ -22,6 +22,7 @@ jobs:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: root123
+          MYSQL_ROOT_HOST: "%"
           MYSQL_DATABASE: yahoo_stock_mcp
           MYSQL_USER: stock
           MYSQL_PASSWORD: stock123
@@ -46,6 +47,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+      - name: Test missing-database bootstrap
+        if: matrix.node == 22
+        env:
+          YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
+        run: npm run test:db-bootstrap
 
   go:
     name: Go sidecar

@@ -12,6 +12,41 @@ const PACKAGE_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MIGRATIONS_DIR = resolve(PACKAGE_ROOT, "db", "migrations");
 const MIGRATION_FILE_RE = /^\d{4}_[A-Za-z0-9][A-Za-z0-9_-]*\.sql$/;
 
+const DATABASE_IDENTIFIER_RE = /^[A-Za-z0-9_]{1,64}$/;
+
+export function validateDatabaseIdentifier(name: string): string {
+  if (!DATABASE_IDENTIFIER_RE.test(name)) {
+    throw new Error(
+      `Invalid database name ${JSON.stringify(name)}; use 1-64 ASCII letters, digits, or underscores`
+    );
+  }
+  return name;
+}
+
+export function databaseServerUrl(databaseUrl: string): string {
+  const url = new URL(databaseUrl);
+  url.pathname = "/";
+  return url.toString();
+}
+
+async function createConfiguredDatabase(): Promise<void> {
+  const database = validateDatabaseIdentifier(config.db.database);
+  let conn: mysql.Connection | null = null;
+  try {
+    conn = await mysql.createConnection(databaseServerUrl(config.databaseUrl));
+    await conn.query(
+      `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+    );
+  } catch (err: any) {
+    throw new Error(
+      `Database "${database}" does not exist and user "${config.db.user}" could not create it: ` +
+      `${err?.message ?? String(err)}. Grant CREATE DATABASE privileges or pre-create the database.`
+    );
+  } finally {
+    if (conn) await conn.end().catch(() => undefined);
+  }
+}
+
 export interface MigrationFile {
   version: string;
   name: string;
@@ -172,15 +207,27 @@ async function assertBootstrapSchemaExists(conn: mysql.PoolConnection): Promise<
 }
 
 export async function initSchema(): Promise<void> {
+  const database = validateDatabaseIdentifier(config.db.database);
   const schemaPath = resolve(PACKAGE_ROOT, "db", "schema.sql");
   // db/schema.sql is the bootstrap baseline. Existing databases are evolved only
   // by ordered files under db/migrations/.
   const sql = readFileSync(schemaPath, "utf8").replace(
     /\byahoo_stock_mcp\b/g,
-    () => config.db.database
+    () => `\`${database}\``
   );
 
-  const conn = await getConnection();
+  let conn: mysql.PoolConnection;
+  try {
+    conn = await getPool().getConnection();
+  } catch (err: any) {
+    if (err?.errno !== 1049) throw configuredDbHint(err);
+    await createConfiguredDatabase();
+    if (pool) {
+      await pool.end();
+      pool = null;
+    }
+    conn = await getConnection();
+  }
   try {
     const applied = await withMigrationLock(conn, async () => {
       const [bootstrap] = await conn.query<any[]>("SHOW TABLES LIKE 'instruments'");
