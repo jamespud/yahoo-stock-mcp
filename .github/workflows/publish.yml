@@ -59,8 +59,11 @@ jobs:
       - name: Build release artifacts once
         run: npm run build:all
 
+      - name: Verify sidecar artifacts
+        run: npm run verify:sidecars
+
       - name: Verify package contents
-        run: npm pack --dry-run --ignore-scripts
+        run: npm run verify:package
 
       - name: Publish
         run: npm publish --ignore-scripts
