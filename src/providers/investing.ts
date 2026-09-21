@@ -11,8 +11,7 @@ const GQL_URL = "https://gql.api.investing.com/graphql";
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
-type Transport = "auto" | "node" | "go";
-let transport: Transport = (env("INVESTING_TRANSPORT") as Transport) ?? "auto";
+let transport = config.investingTransport;
 let sidecarPath: string | null = null;
 
 const SIDECAR_FILES: Record<string, string> = {

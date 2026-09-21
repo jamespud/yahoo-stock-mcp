@@ -25,6 +25,17 @@ export function parseBarsProvider(raw: string | undefined | null): BarsProvider 
   );
 }
 
+export type InvestingTransport = "auto" | "node" | "go";
+
+export function parseInvestingTransport(raw: string | undefined | null): InvestingTransport {
+  const value = (raw ?? "auto").trim().toLowerCase();
+  if (value === "" || value === "auto") return "auto";
+  if (value === "node" || value === "go") return value;
+  throw new Error(
+    `Invalid YAHOO_STOCK_MCP_INVESTING_TRANSPORT=${JSON.stringify(raw)}; expected "auto", "node", or "go"`
+  );
+}
+
 const DEFAULT_DB = "yahoo_stock_mcp";
 
 interface DbTarget {
@@ -72,6 +83,7 @@ export const config = {
   requestDelayMs: num(env("REQUEST_DELAY_MS"), 300),
   barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
   barsProvider: parseBarsProvider(env("BARS_PROVIDER")),
+  investingTransport: parseInvestingTransport(env("INVESTING_TRANSPORT")),
   /**
    * Which provider is authoritative when both return a value (the other one only fills what the
    * primary lacks). `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`, default yahoo.

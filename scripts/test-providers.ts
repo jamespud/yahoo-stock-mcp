@@ -1,5 +1,6 @@
 // Data-source priority: pure-function tests (no DB, no network).
 import assert from "node:assert/strict";
+import { parseInvestingTransport } from "../src/config.js";
 import { RateLimiter } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
@@ -70,6 +71,20 @@ assert.equal(
   canonicalTie.find((r) => r.metric === "net_margin_pct_ttm")?.value,
   25.3,
   "canonical ID wins a same-provider same-date tie over a legacy alias"
+);
+
+// ── Investing transport config parsing ──
+
+assert.equal(parseInvestingTransport(undefined), "auto");
+assert.equal(parseInvestingTransport(null), "auto");
+assert.equal(parseInvestingTransport(""), "auto");
+assert.equal(parseInvestingTransport(" auto "), "auto");
+assert.equal(parseInvestingTransport("NODE"), "node");
+assert.equal(parseInvestingTransport(" go "), "go");
+assert.throws(
+  () => parseInvestingTransport("foo"),
+  /YAHOO_STOCK_MCP_INVESTING_TRANSPORT=.*foo.*auto.*node.*go/,
+  "invalid transport must fail fast with the env var and accepted values"
 );
 
 // ── gqlproxy platform resolution ──
