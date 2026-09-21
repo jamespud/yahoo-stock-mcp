@@ -1,7 +1,7 @@
 import { httpFetch, httpJson, httpText, HttpError } from "./http.js";
 import { config } from "../config.js";
 import { canonicalizeRatio } from "./ratios.js";
-import type { AnalystAction, Bar, CompanyEvent, Dividend, EarningsTrendRow, FinancialField, FundHolder, HolderBreakdown, InsiderTransaction, IntradayBar, NewsItem, OptionChain, OptionQuote, RatioValue, RecommendationTrendRow, ShortInterest } from "./types.js";
+import type { AnalystAction, Bar, CompanyEvent, Dividend, EarningsTrendRow, FinancialField, FundHolder, Holder, HolderBreakdown, InsiderTransaction, IntradayBar, NewsItem, OptionChain, OptionQuote, RatioValue, RecommendationTrendRow, ShortInterest } from "./types.js";
 
 const CHART_HOST = "https://query1.finance.yahoo.com";
 const COOKIE_URL = "https://fc.yahoo.com/";
@@ -405,9 +405,12 @@ export function extractDividendsFromSummary(modules: Record<string, any>): Divid
 // ── data-checklist extraction (quoteSummary modules) ───────────
 
 function unixToDate(u: any): string | null {
-  const n = num(u);
-  if (n == null) return null;
-  return new Date(n * 1000).toISOString().slice(0, 10);
+  const raw = num(u);
+  const n = Number(raw);
+  if (raw == null || !Number.isFinite(n)) return null;
+  const date = new Date(n * 1000);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }
 
 export function extractShortInterest(modules: Record<string, any>): ShortInterest | null {
@@ -537,6 +540,26 @@ export function extractRecommendationTrend(modules: Record<string, any>): Recomm
       hold: num(t.hold),
       sell: num(t.sell),
       strongSell: num(t.strongSell),
+      source: "yahoo",
+    });
+  }
+  return out;
+}
+
+export function extractInstitutionalHolders(modules: Record<string, any>): Holder[] {
+  const out: Holder[] = [];
+  for (const o of modules.institutionOwnership?.ownershipList ?? []) {
+    const holdingDate = unixToDate(o.reportDate?.raw ?? o.reportDate);
+    if (!holdingDate || !o.organization) continue;
+    const pctHeld = num(o.pctHeld);
+    out.push({
+      holdingDate,
+      ownerName: o.organization,
+      sharesHeld: num(o.position),
+      percentOfShares: pctHeld != null ? pctHeld * 100 : null,
+      percentOfPortfolio: null,
+      sharesChanged: null,
+      totalValue: num(o.value),
       source: "yahoo",
     });
   }

@@ -9,6 +9,7 @@ import {
   extractEarningsTrend,
   extractFundHolders,
   extractHolderBreakdown,
+  extractInstitutionalHolders,
   extractInsiderTransactions,
   extractRatiosFromSummary,
   extractRecommendationTrend,
@@ -842,24 +843,22 @@ export async function syncOne(
     }
 
     // holders from yahoo institutionOwnership
-    const ownership = modules.institutionOwnership?.ownershipList ?? [];
-    const holdDate = new Date().toISOString().slice(0, 10);
-    const holderStmts = ownership
-      .filter((o: any) => o.organization)
+    const holderStmts = extractInstitutionalHolders(modules)
       .slice(0, 30)
-      .map((o: any): [string, any[]] => [
+      .map((h): [string, any[]] => [
         `INSERT INTO holders (instrument_id, holding_date, owner_name, shares_held, percent_of_shares, percent_of_portfolio, shares_changed, total_value, source)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
          ON DUPLICATE KEY UPDATE shares_held = VALUES(shares_held), percent_of_shares = VALUES(percent_of_shares),
            total_value = VALUES(total_value)`,
         [
           instrument.id,
-          (() => { const ts = yahooNum(o.reportDate); return ts ? new Date(ts * 1000).toISOString().slice(0, 10) : holdDate; })(),
-          o.organization,
-          yahooNum(o.position),
-          (() => { const pct = yahooNum(o.pctHeld); return pct != null ? pct * 100 : null; })(),          null,
-          null,
-          yahooNum(o.value),
+          h.holdingDate,
+          h.ownerName,
+          h.sharesHeld,
+          h.percentOfShares,
+          h.percentOfPortfolio,
+          h.sharesChanged,
+          h.totalValue,
         ],
       ]);
     if (holderStmts.length) await runBatch(holderStmts);

@@ -24,6 +24,7 @@ import {
   classifyYahooFinancialStatement,
   extractCalendarEvents,
   extractDividendsFromSummary,
+  extractInstitutionalHolders,
   extractShortInterest,
 } from "../src/providers/yahoo.js";
 
@@ -523,6 +524,83 @@ assert.deepEqual(
   extractDividendsFromSummary({ summaryDetail: { lastDividendDate: { raw: dividendTs } } }),
   [],
   "date without amount should not create a dividend row"
+);
+
+// ── institutional holders: never synthesize a provider report date ──
+
+const institutionalWrappedTs = Date.UTC(2026, 5, 30) / 1000;
+const institutionalDirectTs = Date.UTC(2026, 8, 30) / 1000;
+assert.deepEqual(
+  extractInstitutionalHolders({
+    institutionOwnership: {
+      ownershipList: [
+        {
+          reportDate: { raw: institutionalWrappedTs },
+          organization: "Wrapped Date Capital",
+          pctHeld: { raw: 0.081 },
+          position: { raw: 1234 },
+          value: { raw: 5678 },
+        },
+        {
+          reportDate: institutionalDirectTs,
+          organization: "Direct Date Partners",
+          pctHeld: 0.02,
+          position: 4321,
+          value: 8765,
+        },
+        {
+          organization: "Missing Date Asset Management",
+          pctHeld: { raw: 0.03 },
+          position: { raw: 999 },
+          value: { raw: 111 },
+        },
+        {
+          reportDate: { raw: "not-a-timestamp" },
+          organization: "Invalid Date Capital",
+          pctHeld: { raw: 0.035 },
+          position: { raw: 777 },
+          value: { raw: 333 },
+        },
+        {
+          reportDate: 1e30,
+          organization: "Out Of Range Partners",
+          pctHeld: { raw: 0.036 },
+          position: { raw: 666 },
+          value: { raw: 444 },
+        },
+        {
+          reportDate: { raw: institutionalWrappedTs },
+          organization: "",
+          pctHeld: { raw: 0.04 },
+          position: { raw: 888 },
+          value: { raw: 222 },
+        },
+      ],
+    },
+  }),
+  [
+    {
+      holdingDate: "2026-06-30",
+      ownerName: "Wrapped Date Capital",
+      sharesHeld: 1234,
+      percentOfShares: 8.1,
+      percentOfPortfolio: null,
+      sharesChanged: null,
+      totalValue: 5678,
+      source: "yahoo",
+    },
+    {
+      holdingDate: "2026-09-30",
+      ownerName: "Direct Date Partners",
+      sharesHeld: 4321,
+      percentOfShares: 2,
+      percentOfPortfolio: null,
+      sharesChanged: null,
+      totalValue: 8765,
+      source: "yahoo",
+    },
+  ],
+  "institutional holders should keep Yahoo report dates and skip missing, invalid, out-of-range, or anonymous rows"
 );
 
 // ── short interest: provider observation date is the snapshot identity ──
