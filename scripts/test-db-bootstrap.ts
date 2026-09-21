@@ -4,12 +4,13 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
-import { validateDatabaseIdentifier } from "../src/db.js";
+import { loadMigrations, validateDatabaseIdentifier } from "../src/db.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
 const cliEntry = resolve(root, "src/cli.ts");
 const adminUrl = process.env.YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL;
+const expectedMigrationVersions = loadMigrations().map((migration) => migration.version);
 
 assert.equal(validateDatabaseIdentifier("stock_test_2026"), "stock_test_2026");
 assert.throws(() => validateDatabaseIdentifier("bad-name"), /Invalid database name/);
@@ -91,13 +92,7 @@ try {
     );
     assert.deepEqual(
       migrations.map((row) => String(row.version)),
-      [
-        "0001_baseline",
-        "0002_canonical_provider_rows",
-        "0003_create_news_relations",
-        "0004_backfill_news_relations",
-        "0005_drop_legacy_news",
-      ],
+      expectedMigrationVersions,
       "db:init should run every packaged migration after creating the database"
     );
   } finally {
