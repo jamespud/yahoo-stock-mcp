@@ -184,6 +184,7 @@ financial fields, dividends, forward events), Yahoo's value wins and investing o
 did not provide. Dividends are canonical by `(instrument, ex_date)` and forward events by
 `(instrument, event_type)`; provider identity is provenance, not part of those business keys.
 For these canonical rows, NULL fields from the primary do not erase useful fallback values.
+`get_financials` keeps provenance per field in `fieldSources`; a statement-period whose fields come from both providers reports `source: "mixed"`.
 Set `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` to flip the precedence. Building an instrument
 no longer calls investing when Yahoo already returned its identity, so a new ticker (or a whole sector
 sync) does not wait on investing's 403 retries.
