@@ -270,6 +270,16 @@ async function main() {
       2
     );
 
+    // Restore the shared forecast fixture for the pre-existing query regressions below.
+    await query(
+      "DELETE FROM analyst_forecasts WHERE instrument_id = ? AND source = 'yahoo'",
+      [id]
+    );
+    await query(
+      "DELETE FROM analyst_forecasts WHERE instrument_id = ? AND source = 'investing' AND as_of <> '2026-08-01 00:00:00'",
+      [id]
+    );
+
     // --- search_symbol regression (LIMIT used to be bound as DOUBLE) ---
     const hits = await q.searchSymbols(TEST_SYMBOL);
     assert.ok(hits.some((h: any) => h.symbol === TEST_SYMBOL), "searchSymbols should find seeded instrument");
