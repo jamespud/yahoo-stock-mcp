@@ -22,6 +22,7 @@ import {
 } from "../src/providers/priority.js";
 import {
   classifyYahooFinancialStatement,
+  parseYahooFundamentalsResponse,
   extractCalendarEvents,
   extractDividendsFromSummary,
   extractInstitutionalHolders,
@@ -491,6 +492,97 @@ assert.equal(
   classifyYahooFinancialStatement("annualUnknownMetric"),
   null,
   "unknown Yahoo fundamentals must not silently default to CASHFLOW"
+);
+
+assert.throws(
+  () =>
+    parseYahooFundamentalsResponse(
+      {
+        timeseries: {
+          result: [
+            {
+              meta: { symbol: ["AAPL"], type: ["annualTotalRevenue"] },
+              timestamp: [],
+            },
+          ],
+        },
+      },
+      ["annualTotalRevenue"]
+    ),
+  /no requested data series.*annualTotalRevenue/,
+  "meta-only fundamentals response should surface an upstream contract failure"
+);
+
+assert.deepEqual(
+  parseYahooFundamentalsResponse(
+    {
+      timeseries: {
+        result: [
+          {
+            meta: { symbol: ["AAPL"], type: ["annualTotalRevenue"] },
+            timestamp: [1758931200],
+            annualTotalRevenue: [
+              {
+                asOfDate: "2025-09-27",
+                reportedValue: { raw: 416161000000 },
+                currencyCode: "USD",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ["annualTotalRevenue"]
+  ),
+  [
+    {
+      statementType: "INCOME",
+      periodType: "ANNUAL",
+      periodEnd: "2025-09-27",
+      fieldName: "Total Revenue",
+      value: 416161000000,
+      currency: "USD",
+      source: "yahoo",
+    },
+  ],
+  "requested fundamentals series should parse as before"
+);
+
+assert.deepEqual(
+  parseYahooFundamentalsResponse(
+    {
+      timeseries: {
+        result: [
+          {
+            meta: { symbol: ["AAPL"], type: ["quarterlyNetIncome"] },
+            quarterlyNetIncome: [],
+          },
+        ],
+      },
+    },
+    ["quarterlyNetIncome"]
+  ),
+  [],
+  "present but empty requested series should remain a legitimate empty result"
+);
+
+assert.throws(
+  () =>
+    parseYahooFundamentalsResponse(
+      {
+        timeseries: {
+          result: [
+            {
+              meta: { symbol: ["AAPL"], type: ["annualNetIncome"] },
+              annualNetIncome: [],
+            },
+          ],
+        },
+      },
+      ["annualTotalRevenue"]
+    ),
+  /no requested data series.*annualTotalRevenue/,
+  "unrequested series must not satisfy the requested-series guard"
 );
 
 // ── dividends: never synthesize a provider date ──
