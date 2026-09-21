@@ -178,6 +178,199 @@ async function main() {
     await query("DELETE FROM instrument_news WHERE news_id = 'zztest-legacy-news'");
     await query("DELETE FROM news_articles WHERE id = 'zztest-legacy-news'");
 
+    for (const version of [
+      "0006_dedupe_insider_transactions",
+      "0007_normalize_insider_unique_key",
+      "0008_dedupe_analyst_actions",
+      "0009_normalize_analyst_action_unique_key",
+    ]) {
+      assert.ok(migrations.some((m) => m.version === version), `${version} should be packaged`);
+    }
+
+    // Recreate the legacy nullable UNIQUE keys: MySQL permits multiple NULL-bearing rows.
+    await query(
+      `ALTER TABLE insider_transactions
+         DROP INDEX uq_insider_norm,
+         DROP COLUMN transaction_text_key,
+         ADD UNIQUE KEY uq_insider (instrument_id, transaction_date, insider_name, transaction_text)`
+    );
+    await query(
+      `ALTER TABLE analyst_actions
+         DROP INDEX uq_action_norm,
+         DROP COLUMN firm_key,
+         DROP COLUMN to_grade_key,
+         DROP COLUMN from_grade_key,
+         DROP COLUMN action_type_key,
+         DROP COLUMN price_target_action_key,
+         ADD UNIQUE KEY uq_action (instrument_id, action_date, firm, to_grade, from_grade)`
+    );
+
+    await query(
+      `INSERT INTO insider_transactions
+         (instrument_id, transaction_date, insider_name, transaction_text, shares, value, source)
+       VALUES
+         (?, '2026-08-15', 'ZZ Null Insider', NULL, 10, 1000, 'yahoo'),
+         (?, '2026-08-15', 'ZZ Null Insider', NULL, 20, 2000, 'yahoo')`,
+      [id, id]
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM insider_transactions WHERE instrument_id = ? AND insider_name = 'ZZ Null Insider'",
+        [id]
+      ))[0].n),
+      2,
+      "legacy nullable insider key should demonstrate the duplicate bug"
+    );
+
+    await query(
+      `INSERT INTO analyst_actions
+         (instrument_id, action_date, firm, from_grade, to_grade, action_type, price_target_action,
+          current_price_target, prior_price_target, source)
+       VALUES
+         (?, '2026-08-15', NULL, NULL, NULL, 'maintain', 'targetRaised', 100, 90, 'yahoo'),
+         (?, '2026-08-15', NULL, NULL, NULL, 'maintain', 'targetRaised', 110, 90, 'yahoo'),
+         (?, '2026-08-15', NULL, NULL, NULL, 'up',       'targetRaised', 120, 90, 'yahoo'),
+         (?, '2026-08-15', NULL, NULL, NULL, 'maintain', 'targetLowered', 80, 90, 'yahoo')`,
+      [id, id, id, id]
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_actions WHERE instrument_id = ? AND action_date = '2026-08-15' AND firm IS NULL",
+        [id]
+      ))[0].n),
+      4,
+      "legacy nullable analyst key should allow duplicate and distinct actions alike"
+    );
+
+    await query(
+      "DELETE FROM schema_migrations WHERE version IN ('0006_dedupe_insider_transactions','0007_normalize_insider_unique_key','0008_dedupe_analyst_actions','0009_normalize_analyst_action_unique_key')"
+    );
+    assert.deepEqual(
+      await migrateSchema(),
+      [
+        "0006_dedupe_insider_transactions",
+        "0007_normalize_insider_unique_key",
+        "0008_dedupe_analyst_actions",
+        "0009_normalize_analyst_action_unique_key",
+      ],
+      "nullable business keys should migrate through dedupe + normalized-index steps"
+    );
+
+    const migratedInsiders = await query<any[]>(
+      `SELECT transaction_text, shares, value
+       FROM insider_transactions
+       WHERE instrument_id = ? AND insider_name = 'ZZ Null Insider'`,
+      [id]
+    );
+    assert.equal(migratedInsiders.length, 1, "legacy NULL-key insider duplicates should collapse");
+    assert.equal(Number(migratedInsiders[0].shares), 20, "dedupe should keep the newest insider copy");
+    assert.equal(migratedInsiders[0].transaction_text, null, "API-visible nullable value stays NULL");
+
+    await query(
+      `INSERT INTO insider_transactions
+         (instrument_id, transaction_date, insider_name, transaction_text, shares, value, source)
+       VALUES (?, '2026-08-15', 'ZZ Null Insider', NULL, 30, 3000, 'yahoo')
+       ON DUPLICATE KEY UPDATE shares = VALUES(shares), value = VALUES(value)`,
+      [id]
+    );
+    const insiderAfterUpsert = await query<any[]>(
+      `SELECT transaction_text, shares, value
+       FROM insider_transactions
+       WHERE instrument_id = ? AND insider_name = 'ZZ Null Insider'`,
+      [id]
+    );
+    assert.equal(insiderAfterUpsert.length, 1, "post-migration NULL-key insider upsert must remain idempotent");
+    assert.equal(Number(insiderAfterUpsert[0].shares), 30);
+
+    const migratedActions = await query<any[]>(
+      `SELECT firm, from_grade, to_grade, action_type, price_target_action, current_price_target
+       FROM analyst_actions
+       WHERE instrument_id = ? AND action_date = '2026-08-15' AND firm IS NULL
+       ORDER BY action_type, price_target_action`,
+      [id]
+    );
+    assert.equal(
+      migratedActions.length,
+      3,
+      "only the exact logical analyst duplicate should collapse; distinct action/target-action rows remain"
+    );
+    const maintainedRaised = migratedActions.find(
+      (row) => row.action_type === "maintain" && row.price_target_action === "targetRaised"
+    );
+    assert.equal(Number(maintainedRaised?.current_price_target), 110, "dedupe should keep the newest analyst copy");
+    assert.ok(
+      migratedActions.some((row) => row.action_type === "up" && row.price_target_action === "targetRaised"),
+      "different action_type must remain distinct"
+    );
+    assert.ok(
+      migratedActions.some((row) => row.action_type === "maintain" && row.price_target_action === "targetLowered"),
+      "different price_target_action must remain distinct"
+    );
+
+    await query(
+      `INSERT INTO analyst_actions
+         (instrument_id, action_date, firm, from_grade, to_grade, action_type, price_target_action,
+          current_price_target, prior_price_target, source)
+       VALUES (?, '2026-08-15', NULL, NULL, NULL, 'maintain', 'targetRaised', 130, 90, 'yahoo')
+       ON DUPLICATE KEY UPDATE current_price_target = VALUES(current_price_target)`,
+      [id]
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_actions WHERE instrument_id = ? AND action_date = '2026-08-15' AND firm IS NULL",
+        [id]
+      ))[0].n),
+      3,
+      "post-migration nullable analyst upsert must not append another duplicate"
+    );
+
+    const insiderIndex = await query<any[]>(
+      "SHOW INDEX FROM insider_transactions WHERE Key_name = 'uq_insider_norm'"
+    );
+    assert.deepEqual(
+      insiderIndex
+        .sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index))
+        .map((row) => row.Column_name),
+      ["instrument_id", "transaction_date", "insider_name", "transaction_text_key"]
+    );
+    const actionIndex = await query<any[]>(
+      "SHOW INDEX FROM analyst_actions WHERE Key_name = 'uq_action_norm'"
+    );
+    assert.deepEqual(
+      actionIndex
+        .sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index))
+        .map((row) => row.Column_name),
+      [
+        "instrument_id",
+        "action_date",
+        "firm_key",
+        "to_grade_key",
+        "from_grade_key",
+        "action_type_key",
+        "price_target_action_key",
+      ]
+    );
+
+    const insiderApi = await q.getInsiderTransactions(TEST_SYMBOL, 100);
+    assert.equal(
+      insiderApi?.transactions.find((row: any) => row.insider_name === "ZZ Null Insider")?.transaction_text,
+      null,
+      "generated dedupe columns must not leak into or alter the API-visible nullable field"
+    );
+    const analystApi = await q.getAnalystActions(TEST_SYMBOL, 100);
+    assert.ok(
+      analystApi?.actions.some((row: any) => row.action_date && row.firm === null),
+      "generated analyst key columns must not require replacing nullable API fields with empty strings"
+    );
+
+    await query(
+      "DELETE FROM insider_transactions WHERE instrument_id = ? AND insider_name = 'ZZ Null Insider'",
+      [id]
+    );
+    await query(
+      "DELETE FROM analyst_actions WHERE instrument_id = ? AND action_date = '2026-08-15' AND firm IS NULL",
+      [id]
+    );
 
     assert.equal(
       summarizeSyncStatus({ bars: { status: "ok" }, news: { status: "failed", error: "boom" } }),
