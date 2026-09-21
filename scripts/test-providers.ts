@@ -25,11 +25,11 @@ import {
   shouldOverride,
 } from "../src/providers/priority.js";
 import {
+  buildYahooFundamentalsUrl,
   classifyYahooFinancialStatement,
   extractRatiosFromSummary,
-  extractYahooIncomeStatements,
-  parseYahooFundamentalsResponse,
   YAHOO_SUMMARY_MODULES,
+  parseYahooFundamentalsResponse,
   extractCalendarEvents,
   extractDividendsFromSummary,
   extractInstitutionalHolders,
@@ -495,16 +495,6 @@ assert.deepEqual(fieldMerge.params, ["yahoo", "yahoo", "yahoo", "yahoo", "yahoo"
 // ── Yahoo fundamentals: explicit financial-statement classification ──
 
 assert.equal(
-  YAHOO_SUMMARY_MODULES.includes("incomeStatementHistory"),
-  true,
-  "quoteSummary should request annual income-statement history"
-);
-assert.equal(
-  YAHOO_SUMMARY_MODULES.includes("incomeStatementHistoryQuarterly"),
-  true,
-  "quoteSummary should request quarterly income-statement history"
-);
-assert.equal(
   YAHOO_SUMMARY_MODULES.includes("topHoldings"),
   true,
   "ETF topHoldings must remain requested"
@@ -513,6 +503,25 @@ assert.equal(
   (YAHOO_SUMMARY_MODULES as readonly string[]).includes("esgScores"),
   false,
   "unused esgScores module should no longer be requested"
+);
+
+const fundamentalsUrl = new URL(
+  buildYahooFundamentalsUrl(
+    "AAPL",
+    ["annualGrossProfit", "annualTotalAssets", "annualOperatingCashFlow"],
+    Date.UTC(2026, 8, 21, 12, 0, 0)
+  )
+);
+assert.equal(fundamentalsUrl.searchParams.get("period1"), "0");
+assert.equal(
+  fundamentalsUrl.searchParams.get("period2"),
+  String(Math.floor(Date.UTC(2026, 8, 21, 12, 0, 0) / 1000)),
+  "fundamentals period2 should use the current Unix time instead of an unbounded/future sentinel"
+);
+assert.equal(
+  fundamentalsUrl.searchParams.get("type"),
+  "annualGrossProfit,annualTotalAssets,annualOperatingCashFlow",
+  "fundamentals request should preserve the requested series list"
 );
 
 const currentOperatingCashFlow = extractRatiosFromSummary(
@@ -540,117 +549,6 @@ assert.equal(
   legacyOperatingCashFlow?.value,
   654321,
   "legacy plural operatingCashflows should remain a compatibility fallback"
-);
-
-const annualIncomeEnd = Date.UTC(2025, 8, 27) / 1000;
-const quarterlyIncomeEnd = Date.UTC(2026, 5, 27) / 1000;
-assert.deepEqual(
-  extractYahooIncomeStatements({
-    financialData: { financialCurrency: "USD" },
-    incomeStatementHistory: {
-      incomeStatementHistory: [
-        {
-          maxAge: 1,
-          endDate: { raw: annualIncomeEnd },
-          totalRevenue: { raw: 416161000000 },
-          grossProfit: { raw: 195201000000 },
-          operatingIncome: { raw: 133050000000 },
-          netIncome: { raw: 112010000000 },
-        },
-      ],
-    },
-    incomeStatementHistoryQuarterly: {
-      incomeStatementHistory: [
-        {
-          endDate: quarterlyIncomeEnd,
-          totalRevenue: 94036000000,
-          netIncome: 23434000000,
-        },
-      ],
-    },
-    balanceSheetHistory: {
-      balanceSheetStatements: [{ endDate: { raw: annualIncomeEnd }, totalAssets: { raw: 1 } }],
-    },
-    cashflowStatementHistory: {
-      cashflowStatements: [{ endDate: { raw: annualIncomeEnd }, netIncome: { raw: 1 } }],
-    },
-  }),
-  [
-    {
-      statementType: "INCOME",
-      periodType: "ANNUAL",
-      periodEnd: "2025-09-27",
-      fieldName: "Total Revenue",
-      value: 416161000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-    {
-      statementType: "INCOME",
-      periodType: "ANNUAL",
-      periodEnd: "2025-09-27",
-      fieldName: "Gross Profit",
-      value: 195201000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-    {
-      statementType: "INCOME",
-      periodType: "ANNUAL",
-      periodEnd: "2025-09-27",
-      fieldName: "Operating Income",
-      value: 133050000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-    {
-      statementType: "INCOME",
-      periodType: "ANNUAL",
-      periodEnd: "2025-09-27",
-      fieldName: "Net Income",
-      value: 112010000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-    {
-      statementType: "INCOME",
-      periodType: "QUARTERLY",
-      periodEnd: "2026-06-27",
-      fieldName: "Total Revenue",
-      value: 94036000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-    {
-      statementType: "INCOME",
-      periodType: "QUARTERLY",
-      periodEnd: "2026-06-27",
-      fieldName: "Net Income",
-      value: 23434000000,
-      currency: "USD",
-      source: "yahoo",
-    },
-  ],
-  "quoteSummary income history should recover only populated INCOME rows"
-);
-
-assert.deepEqual(
-  extractYahooIncomeStatements({
-    incomeStatementHistory: {
-      incomeStatementHistory: [{ maxAge: 1, endDate: { raw: annualIncomeEnd } }],
-    },
-    incomeStatementHistoryQuarterly: {
-      incomeStatementHistory: [{ maxAge: 1 }],
-    },
-    balanceSheetHistory: {
-      balanceSheetStatements: [{ endDate: { raw: annualIncomeEnd }, totalAssets: { raw: 999 } }],
-    },
-    cashflowStatementHistory: {
-      cashflowStatements: [{ endDate: { raw: annualIncomeEnd }, netIncome: { raw: 999 } }],
-    },
-  }),
-  [],
-  "metadata-only income and non-income history must not fabricate financial rows"
 );
 
 for (const typeName of [
