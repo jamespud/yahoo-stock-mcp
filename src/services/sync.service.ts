@@ -23,7 +23,7 @@ import {
   fetchYahooOptions,
   fetchYahooSummary,
 } from "../providers/yahoo.js";
-import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, RatioValue } from "../providers/types.js";
+import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, NewsItem, RatioValue } from "../providers/types.js";
 
 interface InstrumentRow {
   id: number;
@@ -342,6 +342,30 @@ export async function saveCompanyEvents(
     [instrumentId, e.eventType, e.eventDate, e.details, e.source, ...keep.params],
   ]);
   await runBatch(stmts);
+}
+
+export async function saveNews(instrumentId: number, news: NewsItem[]): Promise<void> {
+  if (news.length === 0) return;
+  const statements: Array<[string, any[]]> = [];
+  for (const item of news) {
+    statements.push([
+      `INSERT INTO news_articles (id, symbols, title, link, publisher, published_at, news_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         symbols = COALESCE(VALUES(symbols), symbols),
+         title = COALESCE(VALUES(title), title),
+         link = COALESCE(VALUES(link), link),
+         publisher = COALESCE(VALUES(publisher), publisher),
+         published_at = COALESCE(VALUES(published_at), published_at),
+         news_type = COALESCE(VALUES(news_type), news_type)`,
+      [item.id, item.symbols, item.title, item.link, item.publisher, item.publishedAt, item.type],
+    ]);
+    statements.push([
+      `INSERT IGNORE INTO instrument_news (instrument_id, news_id) VALUES (?, ?)`,
+      [instrumentId, item.id],
+    ]);
+  }
+  await runBatch(statements);
 }
 
 // ── data-checklist persistence (Yahoo modules / Investing calendar) ──
@@ -722,12 +746,7 @@ export async function syncOne(
   // 5. news
   try {
     const news = await fetchYahooNews(instrument.yahoo_symbol ?? symbol, config.newsCount);
-    const newsStmts = news.map((n): [string, any[]] => [
-      `INSERT IGNORE INTO news (id, instrument_id, symbols, title, link, publisher, published_at, news_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [n.id, instrument.id, n.symbols, n.title, n.link, n.publisher, n.publishedAt, n.type],
-    ]);
-    if (newsStmts.length) await runBatch(newsStmts);
+    await saveNews(instrument.id, news);
     result.news = news.length;
     components.news = { status: "ok", count: result.news };
   } catch (e) {

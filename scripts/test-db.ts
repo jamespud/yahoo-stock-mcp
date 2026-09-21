@@ -8,6 +8,7 @@ import {
   persistSyncState,
   saveCompanyEvents,
   saveDividends,
+  saveNews,
   summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
@@ -92,6 +93,74 @@ async function main() {
         `${table} primary key should be provider-independent after migration`
       );
     }
+
+
+    for (const version of [
+      "0003_create_news_relations",
+      "0004_backfill_news_relations",
+      "0005_drop_legacy_news",
+    ]) {
+      assert.ok(migrations.some((m) => m.version === version), `${version} should be packaged`);
+    }
+
+    // Simulate an installation that still has the legacy single-instrument news table, then replay 0003-0005.
+    await query(
+      `CREATE TABLE news (
+         id VARCHAR(64) PRIMARY KEY,
+         instrument_id BIGINT NULL,
+         symbols VARCHAR(255) NULL,
+         title VARCHAR(512) NULL,
+         link VARCHAR(512) NULL,
+         publisher VARCHAR(128) NULL,
+         published_at DATETIME NULL,
+         news_type VARCHAR(32) NULL,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         KEY idx_news_instrument (instrument_id, published_at)
+       ) ENGINE=InnoDB`
+    );
+    await query(
+      `INSERT INTO news (id, instrument_id, symbols, title, link, publisher, published_at, news_type)
+       VALUES ('zztest-legacy-news', ?, 'ZZTEST', 'Legacy News', 'https://example.com/legacy',
+               'Legacy Publisher', '2026-07-31 10:00:00', 'NEWS')`,
+      [id]
+    );
+    await query(
+      "DELETE FROM schema_migrations WHERE version IN ('0003_create_news_relations','0004_backfill_news_relations','0005_drop_legacy_news')"
+    );
+    assert.deepEqual(
+      await migrateSchema(),
+      ["0003_create_news_relations", "0004_backfill_news_relations", "0005_drop_legacy_news"],
+      "legacy news schema should migrate through create/backfill/drop steps"
+    );
+    const legacyArticle = (await query<any[]>(
+      "SELECT title, publisher FROM news_articles WHERE id = 'zztest-legacy-news'"
+    ))[0];
+    assert.deepEqual(
+      legacyArticle,
+      { title: "Legacy News", publisher: "Legacy Publisher" },
+      "legacy article metadata should be preserved"
+    );
+    const legacyLinks = await query<any[]>(
+      "SELECT instrument_id FROM instrument_news WHERE news_id = 'zztest-legacy-news'"
+    );
+    assert.deepEqual(
+      legacyLinks.map((row) => Number(row.instrument_id)),
+      [id],
+      "legacy instrument association should be preserved"
+    );
+    assert.equal(
+      (await query<any[]>("SHOW TABLES LIKE 'news'")).length,
+      0,
+      "legacy news table should be dropped after successful backfill"
+    );
+    await initSchema();
+    assert.equal(
+      (await query<any[]>("SHOW TABLES LIKE 'news'")).length,
+      0,
+      "re-running db:init must not recreate objects removed by later migrations"
+    );
+    await query("DELETE FROM instrument_news WHERE news_id = 'zztest-legacy-news'");
+    await query("DELETE FROM news_articles WHERE id = 'zztest-legacy-news'");
 
 
     assert.equal(
@@ -422,6 +491,59 @@ async function main() {
     assert.equal((await q.getHolders(TEST_SYMBOL, 0))?.holders.length, 1, "limit should be clamped to >= 1");
     assert.equal((await q.getNews(TEST_SYMBOL, 10))?.news.length, 2, "getNews regression");
     assert.equal((await q.getNews(TEST_SYMBOL, 0))?.news.length, 1, "limit should be clamped to >= 1");
+
+    // One article may be associated with multiple instruments without duplicating article metadata.
+    await query("DELETE FROM instrument_news WHERE news_id = 'zztest-shared-news'");
+    await query("DELETE FROM news_articles WHERE id = 'zztest-shared-news'");
+    const oldSecond = await query<any[]>("SELECT id FROM instruments WHERE symbol = 'ZZTEST2'");
+    if (oldSecond[0]?.id) {
+      await query("DELETE FROM instrument_news WHERE instrument_id = ?", [oldSecond[0].id]);
+      await query("DELETE FROM instruments WHERE id = ?", [oldSecond[0].id]);
+    }
+    const secondInsert = await query<{ insertId: number }>(
+      `INSERT INTO instruments (symbol, name, exchange, currency, yahoo_symbol)
+       VALUES ('ZZTEST2', 'ZZ Test Corp 2', 'TEST', 'USD', 'ZZTEST2.Y')`
+    );
+    const secondId = Number(secondInsert.insertId);
+    const sharedNews = {
+      id: "zztest-shared-news",
+      symbols: "ZZTEST,ZZTEST2",
+      title: "Shared Article",
+      link: "https://example.com/shared",
+      publisher: "Test Publisher",
+      publishedAt: "2026-08-03 11:00:00",
+      type: "NEWS",
+    };
+    await saveNews(id, [sharedNews]);
+    await saveNews(secondId, [{ ...sharedNews, title: "Shared Article Updated" }]);
+
+    assert.equal(
+      Number((await query<any[]>("SELECT COUNT(*) AS n FROM news_articles WHERE id = 'zztest-shared-news'"))[0].n),
+      1,
+      "shared article metadata should be stored once"
+    );
+    assert.equal(
+      Number((await query<any[]>("SELECT COUNT(*) AS n FROM instrument_news WHERE news_id = 'zztest-shared-news'"))[0].n),
+      2,
+      "shared article should retain both instrument associations"
+    );
+    assert.ok(
+      (await q.getNews(TEST_SYMBOL, 10))?.news.some((row: any) => row.id === "zztest-shared-news"),
+      "first instrument should see the shared article"
+    );
+    assert.ok(
+      (await q.getNews("ZZTEST2", 10))?.news.some((row: any) => row.id === "zztest-shared-news"),
+      "second instrument should see the shared article"
+    );
+    assert.equal(
+      (await query<any[]>("SELECT title FROM news_articles WHERE id = 'zztest-shared-news'"))[0].title,
+      "Shared Article Updated",
+      "later metadata refresh should update the shared article without creating another copy"
+    );
+
+    await query("DELETE FROM instrument_news WHERE news_id = 'zztest-shared-news'");
+    await query("DELETE FROM news_articles WHERE id = 'zztest-shared-news'");
+    await query("DELETE FROM instruments WHERE id = ?", [secondId]);
     const opts = await q.getOptions(TEST_SYMBOL);
     assert.equal(opts?.expirations.length, 1);
     const beforeContracts = (await query<any[]>(

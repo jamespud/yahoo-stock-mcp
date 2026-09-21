@@ -183,7 +183,10 @@ export async function initSchema(): Promise<void> {
   const conn = await getConnection();
   try {
     const applied = await withMigrationLock(conn, async () => {
-      await conn.query(sql);
+      const [bootstrap] = await conn.query<any[]>("SHOW TABLES LIKE 'instruments'");
+      if (bootstrap.length === 0) {
+        await conn.query(sql);
+      }
       return applyPendingMigrations(conn);
     });
     console.log(
