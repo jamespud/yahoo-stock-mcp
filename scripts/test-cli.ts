@@ -10,6 +10,7 @@ import {
   INCREMENTAL_BAR_REPLAY_DAYS,
   shouldSyncSectorMembers,
   summarizeBatchSyncStatus,
+  summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,6 +51,34 @@ async function main() {
   assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");
   assert.equal(shouldSyncSectorMembers({ members: true }), true, "members=true stays enabled");
   assert.equal(shouldSyncSectorMembers({ members: false }), false, "members=false disables holdings sync");
+
+  assert.equal(
+    summarizeSyncStatus({
+      bars: { status: "ok", count: 20 },
+      yahooSummary: { status: "failed", error: "summary unavailable" },
+      members: { status: "skipped" },
+    }),
+    "partial",
+    "sector summary failure beside successful bars should be partial"
+  );
+  assert.equal(
+    summarizeSyncStatus({
+      bars: { status: "failed", error: "bars unavailable" },
+      yahooSummary: { status: "failed", error: "summary unavailable" },
+      members: { status: "skipped" },
+    }),
+    "failed",
+    "sector should be failed when every attempted component fails"
+  );
+  assert.equal(
+    summarizeSyncStatus({
+      bars: { status: "ok", count: 20 },
+      yahooSummary: { status: "ok" },
+      members: { status: "failed", error: "members write failed" },
+    }),
+    "partial",
+    "requested sector-member failure should make the sector partial"
+  );
 
   assert.equal(summarizeBatchSyncStatus([]), "success", "empty batch should be successful");
   assert.equal(summarizeBatchSyncStatus(["success"]), "success", "single success should stay successful");
