@@ -18,7 +18,7 @@ npm install -g yahoo-stock-mcp
 
 ## 快速开始（npm 全局安装）
 
-包内已自带编译好的 `dist/` 与 Go sidecar `bin/gqlproxy`，无需再构建，直接用 `yahoo-stock-mcp` 命令：
+包内已自带编译好的 `dist/`，以及 Linux / macOS / Windows 的平台专用 Go sidecar（x64/arm64），无需本地安装 Go 再构建，直接使用 `yahoo-stock-mcp` 命令：
 
 ```bash
 
@@ -229,17 +229,25 @@ investing 只补 Yahoo 没给的。设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investi
 
 ## 关于 investing.com 的 TLS 拦截
 
-investing.com 通过 Cloudflare **TLS 指纹**拦截 Node.js 的请求（HTTP 403），Go 客户端可正常访问。因此项目内置了一个极小的 Go 传输代理 `cmd/gqlproxy`（约 200 行，仅标准库）：
+investing.com 在部分网络下会通过 Cloudflare **TLS 指纹**拦截 Node.js 请求（HTTP 403），而内置 Go transport 可以正常访问。因此 npm 发布包包含按 `process.platform/process.arch` 自动选择的平台二进制：
 
-```bash
-npm run build:sidecar   # 生成 bin/gqlproxy
+```text
+bin/gqlproxy-linux-x64
+bin/gqlproxy-linux-arm64
+bin/gqlproxy-darwin-x64
+bin/gqlproxy-darwin-arm64
+bin/gqlproxy-win32-x64.exe
+bin/gqlproxy-win32-arm64.exe
 ```
 
-TS 数据源层默认先试 Node fetch，遇到 403 自动切换到该代理（含持久化 cookie 会话，自动处理 Cloudflare challenge）。从不受指纹拦截的网络访问时无需代理，可设置 `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` 强制纯 Node。
+TS 层默认先尝试 Node fetch，遇到 403 时自动切换到当前平台对应的 sidecar。`YAHOO_STOCK_MCP_GQLPROXY_PATH` 可以显式覆盖包内查找；不支持的 platform/architecture 会返回明确错误，不会尝试执行其他操作系统的二进制。
 
 ```bash
-# 完整构建（TypeScript + Go sidecar）
-npm run build:all
+npm run build:sidecar   # 只构建当前 platform/architecture
+npm run build:sidecars  # cross-compile 全部 6 个发行目标
+npm run verify:sidecar  # 实际执行并探测当前平台二进制
+npm run verify:package  # 确认 npm tarball 中包含全部 6 个二进制
+npm run build:all       # TypeScript + 全部发行 sidecar
 ```
 
 ## 环境变量
@@ -256,4 +264,5 @@ npm run build:all
 | `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | 两家都有值时以谁为准（yahoo/investing），另一家只补主源缺失的数据 |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | 每次抓取的新闻条数 |
 | `YAHOO_STOCK_MCP_INVESTING_TRANSPORT` | auto | node / go / auto |
+| `YAHOO_STOCK_MCP_GQLPROXY_PATH` | 包内平台二进制 | 显式指定 Go sidecar 路径 |
 | `YAHOO_STOCK_MCP_GQLPROXY_COOKIE_FILE` | .cache/gqlproxy_cookies.txt | sidecar cookie 会话文件 |
