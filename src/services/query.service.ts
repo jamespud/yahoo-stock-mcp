@@ -337,8 +337,12 @@ export async function getNews(symbol: string, limit = 20) {
   const inst = await getInstrument(symbol);
   if (!inst) return null;
   const rows = await query<any[]>(
-    `SELECT id, title, link, publisher, published_at, news_type FROM news
-     WHERE instrument_id = ? ORDER BY published_at DESC LIMIT ${Math.max(1, Math.min(limit, 100))}`,
+    `SELECT a.id, a.title, a.link, a.publisher, a.published_at, a.news_type
+     FROM instrument_news n
+     JOIN news_articles a ON a.id = n.news_id
+     WHERE n.instrument_id = ?
+     ORDER BY a.published_at DESC
+     LIMIT ${Math.max(1, Math.min(limit, 100))}`,
     [inst.id]
   );
   return { symbol: inst.symbol, news: rows };
