@@ -723,7 +723,10 @@ async function main() {
 
     await saveYahooSectorMembersSnapshot("ZZSEC", []);
     assert.equal(
-      (await q.getSectorMembers("ZZSEC", 5))?.members.length,
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
+        ["ZZSEC"]
+      ))[0].n),
       0,
       "a successful empty holdings snapshot must clear stale Yahoo sector members"
     );
