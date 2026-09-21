@@ -8,6 +8,7 @@ import {
   incrementalBarsStartForProvider,
   mergeInstrumentProfile,
   persistSyncState,
+  saveAnalystForecast,
   saveCompanyEvents,
   saveDividends,
   saveNews,
@@ -190,6 +191,84 @@ async function main() {
     assert.equal(Number(recoveredState.error_count), 0, "successful later sync clears current error state");
     assert.equal(recoveredState.last_error, null);
 
+
+    // --- analyst forecast snapshots: identical content must not accumulate by sync timestamp ---
+    const sameInvestingForecast = {
+      asOf: "2026-08-02 12:34:56",
+      consensus: "BUY",
+      nBuy: 10,
+      nHold: 2,
+      nSell: 1,
+      nEstimates: 13,
+      targetHigh: 150,
+      targetLow: 100,
+      targetMean: 125,
+      source: "investing",
+    };
+    assert.equal(
+      await saveAnalystForecast(id, sameInvestingForecast),
+      false,
+      "unchanged Investing forecast should reuse the existing logical snapshot"
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_forecasts WHERE instrument_id = ? AND source = 'investing'",
+        [id]
+      ))[0].n),
+      1,
+      "unchanged Investing data must not create a timestamp-only duplicate"
+    );
+
+    assert.equal(
+      await saveAnalystForecast(id, { ...sameInvestingForecast, asOf: "2026-08-03 12:34:56", targetMean: 126 }),
+      true,
+      "changed Investing forecast should append a new historical observation"
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_forecasts WHERE instrument_id = ? AND source = 'investing'",
+        [id]
+      ))[0].n),
+      2
+    );
+
+    const yahooForecast = {
+      asOf: "2026-08-04 09:00:00",
+      consensus: "buy",
+      nBuy: null,
+      nHold: null,
+      nSell: null,
+      nEstimates: 11,
+      targetHigh: 160,
+      targetLow: 110,
+      targetMean: 135,
+      source: "yahoo",
+    };
+    assert.equal(await saveAnalystForecast(id, yahooForecast), true);
+    assert.equal(
+      await saveAnalystForecast(id, { ...yahooForecast, asOf: "2026-08-04 10:00:00" }),
+      false,
+      "Yahoo sync time alone must not create another snapshot"
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_forecasts WHERE instrument_id = ? AND source = 'yahoo'",
+        [id]
+      ))[0].n),
+      1
+    );
+    assert.equal(
+      await saveAnalystForecast(id, { ...yahooForecast, asOf: "2026-08-05 09:00:00", nEstimates: 12 }),
+      true,
+      "actual Yahoo forecast changes should remain historical"
+    );
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM analyst_forecasts WHERE instrument_id = ? AND source = 'yahoo'",
+        [id]
+      ))[0].n),
+      2
+    );
 
     // --- search_symbol regression (LIMIT used to be bound as DOUBLE) ---
     const hits = await q.searchSymbols(TEST_SYMBOL);
