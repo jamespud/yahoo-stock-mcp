@@ -362,23 +362,21 @@ export function yahooNum(v: any): number | null {
 }
 
 export function extractDividendsFromSummary(modules: Record<string, any>): Dividend[] {
-  const out: Dividend[] = [];
   const sd = modules.summaryDetail ?? {};
   const dks = modules.defaultKeyStatistics ?? {};
   const lastDiv = num(sd.lastDividendValue ?? dks.lastDividendValue);
-  if (lastDiv != null) {
-    const lastDate = num(sd.lastDividendDate ?? dks.lastDividendDate);
-    const yieldRaw = num(sd.dividendYield);
-    out.push({
-      exDate: lastDate ? new Date(lastDate * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      amount: lastDiv,
-      payDate: null,
-      ttmDividend: num(sd.dividendRate ?? dks.dividendRate),
-      yieldPct: yieldRaw != null ? yieldRaw * 100 : null,
-      source: "yahoo",
-    });
-  }
-  return out;
+  const lastDate = num(sd.lastDividendDate ?? dks.lastDividendDate);
+  if (lastDiv == null || lastDate == null) return [];
+
+  const yieldRaw = num(sd.dividendYield);
+  return [{
+    exDate: new Date(lastDate * 1000).toISOString().slice(0, 10),
+    amount: lastDiv,
+    payDate: null,
+    ttmDividend: num(sd.dividendRate ?? dks.dividendRate),
+    yieldPct: yieldRaw != null ? yieldRaw * 100 : null,
+    source: "yahoo",
+  }];
 }
 
 // ── data-checklist extraction (quoteSummary modules) ───────────
