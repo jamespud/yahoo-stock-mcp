@@ -27,4 +27,8 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Both providers gate this job. Investing is a real data source reached through the native
+      # TLS transport, so a silent Cloudflare or contract regression must fail the schedule
+      # instead of being logged as an informational warning.
       - run: npm run canary:providers

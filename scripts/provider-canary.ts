@@ -17,7 +17,10 @@ const FUNDAMENTAL_TYPES = [
   "annualOperatingCashFlow",
 ];
 
-const yahooFailures: string[] = [];
+/** Money series arrive from Investing in millions; anything below this is still un-normalised. */
+const ABSOLUTE_MONEY_FLOOR = 1_000_000_000;
+
+const failures: string[] = [];
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -33,18 +36,18 @@ function utcDateDaysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-async function yahooCheck(name: string, run: () => Promise<string>): Promise<void> {
+async function check(name: string, run: () => Promise<string>): Promise<void> {
   try {
     const detail = await run();
     console.log(`✓ ${name}: ${detail}`);
   } catch (err) {
     const detail = message(err);
-    yahooFailures.push(`${name}: ${detail}`);
+    failures.push(`${name}: ${detail}`);
     console.error(`✗ ${name}: ${detail}`);
   }
 }
 
-await yahooCheck("yahoo.chart", async () => {
+await check("yahoo.chart", async () => {
   const bars = await fetchYahooBars(SYMBOL, "1d", utcDateDaysAgo(14), utcDateDaysAgo(0));
   requireContract(bars.length > 0, "recent daily chart returned no bars");
   const latest = bars[bars.length - 1];
@@ -55,7 +58,7 @@ await yahooCheck("yahoo.chart", async () => {
   return `rows=${bars.length} latest=${latest.date} close=${latest.close}`;
 });
 
-await yahooCheck("yahoo.quoteSummary", async () => {
+await check("yahoo.quoteSummary", async () => {
   const summary = await fetchYahooSummary(SYMBOL);
   const priceModule = summary.modules.price ?? {};
   const financialData = summary.modules.financialData ?? {};
@@ -75,7 +78,7 @@ await yahooCheck("yahoo.quoteSummary", async () => {
   return `price=${price} operatingCashflow=${operatingCashflow}`;
 });
 
-await yahooCheck("yahoo.fundamentals", async () => {
+await check("yahoo.fundamentals", async () => {
   const fields = await fetchYahooFundamentals(SYMBOL, FUNDAMENTAL_TYPES);
   const counts = {
     INCOME: fields.filter((field) => field.statementType === "INCOME").length,
@@ -98,31 +101,75 @@ await yahooCheck("yahoo.fundamentals", async () => {
   return `rows=${fields.length} INCOME=${counts.INCOME} BALANCE=${counts.BALANCE} CASHFLOW=${counts.CASHFLOW}`;
 });
 
-await yahooCheck("yahoo.options", async () => {
+await check("yahoo.options", async () => {
   const chain = await fetchYahooOptionChain(SYMBOL);
   requireContract(chain.expirations.length > 0, "options chain returned no expirations");
   requireContract(chain.legs.length > 0, "options chain returned no contracts");
   return `expirations=${chain.expirations.length} contracts=${chain.legs.length}`;
 });
 
-await yahooCheck("yahoo.news", async () => {
+await check("yahoo.news", async () => {
   const news = await fetchYahooNews(SYMBOL, 3);
   return `request-ok items=${news.length}`;
 });
 
-try {
+// Investing gates this job too: it is a real data source, so a silent Cloudflare/contract
+// regression must show up here rather than being logged as an informational warning.
+await check("investing.snapshot", async () => {
   const snapshot = await fetchInvestingSnapshot(SYMBOL);
-  console.log(
-    `✓ investing.snapshot (non-gating): id=${snapshot.identity.investingId} latest=${snapshot.latestPrice}`
-  );
-} catch (err) {
-  console.warn(`⚠ investing.snapshot (non-gating): ${message(err)}`);
-}
 
-if (yahooFailures.length > 0) {
-  console.error("\nYahoo live canary: FAIL");
-  for (const failure of yahooFailures) console.error(`- ${failure}`);
+  requireContract(
+    Number.isFinite(snapshot.identity.investingId) && snapshot.identity.investingId > 0,
+    `investing identity has no numeric id (${String(snapshot.identity.investingId)})`
+  );
+  requireContract(snapshot.financials.length > 0, "snapshot returned no financial statements");
+  requireContract(snapshot.ratios.length > 0, "snapshot returned no ratios");
+
+  const statements = new Set(snapshot.financials.map((field) => field.statementType));
+  requireContract(statements.has("INCOME"), "no INCOME statement rows returned");
+  requireContract(statements.has("BALANCE"), "no BALANCE statement rows returned");
+  requireContract(statements.has("CASHFLOW"), "no CASHFLOW statement rows returned");
+  requireContract(
+    snapshot.financials.every((field) => field.value == null || Number.isFinite(field.value)),
+    "one or more statement rows have a non-finite value"
+  );
+
+  const annualIncome = snapshot.financials.filter(
+    (field) => field.statementType === "INCOME" && field.periodType === "ANNUAL"
+  );
+  const revenue = annualIncome.find((field) => field.fieldName === "Total Revenues");
+  requireContract(revenue != null, "no annual Total Revenues row");
+  requireContract(
+    typeof revenue.value === "number" && revenue.value > ABSOLUTE_MONEY_FLOOR,
+    `Total Revenues is not normalised to absolute units: ${String(revenue.value)}`
+  );
+
+  // Per-share and percentage series must stay unscaled; a blanket money multiplier would blow
+  // these past the guard below.
+  const eps = annualIncome.find((field) => field.fieldName === "Basic EPS - Continuing Operations");
+  requireContract(eps != null, "no annual Basic EPS row");
+  requireContract(
+    typeof eps.value === "number" && Math.abs(eps.value) < 1000,
+    `Basic EPS looks scaled: ${String(eps.value)}`
+  );
+
+  const margin = annualIncome.find((field) => field.fieldName === "Gross Profit Margin %");
+  requireContract(margin != null, "no annual Gross Profit Margin row");
+  requireContract(
+    typeof margin.value === "number" && Math.abs(margin.value) < 1000,
+    `Gross Profit Margin looks scaled: ${String(margin.value)}`
+  );
+
+  return (
+    `id=${snapshot.identity.investingId} financials=${snapshot.financials.length} ` +
+    `ratios=${snapshot.ratios.length} revenue=${revenue.value} eps=${eps.value} latest=${snapshot.latestPrice}`
+  );
+});
+
+if (failures.length > 0) {
+  console.error("\nLive provider canary: FAIL");
+  for (const failure of failures) console.error(`- ${failure}`);
   process.exitCode = 1;
 } else {
-  console.log("\nYahoo live canary: PASS");
+  console.log("\nLive provider canary: PASS");
 }
