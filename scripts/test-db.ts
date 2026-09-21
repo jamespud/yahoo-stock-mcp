@@ -153,6 +153,12 @@ async function main() {
       0,
       "legacy news table should be dropped after successful backfill"
     );
+    await initSchema();
+    assert.equal(
+      (await query<any[]>("SHOW TABLES LIKE 'news'")).length,
+      0,
+      "re-running db:init must not recreate objects removed by later migrations"
+    );
     await query("DELETE FROM instrument_news WHERE news_id = 'zztest-legacy-news'");
     await query("DELETE FROM news_articles WHERE id = 'zztest-legacy-news'");
 
