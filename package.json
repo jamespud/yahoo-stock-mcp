@@ -59,7 +59,8 @@
     "verify:sidecar": "node scripts/verify-sidecar.mjs",
     "verify:sidecars": "node scripts/verify-sidecar.mjs --all",
     "verify:package": "node scripts/verify-sidecar.mjs --package",
-    "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts"
+    "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts",
+    "canary:providers": "tsx scripts/provider-canary.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
