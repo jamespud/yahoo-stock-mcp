@@ -24,7 +24,7 @@ import {
   fetchYahooOptions,
   fetchYahooSummary,
 } from "../providers/yahoo.js";
-import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, NewsItem, OptionLeg, RatioValue } from "../providers/types.js";
+import type { AnalystForecast, Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, NewsItem, OptionLeg, RatioValue } from "../providers/types.js";
 
 interface InstrumentRow {
   id: number;
@@ -368,6 +368,73 @@ export async function saveRatios(
   await runBatch(stmts);
 }
 
+function forecastNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function sameAnalystForecast(
+  stored: Record<string, unknown>,
+  forecast: AnalystForecast
+): boolean {
+  return (
+    (stored.consensus == null ? null : String(stored.consensus)) === forecast.consensus &&
+    forecastNumber(stored.n_buy) === forecastNumber(forecast.nBuy) &&
+    forecastNumber(stored.n_hold) === forecastNumber(forecast.nHold) &&
+    forecastNumber(stored.n_sell) === forecastNumber(forecast.nSell) &&
+    forecastNumber(stored.n_estimates) === forecastNumber(forecast.nEstimates) &&
+    forecastNumber(stored.target_high) === forecastNumber(forecast.targetHigh) &&
+    forecastNumber(stored.target_low) === forecastNumber(forecast.targetLow) &&
+    forecastNumber(stored.target_mean) === forecastNumber(forecast.targetMean)
+  );
+}
+
+export async function saveAnalystForecast(
+  instrumentId: number,
+  forecast: AnalystForecast
+): Promise<boolean> {
+  const [latest] = await query<any[]>(
+    `SELECT consensus, n_buy, n_hold, n_sell, n_estimates, target_high, target_low, target_mean
+     FROM analyst_forecasts
+     WHERE instrument_id = ? AND source = ?
+     ORDER BY as_of DESC
+     LIMIT 1`,
+    [instrumentId, forecast.source]
+  );
+
+  if (latest && sameAnalystForecast(latest, forecast)) return false;
+
+  await query(
+    `INSERT INTO analyst_forecasts
+       (instrument_id, as_of, consensus, n_buy, n_hold, n_sell, n_estimates, target_high, target_low, target_mean, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       consensus = VALUES(consensus),
+       n_buy = VALUES(n_buy),
+       n_hold = VALUES(n_hold),
+       n_sell = VALUES(n_sell),
+       n_estimates = VALUES(n_estimates),
+       target_high = VALUES(target_high),
+       target_low = VALUES(target_low),
+       target_mean = VALUES(target_mean)`,
+    [
+      instrumentId,
+      forecast.asOf,
+      forecast.consensus,
+      forecast.nBuy,
+      forecast.nHold,
+      forecast.nSell,
+      forecast.nEstimates,
+      forecast.targetHigh,
+      forecast.targetLow,
+      forecast.targetMean,
+      forecast.source,
+    ]
+  );
+  return true;
+}
+
 export async function saveDividends(
   instrumentId: number,
   dividends: Dividend[],
@@ -686,20 +753,18 @@ export async function syncOne(
     // forecast from yahoo financialData
     const fd = modules.financialData ?? {};
     if (yahooNum(fd.targetMeanPrice) != null) {
-      await query(
-        `INSERT INTO analyst_forecasts (instrument_id, as_of, consensus, n_buy, n_hold, n_sell, n_estimates, target_high, target_low, target_mean, source)
-         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
-         ON DUPLICATE KEY UPDATE consensus = VALUES(consensus), target_mean = VALUES(target_mean)`,
-        [
-          instrument.id,
-          fd.recommendationKey ?? null,
-          null, null, null,
-          yahooNum(fd.numberOfAnalystOpinions),
-          yahooNum(fd.targetHighPrice),
-          yahooNum(fd.targetLowPrice),
-          yahooNum(fd.targetMeanPrice),
-        ]
-      );
+      await saveAnalystForecast(instrument.id, {
+        asOf: new Date().toISOString().slice(0, 19).replace("T", " "),
+        consensus: fd.recommendationKey ?? null,
+        nBuy: null,
+        nHold: null,
+        nSell: null,
+        nEstimates: yahooNum(fd.numberOfAnalystOpinions),
+        targetHigh: yahooNum(fd.targetHighPrice),
+        targetLow: yahooNum(fd.targetLowPrice),
+        targetMean: yahooNum(fd.targetMeanPrice),
+        source: "yahoo",
+      });
     }
 
     // holders from yahoo institutionOwnership
@@ -772,19 +837,7 @@ export async function syncOne(
     );
 
     if (snapshot.forecast) {
-      await query(
-        `INSERT INTO analyst_forecasts (instrument_id, as_of, consensus, n_buy, n_hold, n_sell, n_estimates, target_high, target_low, target_mean, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'investing')
-         ON DUPLICATE KEY UPDATE consensus = VALUES(consensus), n_buy = VALUES(n_buy), n_hold = VALUES(n_hold),
-           n_sell = VALUES(n_sell), n_estimates = VALUES(n_estimates), target_high = VALUES(target_high),
-           target_low = VALUES(target_low), target_mean = VALUES(target_mean)`,
-        [
-          instrument.id, snapshot.forecast.asOf, snapshot.forecast.consensus,
-          snapshot.forecast.nBuy, snapshot.forecast.nHold, snapshot.forecast.nSell,
-          snapshot.forecast.nEstimates, snapshot.forecast.targetHigh,
-          snapshot.forecast.targetLow, snapshot.forecast.targetMean,
-        ]
-      );
+      await saveAnalystForecast(instrument.id, snapshot.forecast);
     }
 
     const holderStmts2 = snapshot.holders.map((h): [string, any[]] => [
