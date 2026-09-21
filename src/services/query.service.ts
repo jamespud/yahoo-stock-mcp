@@ -576,7 +576,11 @@ export async function getSectorPerformance() {
     else sectors.push(item);
   }
   sectors.sort((a, b) => (b.change1d ?? -Infinity) - (a.change1d ?? -Infinity));
-  return { asOf: new Date().toISOString().slice(0, 10), benchmark, sectors };
+  const asOf = rows.reduce<string | null>((latest, row) => {
+    const d = row.trade_date == null ? null : toDateStr(row.trade_date);
+    return d && (!latest || d > latest) ? d : latest;
+  }, null);
+  return { asOf, benchmark, sectors };
 }
 
 export async function getSectorMembers(sector: string, limit = 20) {
