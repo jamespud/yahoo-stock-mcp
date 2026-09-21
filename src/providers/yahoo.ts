@@ -131,8 +131,6 @@ export const YAHOO_SUMMARY_MODULES = [
   "insiderTransactions",
   "upgradeDowngradeHistory",
   "summaryProfile",
-  "incomeStatementHistory",
-  "incomeStatementHistoryQuarterly",
   "topHoldings",
 ] as const;
 
@@ -275,53 +273,6 @@ export function classifyYahooFinancialStatement(
   return YAHOO_FINANCIAL_STATEMENT_BY_FIELD[field] ?? null;
 }
 
-export function extractYahooIncomeStatements(
-  modules: Record<string, any>
-): FinancialField[] {
-  const currencyCandidate =
-    modules.financialData?.financialCurrency ?? modules.price?.currency ?? "USD";
-  const currency =
-    typeof currencyCandidate === "string" && currencyCandidate.trim()
-      ? currencyCandidate.trim()
-      : "USD";
-  const fields: FinancialField[] = [];
-
-  const extractHistory = (
-    moduleValue: any,
-    periodType: "ANNUAL" | "QUARTERLY"
-  ) => {
-    const rows = Array.isArray(moduleValue?.incomeStatementHistory)
-      ? moduleValue.incomeStatementHistory
-      : [];
-
-    for (const row of rows) {
-      const periodEnd = unixToDate(row?.endDate);
-      if (!periodEnd) continue;
-
-      for (const [key, rawValue] of Object.entries(row ?? {})) {
-        if (key === "endDate" || key === "maxAge") continue;
-        const parsed = num(rawValue);
-        const value = parsed == null ? null : Number(parsed);
-        if (value == null || !Number.isFinite(value)) continue;
-
-        fields.push({
-          statementType: "INCOME",
-          periodType,
-          periodEnd,
-          fieldName: humanizeField(key),
-          value,
-          currency,
-          source: "yahoo",
-        });
-      }
-    }
-  };
-
-  extractHistory(modules.incomeStatementHistory, "ANNUAL");
-  extractHistory(modules.incomeStatementHistoryQuarterly, "QUARTERLY");
-  return fields;
-}
-
 export function parseYahooFundamentalsResponse(
   resp: any,
   types: string[]
@@ -372,11 +323,25 @@ export function parseYahooFundamentalsResponse(
   return fields;
 }
 
+export function buildYahooFundamentalsUrl(
+  symbol: string,
+  types: string[],
+  nowMs = Date.now()
+): string {
+  const period2 = Math.floor(nowMs / 1000);
+  const params = new URLSearchParams({
+    type: types.join(","),
+    period1: "0",
+    period2: String(period2),
+  });
+  return `${CHART_HOST}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?${params.toString()}`;
+}
+
 export async function fetchYahooFundamentals(
   symbol: string,
   types: string[]
 ): Promise<FinancialField[]> {
-  const url = `${CHART_HOST}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=${types.join(",")}`;
+  const url = buildYahooFundamentalsUrl(symbol, types);
   const resp = await httpJson<any>(url);
   return parseYahooFundamentalsResponse(resp, types);
 }
