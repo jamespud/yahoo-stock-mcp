@@ -23,7 +23,7 @@ const CHILD_TABLES = [
   "ratios",
   "financial_statements",
   "daily_bars",
-  "news",
+  "instrument_news",
 ];
 
 export async function cleanupTestData(): Promise<void> {
@@ -34,6 +34,9 @@ export async function cleanupTestData(): Promise<void> {
       [TEST_SYMBOL]
     );
   }
+  await pool.query(
+    "DELETE a FROM news_articles a LEFT JOIN instrument_news n ON n.news_id = a.id WHERE n.news_id IS NULL AND a.id LIKE 'zztest-%'"
+  );
   await pool.query("DELETE FROM sector_members WHERE sector_code = 'ZZSEC'");
   await pool.query("DELETE FROM sectors WHERE sector_code = 'ZZSEC'");
   await pool.query("DELETE FROM instruments WHERE symbol = ?", [TEST_SYMBOL]);
@@ -121,9 +124,13 @@ export async function seedTestData(): Promise<number> {
   );
 
   await pool.query(
-    `INSERT INTO news (id, instrument_id, symbols, title, link, publisher, published_at, news_type)
-     VALUES ('zztest-news-1', ?, 'ZZTEST', 'Test News 1', 'https://example.com/1', 'Test Publisher', '2026-08-01 10:00:00', 'NEWS'),
-            ('zztest-news-2', ?, 'ZZTEST', 'Test News 2', 'https://example.com/2', 'Test Publisher', '2026-08-02 10:00:00', 'NEWS')`,
+    `INSERT INTO news_articles (id, symbols, title, link, publisher, published_at, news_type)
+     VALUES ('zztest-news-1', 'ZZTEST', 'Test News 1', 'https://example.com/1', 'Test Publisher', '2026-08-01 10:00:00', 'NEWS'),
+            ('zztest-news-2', 'ZZTEST', 'Test News 2', 'https://example.com/2', 'Test Publisher', '2026-08-02 10:00:00', 'NEWS')`
+  );
+  await pool.query(
+    `INSERT INTO instrument_news (instrument_id, news_id)
+     VALUES (?, 'zztest-news-1'), (?, 'zztest-news-2')`,
     [id, id]
   );
 
