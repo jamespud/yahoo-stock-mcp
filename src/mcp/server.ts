@@ -8,11 +8,16 @@ import { listIndicatorMeta } from "../indicators/registry.js";
 import { getIndicators } from "../services/indicator.service.js";
 import { closeDb } from "../db.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../package-meta.js";
+import { isValidIsoDate, isoDateToUnixSeconds } from "../validation.js";
 
 const server = new McpServer({
   name: PACKAGE_NAME,
   version: PACKAGE_VERSION,
 });
+
+const isoDateSchema = z
+  .string()
+  .refine(isValidIsoDate, { message: "Expected a valid calendar date in YYYY-MM-DD format" });
 
 function text(data: unknown): any {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -174,7 +179,7 @@ server.tool(
   "Get the latest options chain snapshot for a stock (from Yahoo).",
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
-    expiration: z.string().optional().describe("Expiration date YYYY-MM-DD"),
+    expiration: isoDateSchema.optional().describe("Expiration date YYYY-MM-DD"),
   },
   async ({ symbol, expiration }) =>
     guard(async () => {
@@ -189,18 +194,14 @@ server.tool(
   "Fetch live options quotes for a stock directly from Yahoo (on-demand, no DB sync needed): underlying quote, available expirations/strikes, and per-contract bid/ask/last/volume/open interest/IV.",
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
-    expiration: z.string().optional().describe("Expiration date YYYY-MM-DD (default: nearest listed)"),
+    expiration: isoDateSchema.optional().describe("Expiration date YYYY-MM-DD (default: nearest listed)"),
     type: z.enum(["CALL", "PUT"]).optional().describe("Only return CALL or PUT legs"),
     strike: z.number().optional().describe("Only return legs at this exact strike"),
     limit: z.number().int().min(1).max(2000).optional().default(500).describe("Max legs to return"),
   },
   async ({ symbol, expiration, type, strike, limit }) =>
     guard(async () => {
-      let dateUnix: number | undefined;
-      if (expiration) {
-        dateUnix = Math.floor(new Date(expiration + "T00:00:00Z").getTime() / 1000);
-        if (Number.isNaN(dateUnix)) throw new Error(`invalid expiration date: ${expiration}`);
-      }
+      const dateUnix = expiration ? isoDateToUnixSeconds(expiration) : undefined;
       const chain = await fetchYahooOptionChain(symbol, dateUnix);
       let legs = chain.legs;
       if (type) legs = legs.filter((l) => l.optionType === type);
