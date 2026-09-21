@@ -17,10 +17,6 @@ jobs:
     name: Live provider contracts
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # The source checkout does not contain packaged sidecar binaries. Keep the
-      # informational Investing probe on Node transport; Investing never gates this job.
-      YAHOO_STOCK_MCP_INVESTING_TRANSPORT: node
 
     steps:
       - uses: actions/checkout@v4

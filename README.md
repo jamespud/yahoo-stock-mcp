@@ -18,7 +18,7 @@ Requires Node.js >= 20 and an external MySQL (see the `.env` config below).
 
 ## Quick start (npm global install)
 
-The package already ships compiled `dist/` plus platform-specific Go sidecars for Linux, macOS, and Windows (x64/arm64), so no local Go build is needed — just use the `yahoo-stock-mcp` command:
+The package already ships compiled `dist/`, so no local build step is needed — just use the `yahoo-stock-mcp` command:
 
 ```bash
 
@@ -82,7 +82,7 @@ Run `yahoo-stock-mcp help sync` (or `yahoo-stock-mcp sync --help`) for sync opti
 
 ```bash
 npm install
-npm run build:all   # TypeScript + Go sidecar
+npm run build       # TypeScript
 npm run server      # stdio; use npm run sync -- ... or npm run dev for other commands
 npm run db:migrate  # apply pending database migrations
 ```
@@ -249,34 +249,32 @@ For the "watch the market, position early" use case, the following dimensions ar
 - News is normalized as shared article metadata in `news_articles` plus per-instrument links in `instrument_news`; the same Yahoo article can therefore appear for multiple synced symbols without duplicating the article row.
 - Yahoo dividend history rows are only written when Yahoo supplies both the dividend amount and its ex-date; missing dates are never synthesized from the local clock.
 - All writes are idempotent upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and can be re-run safely.
-- Rate limiting is process-wide for Node HTTP requests (default 300ms between request starts, shared by Yahoo and Investing Node transport); concurrent callers reserve distinct send slots. Yahoo crumb cache 25 min, TVC token cache 25 min.
+- Rate limiting is process-wide for Node HTTP requests (default 300ms between request starts, shared by Yahoo and Investing Node transport); concurrent callers reserve distinct send slots. Yahoo crumb cache 25 min.
 
 ## Investing.com transport and Cloudflare availability
 
-Investing.com may reject automated requests with Cloudflare HTTP 403 responses. Node.js TLS fingerprinting is one common trigger, so the project bundles a small Go transport proxy `cmd/gqlproxy` (~200 lines, stdlib only) as a compatibility fallback. The sidecar improves the chance of reaching Investing.com, but it is **not a guaranteed Cloudflare bypass**: depending on the network and Cloudflare policy, the Go request can also receive a challenge or remain blocked.
+Investing.com sits behind Cloudflare bot management, which fingerprints both the TLS handshake and
+the case of HTTP/1.1 header names. Node's default client (`fetch`, `undici`, `https.Agent`) is
+answered with a bare `403`, so `src/providers/investing-transport.ts` performs the handshake
+directly with `node:net` + `node:tls`:
 
-Published npm packages include platform-specific binaries selected from `process.platform/process.arch`:
+- a forward-proxy `CONNECT` tunnel when `YAHOO_STOCK_MCP_PROXY_URL` is set, otherwise a direct
+  connection;
+- a version-constrained TLS handshake (`minVersion: TLSv1.3`, with an internal TLS 1.2-only
+  fallback). This is an implementation detail, not a configuration knob;
+- browser-cased request headers.
 
-```text
-bin/gqlproxy-linux-x64
-bin/gqlproxy-linux-arm64
-bin/gqlproxy-darwin-x64
-bin/gqlproxy-darwin-arm64
-bin/gqlproxy-win32-x64.exe
-bin/gqlproxy-win32-arm64.exe
-```
+Response framing (chunked encoding, `Content-Length`, gzip/brotli) is delegated to Node's own HTTP
+parser, so only the CONNECT + TLS layer is custom.
 
-With the default `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=auto`, the TS data-source layer tries Node `fetch` first and falls back to the matching Go sidecar when Node receives HTTP 403. The sidecar keeps a persistent cookie session and retries responses that are recognized as Cloudflare challenge pages, but those retries can still end in HTTP 403. Use `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` to force pure Node or `go` to force the sidecar; `YAHOO_STOCK_MCP_GQLPROXY_PATH` overrides bundled sidecar discovery.
+This transport serves only `https://gql.api.investing.com/graphql`. Bars are Yahoo-only: the old
+TVC/K-line path needed a browser-grade Cloudflare challenge solve, so it was deleted rather than
+kept as a permanently failing provider. No Go sidecar, cookie file, or transport-selection env var
+is involved any more.
 
-Investing availability is therefore environment-dependent. If Investing remains unavailable, the sync surfaces the failure as an `investingSnapshot` warning/component failure instead of silently treating the data as present. A sync whose Yahoo components succeed can consequently report `partial` because the Investing component is unavailable.
-
-```bash
-npm run build:sidecar   # build only the current platform/arch
-npm run build:sidecars  # cross-compile all six release targets
-npm run build:all       # TypeScript + all release sidecars
-```
-
-Unsupported platform/architecture pairs fail with an explicit message instead of attempting to execute a binary for the wrong OS.
+Investing availability is still environment-dependent. If Investing is unreachable, the sync
+surfaces it as an `investingSnapshot` component failure/warning instead of silently treating the
+data as present, so a sync whose Yahoo components succeed can still report `partial`.
 
 ## Environment variables
 
@@ -288,8 +286,5 @@ Unsupported platform/architecture pairs fail with an explicit message instead of
 | `YAHOO_STOCK_MCP_REQUEST_DELAY_MS` | 300 | Per-request rate limit |
 | `YAHOO_STOCK_MCP_PROXY_URL` | none | HTTP(S) proxy for all Node fetch requests, e.g. `http://127.0.0.1:17890`; Yahoo needs it from mainland China |
 | `YAHOO_STOCK_MCP_BARS_START_DATE` | 2000-01-01 | Full-sync start date |
-| `YAHOO_STOCK_MCP_BARS_PROVIDER` | yahoo | Bar source (yahoo/investing) |
 | `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | Which source has priority when both return a value (yahoo/investing); the other fills only what the primary lacks |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | News count per fetch |
-| `YAHOO_STOCK_MCP_INVESTING_TRANSPORT` | auto | node / go / auto |
-| `YAHOO_STOCK_MCP_GQLPROXY_COOKIE_FILE` | .cache/gqlproxy_cookies.txt | sidecar cookie session file |

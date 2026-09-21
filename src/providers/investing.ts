@@ -1,31 +1,9 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { config, env } from "../config.js";
-import { httpFetch, httpText } from "./http.js";
 import { canonicalizeRatio } from "./ratios.js";
-import type { AnalystForecast, Bar, Dividend, EarningsRecord, FinancialField, Holder, RatioValue } from "./types.js";
+import { normalizeInvestingStatementValue } from "./financial-units.js";
+import { investingFetch } from "./investing-transport.js";
+import type { AnalystForecast, Dividend, EarningsRecord, FinancialField, Holder, RatioValue } from "./types.js";
 
 const GQL_URL = "https://gql.api.investing.com/graphql";
-
-const PROJECT_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-
-let transport = config.investingTransport;
-let sidecarPath: string | null = null;
-
-const SIDECAR_FILES: Record<string, string> = {
-  "linux/x64": "gqlproxy-linux-x64",
-  "linux/arm64": "gqlproxy-linux-arm64",
-  "darwin/x64": "gqlproxy-darwin-x64",
-  "darwin/arm64": "gqlproxy-darwin-arm64",
-  "win32/x64": "gqlproxy-win32-x64.exe",
-  "win32/arm64": "gqlproxy-win32-arm64.exe",
-};
-
-export function sidecarBinaryName(platform = process.platform, arch = process.arch): string | null {
-  return SIDECAR_FILES[`${platform}/${arch}`] ?? null;
-}
 
 export function isInvestingCloudflareChallenge(status: number, text: string): boolean {
   if (status !== 403) return false;
@@ -48,124 +26,37 @@ export function formatInvestingHttpError(scope: string, status: number, text: st
     : `investing ${scope} HTTP ${status}`;
 }
 
-function findSidecar(): string | null {
-  const configured = env("GQLPROXY_PATH");
-  if (configured) return existsSync(configured) ? configured : null;
-
-  const binary = sidecarBinaryName();
-  const legacy = process.platform === "win32" ? "gqlproxy.exe" : "gqlproxy";
-  const candidates = [
-    binary ? resolve(PROJECT_ROOT, "bin", binary) : null,
-    binary ? resolve(process.cwd(), "bin", binary) : null,
-    resolve(PROJECT_ROOT, "bin", legacy),
-    resolve(process.cwd(), "bin", legacy),
-  ];
-  for (const c of candidates) {
-    if (c && existsSync(c)) return c;
-  }
-  return null;
-}
-
-function sidecarMissingMessage(): string {
-  const configured = env("GQLPROXY_PATH");
-  if (configured) {
-    return `investing: configured gqlproxy sidecar not found: ${configured}`;
-  }
-  const binary = sidecarBinaryName();
-  if (!binary) {
-    return `investing: gqlproxy does not support this platform: ${process.platform}/${process.arch}. ` +
-      "Set YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node or provide YAHOO_STOCK_MCP_GQLPROXY_PATH.";
-  }
-  return `investing: Node transport is TLS-fingerprint blocked (HTTP 403) and the ${process.platform}/${process.arch} ` +
-    `gqlproxy sidecar is missing (expected bin/${binary}). Reinstall the npm package or run npm run build:sidecar.`;
-}
-
-async function sidecarRequest(
-  method: string,
-  url: string,
-  headers: Record<string, string>,
-  body?: string
-): Promise<{ status: number; text: string }> {
-  sidecarPath ??= findSidecar();
-  if (!sidecarPath) {
-    throw new Error(sidecarMissingMessage());
-  }
-  const fullHeaders = { "user-agent": config.userAgent, ...headers };
-  const payload = JSON.stringify({ method, headers: fullHeaders, body: body ?? "" });
-  const cookieFile = env("GQLPROXY_COOKIE_FILE") ?? resolve(PROJECT_ROOT, ".cache", "gqlproxy_cookies.txt");
-  let attempt = 0;
-  for (;;) {
-    const { status, text } = await sidecarOnce(payload, url, cookieFile);
-    if (!isInvestingCloudflareChallenge(status, text) || attempt >= 2) return { status, text };
-    attempt++;
-    console.warn(`investing: sidecar got Cloudflare challenge (HTTP 403), retry ${attempt}/2 after backoff`);
-    await new Promise((r) => setTimeout(r, attempt * 8000));
-  }
-}
-
-async function sidecarOnce(payload: string, url: string, cookieFile: string): Promise<{ status: number; text: string }> {
-  const { status, text } = await new Promise<{ status: number; text: string }>((resolvePromise, reject) => {
-    const child = spawn(sidecarPath!, ["-cookiefile", cookieFile, url], { stdio: ["pipe", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (err += d));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) return reject(new Error(`gqlproxy exited ${code}: ${err.trim()}`));
-      try {
-        const parsed = JSON.parse(out) as { status: number; body: string };
-        resolvePromise({ status: parsed.status, text: parsed.body });
-      } catch (e) {
-        reject(e);
-      }
-    });
-    child.stdin.write(payload);
-    child.stdin.end();
-  });
-  return { status, text };
-}
-
-/** Request that works around investing.com's TLS-fingerprint block of Node:
- *  tries Node fetch first, and on HTTP 403 transparently falls back to the Go
- *  sidecar (same client config as QuantOS's InvestingClient). */
+/** POST/GET the Investing GraphQL endpoint through the native TLS transport. */
 async function investingRequest(
   method: string,
   url: string,
   headers: Record<string, string>,
   body?: string
 ): Promise<{ status: number; text: string }> {
-  if (transport === "go") return sidecarRequest(method, url, headers, body);
-  try {
-    const res = await httpFetch(url, {
-      method,
-      headers: { "user-agent": config.userAgent, ...headers },
-      body: body ?? undefined,
-      signal: AbortSignal.timeout(45000),
-    });
-    const text = await res.text();
-    if (transport === "auto" && res.status === 403) {
-      console.warn("investing: Node fetch blocked (TLS fingerprint), switching to gqlproxy sidecar");
-      transport = "go";
-      return sidecarRequest(method, url, headers, body);
-    }
-    return { status: res.status, text };
-  } catch (e) {
-    if (transport === "auto") {
-      transport = "go";
-      return sidecarRequest(method, url, headers, body);
-    }
-    throw e;
-  }
+  const res = await investingFetch(url, { method: method === "POST" ? "POST" : "GET", headers, body });
+  return { status: res.status, text: res.text };
 }
-const CHART_PAGE = "https://www.investing.com/equities/nvidia-corp-chart";
-const TVC_BASE = "https://tvc4.investing.com";
 
 // ── GraphQL ─────────────────────────────────────────────────────
 
 interface GqlResponse {
   data?: any;
   errors?: Array<{ message: string }>;
+}
+
+/** Turn a raw GraphQL HTTP response into data, surfacing transport and GraphQL-level errors. */
+export function parseGqlResponse(status: number, text: string): any {
+  if (status !== 200) throw new Error(formatInvestingHttpError("gql", status, text));
+  let resp: GqlResponse;
+  try {
+    resp = JSON.parse(text) as GqlResponse;
+  } catch {
+    throw new Error(`investing gql: response was not JSON (${text.slice(0, 120)})`);
+  }
+  if (resp.errors?.length) {
+    throw new Error(`investing gql: ${resp.errors.map((e) => e.message).join("; ")}`);
+  }
+  return resp.data;
 }
 
 async function gql(query: string, variables?: Record<string, any>): Promise<any> {
@@ -175,12 +66,7 @@ async function gql(query: string, variables?: Record<string, any>): Promise<any>
     { "content-type": "application/json", accept: "application/json" },
     JSON.stringify({ query, variables: variables ?? {} })
   );
-  if (status !== 200) throw new Error(formatInvestingHttpError("gql", status, text));
-  const resp = JSON.parse(text) as GqlResponse;
-  if (resp.errors?.length) {
-    throw new Error(`investing gql: ${resp.errors.map((e) => e.message).join("; ")}`);
-  }
-  return resp.data;
+  return parseGqlResponse(status, text);
 }
 
 export interface InvestingIdentity {
@@ -322,7 +208,10 @@ export async function fetchInvestingSnapshot(symbol: string): Promise<InvestingS
       if (!periodEnd) continue;
       for (const [k, v] of Object.entries(rep.indicators ?? {})) {
         const item = v as any;
-        const val = item?.value != null ? Number(item.value) : null;
+        const raw = item?.value != null ? Number(item.value) : null;
+        // Investing reports money and share series in millions while Yahoo reports absolute
+        // values, and financial_statements is shared. Normalise per field, never in bulk.
+        const val = normalizeInvestingStatementValue(k, raw, item?.name);
         financials.push({
           statementType: type, periodType, periodEnd,
           fieldName: item?.name ?? k, value: val,
@@ -467,66 +356,4 @@ export async function fetchInvestingSnapshot(symbol: string): Promise<InvestingS
       ? String(a.earnings2.epsForecastHistory.next_release_date).slice(0, 10)
       : null,
   };
-}
-
-// ── TVC bars (optional secondary source) ────────────────────────
-
-interface TvcToken {
-  carrier: string;
-  time: string;
-  expiresAt: number;
-}
-let tvcToken: TvcToken | null = null;
-const TVC_TTL_MS = 25 * 60 * 1000;
-
-async function getTvcToken(): Promise<TvcToken> {
-  if (tvcToken && Date.now() < tvcToken.expiresAt) return tvcToken;
-  const tok = await investingRequest("GET", CHART_PAGE, {
-    "sec-ch-ua": `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`,
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": `"Windows"`,
-    dnt: "1",
-  });
-  if (tok.status !== 200) throw new Error(`investing chart page HTTP ${tok.status}`);
-  const html = tok.text;
-  const carrier = html.match(/carrier=([a-f0-9]{32})/)?.[1];
-  const time = html.match(/time=(\d{10})/)?.[1];
-  if (!carrier || !time) throw new Error("investing tvc: carrier/time not found (chart page blocked?)");
-  tvcToken = { carrier, time, expiresAt: Date.now() + TVC_TTL_MS };
-  return tvcToken;
-}
-
-export async function fetchInvestingBars(
-  investingId: number,
-  resolution: "D" | "W" | "M" | "60" | "15" | "5" | "1",
-  from: string,
-  to: string
-): Promise<Bar[]> {
-  const token = await getTvcToken();
-  const base = `${TVC_BASE}/${token.carrier}/${token.time}/1/1/8`;
-  const fromU = Math.floor(new Date(from + "T00:00:00Z").getTime() / 1000);
-  const toU = Math.floor(new Date(to + "T23:59:59Z").getTime() / 1000);
-  const url = `${base}/history?symbol=${investingId}&resolution=${resolution}&from=${fromU}&to=${toU}`;
-  const hres = await investingRequest("GET", url, {
-    origin: "https://tvc-invdn-cf-com.investing.com",
-    referer: "https://tvc-invdn-cf-com.investing.com/",
-  });
-  if (hres.status !== 200) throw new Error(`investing tvc HTTP ${hres.status}`);
-  const resp = JSON.parse(hres.text) as any;
-  if (!Array.isArray(resp.t)) return [];
-  const out: Bar[] = [];
-  for (let i = 0; i < resp.t.length; i++) {
-    if (resp.c?.[i] == null) continue;
-    out.push({
-      date: new Date(resp.t[i] * 1000).toISOString().slice(0, 10),
-      open: resp.o?.[i] ?? null,
-      high: resp.h?.[i] ?? null,
-      low: resp.l?.[i] ?? null,
-      close: resp.c?.[i] ?? null,
-      adjClose: null,
-      volume: resp.v?.[i] ?? null,
-      source: "investing",
-    });
-  }
-  return out;
 }

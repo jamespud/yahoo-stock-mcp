@@ -159,17 +159,6 @@ async function main() {
     "a brand-new instrument keeps the 30-day incremental bootstrap"
   );
 
-  const invalidBarsProvider = await runCli(
-    ["--version"],
-    { YAHOO_STOCK_MCP_BARS_PROVIDER: "not-a-provider" }
-  );
-  assert.equal(invalidBarsProvider.code, 1, "invalid BARS_PROVIDER should fail during config load");
-  assert.match(
-    invalidBarsProvider.stderr,
-    /Invalid YAHOO_STOCK_MCP_BARS_PROVIDER.*yahoo.*investing/,
-    "invalid BARS_PROVIDER error should name the accepted values"
-  );
-
   // version: subcommand and global flags must all print "<name> <version>".
   for (const flag of [["version"], ["--version"], ["-v"]]) {
     const r = await runCli(flag);

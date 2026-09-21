@@ -1,6 +1,6 @@
-import { config, type BarsProvider } from "../config.js";
+import { config } from "../config.js";
 import { query, replaceBatch, runBatch } from "../db.js";
-import { fetchInvestingBars, fetchInvestingSnapshot, resolveInvestingSymbol, type InvestingSnapshot } from "../providers/investing.js";
+import { fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
 import { needsInvestingIdentity, priorityMergeUpdate, priorityUpdate, type Provider } from "../providers/priority.js";
 import { canonicalizeRatioValue } from "../providers/ratios.js";
 import {
@@ -56,18 +56,18 @@ export function incrementalBarsStartFromCoverage(
   return incrementalBarsFrom(null, nowMs);
 }
 
-export async function incrementalBarsStartForProvider(
+/** Bars are Yahoo-only; any other stored source is treated as stale coverage. */
+export async function incrementalBarsStart(
   instrumentId: number,
-  provider: BarsProvider = config.barsProvider,
   nowMs = Date.now()
 ): Promise<string> {
   const rows = await query<Array<{ preferred_last: unknown; any_last: unknown }>>(
     `SELECT
-       MAX(CASE WHEN source = ? THEN trade_date END) AS preferred_last,
+       MAX(CASE WHEN source = 'yahoo' THEN trade_date END) AS preferred_last,
        MAX(trade_date) AS any_last
      FROM daily_bars
      WHERE instrument_id = ?`,
-    [provider, instrumentId]
+    [instrumentId]
   );
   return incrementalBarsStartFromCoverage(
     rows[0]?.preferred_last ?? null,
@@ -347,38 +347,8 @@ export async function ensureInstrument(
 
 // ── bars ────────────────────────────────────────────────────────
 
-type InvestingIdentityResolver = typeof resolveInvestingSymbol;
-
-export async function ensureBarProviderIdentity(
-  instrument: InstrumentRow,
-  provider: BarsProvider = config.barsProvider,
-  resolver: InvestingIdentityResolver = resolveInvestingSymbol
-): Promise<InstrumentRow> {
-  if (provider !== "investing" || instrument.investing_id != null) return instrument;
-
-  const identity = await resolver(instrument.symbol);
-  await query(
-    "UPDATE instruments SET investing_id = ?, updated_at = NOW() WHERE id = ?",
-    [identity.investingId, instrument.id]
-  );
-  return { ...instrument, investing_id: identity.investingId };
-}
-
-async function syncBars(
-  instrument: InstrumentRow,
-  from: string,
-  to: string,
-  provider: BarsProvider = config.barsProvider
-): Promise<number> {
-  let bars: Bar[];
-  if (provider === "investing") {
-    if (instrument.investing_id == null) {
-      throw new Error(`investing bars require an investing_id for ${instrument.symbol}`);
-    }
-    bars = await fetchInvestingBars(instrument.investing_id, "D", from, to);
-  } else {
-    bars = await fetchYahooBars(instrument.yahoo_symbol ?? instrument.symbol, "1d", from, to);
-  }
+async function syncBars(instrument: InstrumentRow, from: string, to: string): Promise<number> {
+  const bars = await fetchYahooBars(instrument.yahoo_symbol ?? instrument.symbol, "1d", from, to);
   if (bars.length === 0) return 0;
   const sql =
     `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
@@ -768,7 +738,7 @@ export async function syncOne(
   symbol: string;
   status: SyncStatus;
   bars: number;
-  barSource: BarsProvider | null;
+  barSource: "yahoo" | null;
   news: number;
   options: number;
   intraday: number;
@@ -789,7 +759,7 @@ export async function syncOne(
     options: { status: "skipped" },
     intraday: { status: "skipped" },
   };
-  const result: { symbol: string; bars: number; barSource: BarsProvider | null; news: number; options: number; intraday: number } =
+  const result: { symbol: string; bars: number; barSource: "yahoo" | null; news: number; options: number; intraday: number } =
     { symbol, bars: 0, barSource: null, news: 0, options: 0, intraday: 0 };
   const failed = (component: string, err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -800,12 +770,9 @@ export async function syncOne(
 
   // 1. bars
   try {
-    const barInstrument = await ensureBarProviderIdentity(instrument);
-    const from = opts.full
-      ? config.barsStartDate
-      : await incrementalBarsStartForProvider(instrument.id, config.barsProvider);
-    result.bars = await syncBars(barInstrument, from, today, config.barsProvider);
-    result.barSource = config.barsProvider;
+    const from = opts.full ? config.barsStartDate : await incrementalBarsStart(instrument.id);
+    result.bars = await syncBars(instrument, from, today);
+    result.barSource = "yahoo";
     components.bars = { status: "ok", count: result.bars };
   } catch (e) {
     failed("bars", e);
@@ -1013,8 +980,8 @@ export async function syncOne(
 
   // 7. sync state
   const lastBarDate = await query<any[]>(
-    "SELECT MAX(trade_date) AS d FROM daily_bars WHERE instrument_id = ? AND source = ?",
-    [instrument.id, config.barsProvider]
+    "SELECT MAX(trade_date) AS d FROM daily_bars WHERE instrument_id = ? AND source = 'yahoo'",
+    [instrument.id]
   );
   const status = summarizeSyncStatus(components);
   await persistSyncState(
