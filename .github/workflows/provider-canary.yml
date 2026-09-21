@@ -28,7 +28,7 @@ jobs:
 
       - run: npm ci
 
-      # Both providers gate this job. Investing is a real data source reached through the native
-      # TLS transport, so a silent Cloudflare or contract regression must fail the schedule
-      # instead of being logged as an informational warning.
+      # Yahoo contract failures hard-fail. Investing network/access availability can be DEGRADED
+      # because hosted-runner egress may be blocked; once Investing returns a snapshot, its
+      # schema/unit contract assertions hard-fail on regression.
       - run: npm run canary:providers
