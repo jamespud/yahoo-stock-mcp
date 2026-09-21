@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { query, replaceBatch, runBatch } from "../db.js";
 import { fetchInvestingBars, fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
-import { needsInvestingIdentity, priorityUpdate, type Provider } from "../providers/priority.js";
+import { needsInvestingIdentity, priorityMergeUpdate, priorityUpdate, type Provider } from "../providers/priority.js";
 import { canonicalizeRatioValue } from "../providers/ratios.js";
 import {
   extractCalendarEvents,
@@ -23,7 +23,7 @@ import {
   fetchYahooOptions,
   fetchYahooSummary,
 } from "../providers/yahoo.js";
-import type { Bar, FinancialField, IntradayBar, RatioValue } from "../providers/types.js";
+import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, RatioValue } from "../providers/types.js";
 
 interface InstrumentRow {
   id: number;
@@ -308,6 +308,42 @@ export async function saveRatios(
   await runBatch(stmts);
 }
 
+export async function saveDividends(
+  instrumentId: number,
+  dividends: Dividend[],
+  primary: Provider = config.primaryProvider
+): Promise<void> {
+  if (dividends.length === 0) return;
+  const keep = priorityMergeUpdate(primary, ["amount", "pay_date", "ttm_dividend", "yield_pct"]);
+  const sql =
+    `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE ${keep.sql}`;
+  const stmts = dividends.map((d): [string, any[]] => [
+    sql,
+    [instrumentId, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, d.source, ...keep.params],
+  ]);
+  await runBatch(stmts);
+}
+
+export async function saveCompanyEvents(
+  instrumentId: number,
+  events: CompanyEvent[],
+  primary: Provider = config.primaryProvider
+): Promise<void> {
+  if (events.length === 0) return;
+  const keep = priorityMergeUpdate(primary, ["event_date", "details"]);
+  const sql =
+    `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
+     VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE ${keep.sql}`;
+  const stmts = events.map((e): [string, any[]] => [
+    sql,
+    [instrumentId, e.eventType, e.eventDate, e.details, e.source, ...keep.params],
+  ]);
+  await runBatch(stmts);
+}
+
 // ── data-checklist persistence (Yahoo modules / Investing calendar) ──
 
 /** Persist the new data-checklist rows from the already-fetched Yahoo quoteSummary modules. */
@@ -372,16 +408,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
   });
 
   await safe("company_events", async () => {
-    const events = extractCalendarEvents(modules);
-    if (!events.length) return;
-    const eventKeep = priorityUpdate(config.primaryProvider, ["event_date", "details"]);
-    const stmts = events.map((e): [string, any[]] => [
-      `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
-       VALUES (?, ?, ?, ?, 'yahoo')
-       ON DUPLICATE KEY UPDATE ${eventKeep.sql}`,
-      [instrument.id, e.eventType, e.eventDate, e.details, ...eventKeep.params],
-    ]);
-    await runBatch(stmts);
+    await saveCompanyEvents(instrument.id, extractCalendarEvents(modules));
   });
 
   await safe("earnings_trend", async () => {
@@ -433,13 +460,12 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
 
 async function syncInvestingCalendar(instrument: InstrumentRow, nextEarningsDate: string | null): Promise<void> {
   if (!nextEarningsDate) return;
-  const keep = priorityUpdate(config.primaryProvider, ["event_date"]);
-  await query(
-    `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
-     VALUES (?, 'EARNINGS', ?, NULL, 'investing')
-     ON DUPLICATE KEY UPDATE ${keep.sql}`,
-    [instrument.id, nextEarningsDate, ...keep.params]
-  );
+  await saveCompanyEvents(instrument.id, [{
+    eventType: "EARNINGS",
+    eventDate: nextEarningsDate,
+    details: null,
+    source: "investing",
+  }]);
 }
 
 /** Sync intraday bars into intraday_bars (Yahoo chart API). */
@@ -528,16 +554,7 @@ export async function syncOne(
     await saveRatios(instrument.id, extractRatiosFromSummary(modules, symbol, today));
 
     // dividends from yahoo
-    const divs = extractDividendsFromSummary(modules);
-    const divKeep = priorityUpdate(config.primaryProvider, ["amount", "ttm_dividend", "yield_pct"]);
-    for (const d of divs) {
-      await query(
-        `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
-         VALUES (?, ?, ?, ?, ?, ?, 'yahoo')
-         ON DUPLICATE KEY UPDATE ${divKeep.sql}`,
-        [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, ...divKeep.params]
-      );
-    }
+    await saveDividends(instrument.id, extractDividendsFromSummary(modules));
 
     // forecast from yahoo financialData
     const fd = modules.financialData ?? {};
@@ -602,17 +619,9 @@ export async function syncOne(
     });
   if (snapshot) {
     try {
-      const divKeepInv = priorityUpdate(config.primaryProvider, ["amount", "pay_date"]);
     await saveFinancials(instrument.id, snapshot.financials);
     await saveRatios(instrument.id, snapshot.ratios);
-
-    const divStmts = snapshot.dividends.map((d): [string, any[]] => [
-      `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)
-       VALUES (?, ?, ?, ?, ?, ?, 'investing')
-       ON DUPLICATE KEY UPDATE ${divKeepInv.sql}`,
-      [instrument.id, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, ...divKeepInv.params],
-    ]);
-    if (divStmts.length) await runBatch(divStmts);
+    await saveDividends(instrument.id, snapshot.dividends);
     const summaryKeep = priorityUpdate(config.primaryProvider, [
       "dividend_yield",
       "payout_ratio",

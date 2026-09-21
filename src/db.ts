@@ -103,6 +103,8 @@ async function ensureMigrationTable(conn: mysql.PoolConnection): Promise<void> {
 
 async function applyPendingMigrations(conn: mysql.PoolConnection): Promise<string[]> {
   await ensureMigrationTable(conn);
+  // Data-reconciliation migrations may need the same provider precedence as runtime upserts.
+  await conn.query("SET @yahoo_stock_mcp_primary_provider = ?", [config.primaryProvider]);
   const [rows] = await conn.query<any[]>(
     "SELECT version, checksum FROM schema_migrations ORDER BY version"
   );

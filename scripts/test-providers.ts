@@ -7,6 +7,7 @@ import {
   needsInvestingIdentity,
   parsePrimaryProvider,
   preferPrimary,
+  priorityMergeUpdate,
   priorityUpdate,
   shouldOverride,
 } from "../src/providers/priority.js";
@@ -173,6 +174,14 @@ assert.equal(
   "multi column clause keeps the source assignment last"
 );
 assert.deepEqual(multi.params, ["investing", "investing", "investing", "investing", "investing", "investing"]);
+
+// ── priorityMergeUpdate: field-level fallback without null clobbering ──
+
+const fieldMerge = priorityMergeUpdate("yahoo", ["amount", "pay_date"]);
+assert.match(fieldMerge.sql, /COALESCE\(VALUES\(amount\), amount\)/, "primary NULL must preserve the stored amount");
+assert.match(fieldMerge.sql, /COALESCE\(pay_date, VALUES\(pay_date\)\)/, "fallback may fill a primary NULL");
+assert.ok(fieldMerge.sql.endsWith("source = IF(VALUES(source) = ? OR source <> ?, VALUES(source), source)"));
+assert.deepEqual(fieldMerge.params, ["yahoo", "yahoo", "yahoo", "yahoo", "yahoo", "yahoo"]);
 
 // ── calendar events: earnings and earnings-call dates are independent ──
 
