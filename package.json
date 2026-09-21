@@ -58,7 +58,8 @@
     "build:sidecars": "node scripts/build-sidecars.mjs",
     "verify:sidecar": "node scripts/verify-sidecar.mjs",
     "verify:sidecars": "node scripts/verify-sidecar.mjs --all",
-    "verify:package": "node scripts/verify-sidecar.mjs --package"
+    "verify:package": "node scripts/verify-sidecar.mjs --package",
+    "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
