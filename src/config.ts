@@ -82,7 +82,7 @@ export function parseInvestingTransport(raw: string | undefined | null): Investi
 
 const DEFAULT_DB = "yahoo_stock_mcp";
 
-interface DbTarget {
+export interface DbTarget {
   host: string;
   port: number;
   user: string;
@@ -91,15 +91,27 @@ interface DbTarget {
   url?: string;
 }
 
-function parseDatabaseUrl(url: string): DbTarget {
-  const u = new URL(url);
+export function parseDatabaseUrl(raw: string): DbTarget {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(
+      `Invalid YAHOO_STOCK_MCP_DATABASE_URL=${JSON.stringify(raw)}; expected a mysql:// connection URL`
+    );
+  }
+  if (u.protocol !== "mysql:") {
+    throw new Error(
+      `Invalid YAHOO_STOCK_MCP_DATABASE_URL=${JSON.stringify(raw)}; expected scheme "mysql://"`
+    );
+  }
   return {
     host: u.hostname,
     port: u.port ? Number(u.port) : 3306,
     user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password),
     database: decodeURIComponent(u.pathname.replace(/^\/+/, "")) || DEFAULT_DB,
-    url,
+    url: raw,
   };
 }
 
