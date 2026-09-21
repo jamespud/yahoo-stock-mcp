@@ -410,7 +410,7 @@ async function main() {
       "a checklist failure beside a successful Yahoo summary should produce partial status"
     );
 
-    await persistSyncState(id, false, "2026-08-04", isolatedChecklist.warnings, true);
+    await persistSyncState(id, false, "partial", "2026-08-04", isolatedChecklist.warnings, true);
     const checklistFailureState = (await query<any[]>(
       "SELECT error_count, last_error FROM sync_state WHERE instrument_id = ?",
       [id]
@@ -440,14 +440,75 @@ async function main() {
       "all attempted components failing should produce failed status"
     );
 
+    await query("DELETE FROM sync_state WHERE instrument_id = ?", [id]);
+
+    await persistSyncState(id, true, "failed", "2026-08-04", ["bars: boom"], false);
+    const firstFailedFull = (await query<any[]>(
+      "SELECT * FROM sync_state WHERE instrument_id = ?",
+      [id]
+    ))[0];
+    assert.equal(Number(firstFailedFull.full_synced), 0, "first failed full sync must not mark full_synced");
+    assert.equal(firstFailedFull.last_full_sync_at, null, "first failed full sync must not set last_full_sync_at");
+    assert.equal(Number(firstFailedFull.error_count), 1, "failed full sync should persist current error state");
+    assert.equal(firstFailedFull.last_error, "bars: boom");
+
+    await persistSyncState(id, true, "success", "2026-08-04", [], true);
+    const successfulFull = (await query<any[]>(
+      "SELECT * FROM sync_state WHERE instrument_id = ?",
+      [id]
+    ))[0];
+    assert.equal(Number(successfulFull.full_synced), 1, "successful full sync should mark full_synced");
+    assert.ok(successfulFull.last_full_sync_at, "successful full sync should set last_full_sync_at");
+    assert.equal(Number(successfulFull.error_count), 0, "successful full sync should clear current error state");
+
+    await query(
+      "UPDATE sync_state SET last_full_sync_at = '2001-01-01 00:00:00' WHERE instrument_id = ?",
+      [id]
+    );
+    const priorSuccessfulFullAt = String(
+      (await query<any[]>("SELECT last_full_sync_at FROM sync_state WHERE instrument_id = ?", [id]))[0].last_full_sync_at
+    );
+
+    await persistSyncState(id, true, "partial", "2026-08-05", ["news: boom"], false);
+    const partialFullAfterSuccess = (await query<any[]>(
+      "SELECT * FROM sync_state WHERE instrument_id = ?",
+      [id]
+    ))[0];
+    assert.equal(
+      Number(partialFullAfterSuccess.full_synced),
+      1,
+      "partial full sync after a success must preserve full_synced"
+    );
+    assert.equal(
+      String(partialFullAfterSuccess.last_full_sync_at),
+      priorSuccessfulFullAt,
+      "partial full sync must preserve the last successful full-sync timestamp"
+    );
+    assert.equal(Number(partialFullAfterSuccess.error_count), 1);
+    assert.equal(partialFullAfterSuccess.last_error, "news: boom");
+
+    await persistSyncState(id, true, "success", "2026-08-06", [], true);
+    const recoveredFull = (await query<any[]>(
+      "SELECT * FROM sync_state WHERE instrument_id = ?",
+      [id]
+    ))[0];
+    assert.equal(Number(recoveredFull.full_synced), 1);
+    assert.notEqual(
+      String(recoveredFull.last_full_sync_at),
+      priorSuccessfulFullAt,
+      "later successful full sync should advance last_full_sync_at"
+    );
+    assert.equal(Number(recoveredFull.error_count), 0);
+    assert.equal(recoveredFull.last_error, null);
+
     const beforeState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
-    await persistSyncState(id, false, "2026-08-04", ["news: boom"], false);
+    await persistSyncState(id, false, "partial", "2026-08-04", ["news: boom"], false);
     const partialState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
     assert.equal(Number(partialState.full_synced), 1, "incremental sync must preserve prior full_synced");
     assert.equal(String(partialState.last_full_sync_at), String(beforeState.last_full_sync_at), "incremental sync must preserve last_full_sync_at");
     assert.equal(Number(partialState.error_count), 1);
     assert.equal(partialState.last_error, "news: boom");
-    await persistSyncState(id, false, "2026-08-04", [], true);
+    await persistSyncState(id, false, "success", "2026-08-04", [], true);
     const recoveredState = (await query<any[]>("SELECT * FROM sync_state WHERE instrument_id = ?", [id]))[0];
     assert.equal(Number(recoveredState.error_count), 0, "successful later sync clears current error state");
     assert.equal(recoveredState.last_error, null);
