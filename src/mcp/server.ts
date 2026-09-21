@@ -56,8 +56,8 @@ server.tool(
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
     interval: z.enum(["1d", "1wk", "1mo"]).default("1d"),
-    from: z.string().optional().describe("Start date YYYY-MM-DD"),
-    to: z.string().optional().describe("End date YYYY-MM-DD"),
+    from: isoDateSchema.optional().describe("Start date YYYY-MM-DD"),
+    to: isoDateSchema.optional().describe("End date YYYY-MM-DD"),
     limit: z.number().int().min(1).max(10000).optional().default(1000),
   },
   async ({ symbol, interval, from, to, limit }) =>
@@ -325,8 +325,8 @@ server.tool(
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
     interval: z.enum(["1m", "5m", "15m", "30m", "60m"]).default("15m"),
-    from: z.string().optional().describe("Start datetime YYYY-MM-DD"),
-    to: z.string().optional().describe("End datetime YYYY-MM-DD"),
+    from: isoDateSchema.optional().describe("Start date YYYY-MM-DD"),
+    to: isoDateSchema.optional().describe("End date YYYY-MM-DD"),
     limit: z.number().int().min(1).max(20000).optional().default(5000),
   },
   async ({ symbol, interval, from, to, limit }) =>
@@ -365,8 +365,8 @@ server.tool(
       .optional()
       .default("adjusted")
       .describe("adjusted rescales OHLC by adjClose/close; intraday always uses raw"),
-    from: z.string().optional().describe("Start date YYYY-MM-DD"),
-    to: z.string().optional().describe("End date YYYY-MM-DD"),
+    from: isoDateSchema.optional().describe("Start date YYYY-MM-DD"),
+    to: isoDateSchema.optional().describe("End date YYYY-MM-DD"),
     limit: z.number().int().min(1).max(5000).optional().default(250).describe("Number of output points"),
   },
   async ({ symbol, indicators, interval, intraday, basis, from, to, limit }) =>
