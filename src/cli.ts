@@ -199,7 +199,9 @@ async function main() {
         return;
       }
       if (sectors) {
-        await syncSectors({ members: sectorMembers });
+        const r = await syncSectors({ members: sectorMembers });
+        console.log(`sync --sectors status=${r.status} sectors=${r.sectors.length}`);
+        if (r.status !== "success") process.exitCode = 1;
       } else if (all) {
         const r = await syncAll({ full, intraday });
         console.log(`sync --all status=${r.status} symbols=${r.results.length}`);
