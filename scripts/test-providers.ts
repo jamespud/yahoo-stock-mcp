@@ -1,7 +1,9 @@
-// Data-source priority: pure-function tests (no DB, no network).
+// Provider/config tests: no DB and no external network.
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { parseInvestingTransport, parseNumericEnv } from "../src/config.js";
-import { RateLimiter } from "../src/providers/http.js";
+import { HttpError, httpText, RateLimiter } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
 import {
@@ -109,6 +111,66 @@ assert.equal(sidecarBinaryName("darwin", "arm64"), "gqlproxy-darwin-arm64");
 assert.equal(sidecarBinaryName("win32", "x64"), "gqlproxy-win32-x64.exe");
 assert.equal(sidecarBinaryName("win32", "arm64"), "gqlproxy-win32-arm64.exe");
 assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets should fail explicitly");
+
+// ── text HTTP retry / timeout behavior ──
+
+{
+  let transientHits = 0;
+  let notFoundHits = 0;
+  const server = createServer((req, res) => {
+    if (req.url === "/transient") {
+      transientHits++;
+      if (transientHits === 1) {
+        res.statusCode = 503;
+        res.end("temporary");
+      } else {
+        res.statusCode = 200;
+        res.end("crumb-ok");
+      }
+      return;
+    }
+    if (req.url === "/not-found") {
+      notFoundHits++;
+      res.statusCode = 404;
+      res.end("missing");
+      return;
+    }
+    if (req.url === "/hang") {
+      req.on("close", () => res.destroy());
+      return;
+    }
+    res.statusCode = 500;
+    res.end("unexpected");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+
+  try {
+    assert.equal(
+      await httpText(`${base}/transient`, { retries: 1, timeoutMs: 1000 }),
+      "crumb-ok",
+      "retryable 5xx text request should return the successful retry body"
+    );
+    assert.equal(transientHits, 2, "503 should consume exactly one configured retry");
+
+    await assert.rejects(
+      httpText(`${base}/not-found`, { retries: 3, timeoutMs: 1000 }),
+      (err: unknown) => err instanceof HttpError && err.status === 404
+    );
+    assert.equal(notFoundHits, 1, "non-retry 404 should fail without another request");
+
+    await assert.rejects(
+      httpText(`${base}/hang`, { retries: 0, timeoutMs: 50 }),
+      (err: unknown) => err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
 
 // ── RateLimiter: concurrent callers reserve distinct send slots ──
 
