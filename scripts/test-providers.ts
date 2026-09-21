@@ -11,6 +11,7 @@ import {
 import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
 import {
   formatInvestingHttpError,
+  isInvestingAvailabilityError,
   isInvestingCloudflareChallenge,
   parseGqlResponse,
 } from "../src/providers/investing.js";
@@ -227,6 +228,9 @@ assert.equal(
   true,
   "observed Just a moment page should be classified as a Cloudflare challenge"
 );
+
+assert.equal(isInvestingCloudflareChallenge(403, "403"), true, "bare 403 must use the shared block classifier");
+assert.equal(isInvestingCloudflareChallenge(403, ""), true, "empty 403 must use the shared block classifier");
 assert.equal(
   isInvestingCloudflareChallenge(403, '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>'),
   true,
@@ -260,6 +264,32 @@ assert.equal(
   formatInvestingHttpError("gql", 500, "  upstream\n  failed  "),
   "investing gql HTTP 500: upstream failed",
   "ordinary HTTP error should normalize whitespace in its body excerpt"
+);
+
+assert.equal(
+  formatInvestingHttpError("gql", 403, "403"),
+  "investing gql HTTP 403: Cloudflare challenge blocked the request",
+  "bare 403 should use the Cloudflare/access-denial diagnostic"
+);
+assert.equal(isInvestingAvailabilityError(new Error("investing gql HTTP 403: Cloudflare challenge blocked the request")), true);
+assert.equal(isInvestingAvailabilityError(new Error("investing gql HTTP 429: too many requests")), true);
+assert.equal(isInvestingAvailabilityError(new Error("investing gql HTTP 503: upstream unavailable")), true);
+assert.equal(isInvestingAvailabilityError(Object.assign(new Error("dns"), { code: "ENOTFOUND" })), true);
+assert.equal(isInvestingAvailabilityError(new Error("investing transport: TLS handshake (tls1.3) timed out")), true);
+assert.equal(
+  isInvestingAvailabilityError(new Error("investing gql: asset not found")),
+  false,
+  "GraphQL application errors must remain hard failures"
+);
+assert.equal(
+  isInvestingAvailabilityError(new Error("investing gql: response was not JSON (<html>)")),
+  false,
+  "successful-HTTP contract errors must remain hard failures"
+);
+assert.equal(
+  isInvestingAvailabilityError(new Error("investing gql HTTP 403: account is not authorized")),
+  false,
+  "ordinary application 403 must not be silently downgraded"
 );
 
 // ── HTTP error URL redaction ──
