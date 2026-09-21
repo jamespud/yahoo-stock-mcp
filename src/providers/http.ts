@@ -3,6 +3,21 @@ import { ProxyAgent } from "undici";
 
 const dispatcher: any = config.proxyUrl ? new ProxyAgent(config.proxyUrl) : undefined;
 
+const SENSITIVE_QUERY_PARAMS = new Set(["crumb"]);
+
+export function redactUrlForError(raw: string): string {
+  try {
+    const url = new URL(raw);
+    for (const key of SENSITIVE_QUERY_PARAMS) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, "[REDACTED]");
+    }
+    return url.toString();
+  } catch {
+    // Error formatting must never replace the original failure with a URL parse error.
+    return raw;
+  }
+}
+
 /**
  * Process-wide reservation-based rate limiter.
  *
@@ -76,7 +91,7 @@ export async function httpJson<T = any>(url: string, opts: HttpOptions = {}): Pr
       });
       const text = await res.text();
       if (res.status === 429 || (res.status >= 500 && !noRetry.includes(res.status))) {
-        lastErr = new Error(`HTTP ${res.status} for ${url}: ${text.slice(0, 200)}`);
+        lastErr = new Error(`HTTP ${res.status} for ${redactUrlForError(url)}: ${text.slice(0, 200)}`);
         continue;
       }
       if (!res.ok) {
@@ -92,7 +107,7 @@ export async function httpJson<T = any>(url: string, opts: HttpOptions = {}): Pr
       clearTimeout(timer);
     }
   }
-  throw lastErr ?? new Error(`request failed: ${url}`);
+  throw lastErr ?? new Error(`request failed: ${redactUrlForError(url)}`);
 }
 
 export class HttpError extends Error {
@@ -101,7 +116,7 @@ export class HttpError extends Error {
     public url: string,
     public body: string
   ) {
-    super(`HTTP ${status} for ${url}: ${body.slice(0, 300)}`);
+    super(`HTTP ${status} for ${redactUrlForError(url)}: ${body.slice(0, 300)}`);
   }
 }
 
