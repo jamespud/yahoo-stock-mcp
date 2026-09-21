@@ -61,9 +61,8 @@ async function main() {
     encoding: "utf8",
   });
   assert.equal(mismatchedReleaseTag.status, 1, "mismatched release tag should fail");
-  assert.match(
-    mismatchedReleaseTag.stderr,
-    new RegExp(`v${pkg.version.replace(/[.*+?^$\\{\\}()|[\\]\\\\]/g, "\\\\  assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");")}`),
+  assert.ok(
+    mismatchedReleaseTag.stderr.includes(`v${pkg.version}`),
     "mismatched release-tag error should name the expected package tag"
   );
 
