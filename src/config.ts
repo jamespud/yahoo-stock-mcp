@@ -14,6 +14,17 @@ function num(v: string | undefined, d: number): number {
   return Number.isFinite(n) ? n : d;
 }
 
+export type BarsProvider = "yahoo" | "investing";
+
+export function parseBarsProvider(raw: string | undefined | null): BarsProvider {
+  const value = (raw ?? "yahoo").trim().toLowerCase();
+  if (value === "" || value === "yahoo") return "yahoo";
+  if (value === "investing") return "investing";
+  throw new Error(
+    `Invalid YAHOO_STOCK_MCP_BARS_PROVIDER=${JSON.stringify(raw)}; expected "yahoo" or "investing"`
+  );
+}
+
 const DEFAULT_DB = "yahoo_stock_mcp";
 
 interface DbTarget {
@@ -60,7 +71,7 @@ export const config = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
   requestDelayMs: num(env("REQUEST_DELAY_MS"), 300),
   barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
-  barsProvider: (env("BARS_PROVIDER") ?? "yahoo") as "yahoo" | "investing",
+  barsProvider: parseBarsProvider(env("BARS_PROVIDER")),
   /**
    * Which provider is authoritative when both return a value (the other one only fills what the
    * primary lacks). `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`, default yahoo.
