@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { parseInvestingTransport, parseNumericEnv } from "../src/config.js";
+import { parseBarsStartDate, parseInvestingTransport, parseNumericEnv } from "../src/config.js";
 import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
@@ -74,6 +74,21 @@ assert.equal(
   25.3,
   "canonical ID wins a same-provider same-date tie over a legacy alias"
 );
+
+// ── Bars start-date config parsing ──
+
+assert.equal(parseBarsStartDate(undefined), "2000-01-01");
+assert.equal(parseBarsStartDate(null), "2000-01-01");
+assert.equal(parseBarsStartDate(""), "2000-01-01");
+assert.equal(parseBarsStartDate("   "), "2000-01-01");
+assert.equal(parseBarsStartDate(" 2028-02-29 "), "2028-02-29");
+assert.throws(
+  () => parseBarsStartDate("2025-02-29"),
+  /YAHOO_STOCK_MCP_BARS_START_DATE=.*2025-02-29.*YYYY-MM-DD/
+);
+assert.throws(() => parseBarsStartDate("2026-02-30"), /BARS_START_DATE/);
+assert.throws(() => parseBarsStartDate("2026-13-01"), /BARS_START_DATE/);
+assert.throws(() => parseBarsStartDate("yesterday"), /BARS_START_DATE/);
 
 // ── Numeric env parsing ──
 
