@@ -272,36 +272,63 @@ export function classifyYahooFinancialStatement(
   return YAHOO_FINANCIAL_STATEMENT_BY_FIELD[field] ?? null;
 }
 
+export function parseYahooFundamentalsResponse(
+  resp: any,
+  types: string[]
+): FinancialField[] {
+  const requestedTypes = [...new Set(types)];
+  if (!requestedTypes.length) return [];
+
+  const results = Array.isArray(resp?.timeseries?.result) ? resp.timeseries.result : [];
+  const fields: FinancialField[] = [];
+  let requestedSeriesFound = 0;
+
+  for (const result of results) {
+    if (!result || typeof result !== "object") continue;
+
+    for (const typeName of requestedTypes) {
+      if (!Object.prototype.hasOwnProperty.call(result, typeName)) continue;
+      requestedSeriesFound++;
+
+      const statementType = classifyYahooFinancialStatement(typeName);
+      if (!statementType) continue;
+
+      const periodType: "ANNUAL" | "QUARTERLY" =
+        typeName.startsWith("annual") ? "ANNUAL" : "QUARTERLY";
+      const fieldName = humanizeField(typeName);
+      const items = Array.isArray(result[typeName]) ? result[typeName] : [];
+
+      for (const item of items) {
+        if (!item?.asOfDate || item.reportedValue?.raw == null) continue;
+        fields.push({
+          statementType,
+          periodType,
+          periodEnd: item.asOfDate,
+          fieldName,
+          value: item.reportedValue.raw,
+          currency: item.currencyCode ?? "USD",
+          source: "yahoo",
+        });
+      }
+    }
+  }
+
+  if (requestedSeriesFound === 0) {
+    throw new Error(
+      `yahoo fundamentals response contained no requested data series: ${requestedTypes.join(", ")}`
+    );
+  }
+
+  return fields;
+}
+
 export async function fetchYahooFundamentals(
   symbol: string,
   types: string[]
 ): Promise<FinancialField[]> {
   const url = `${CHART_HOST}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=${types.join(",")}`;
   const resp = await httpJson<any>(url);
-  const fields: FinancialField[] = [];
-  for (const result of resp.timeseries?.result ?? []) {
-    const typeName: string = result.meta?.type?.[0] ?? "";
-    const annual = typeName.startsWith("annual");
-    const periodType: "ANNUAL" | "QUARTERLY" = annual ? "ANNUAL" : "QUARTERLY";
-    const statementType = classifyYahooFinancialStatement(typeName);
-    if (!statementType) continue;
-    const key = Object.keys(result).find((k) => k !== "meta" && k !== "timestamp");
-    if (!key) continue;
-    const fieldName = humanizeField(typeName);
-    for (const item of result[key] ?? []) {
-      if (!item?.asOfDate || item.reportedValue?.raw == null) continue;
-      fields.push({
-        statementType,
-        periodType,
-        periodEnd: item.asOfDate,
-        fieldName,
-        value: item.reportedValue.raw,
-        currency: item.currencyCode ?? "USD",
-        source: "yahoo",
-      });
-    }
-  }
-  return fields;
+  return parseYahooFundamentalsResponse(resp, types);
 }
 
 function humanizeField(typeName: string): string {
