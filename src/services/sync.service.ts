@@ -91,6 +91,11 @@ export function summarizeSyncStatus(components: Record<string, SyncComponentResu
   return failed === attempted.length ? "failed" : "partial";
 }
 
+export function summarizeBatchSyncStatus(statuses: SyncStatus[]): SyncStatus {
+  if (statuses.length === 0 || statuses.every((status) => status === "success")) return "success";
+  return statuses.every((status) => status === "failed") ? "failed" : "partial";
+}
+
 export interface ChecklistTask {
   name: string;
   run: () => Promise<void>;
@@ -1012,15 +1017,41 @@ export async function syncOne(
   };
 }
 
-export async function syncAll(opts: { full: boolean; intraday?: IntradayInterval | null }): Promise<void> {
+export interface BatchSyncItemResult {
+  symbol: string;
+  status: SyncStatus;
+  error?: string;
+}
+
+export interface BatchSyncResult {
+  status: SyncStatus;
+  results: BatchSyncItemResult[];
+}
+
+export async function syncAll(
+  opts: { full: boolean; intraday?: IntradayInterval | null }
+): Promise<BatchSyncResult> {
   const rows = await query<Array<{ symbol: string }>>("SELECT symbol FROM instruments ORDER BY symbol");
+  const results: BatchSyncItemResult[] = [];
+
   for (const r of rows) {
     try {
       const res = await syncOne(r.symbol, opts);
-      console.log(`[${r.symbol}] bars=${res.bars} source=${res.barSource ?? "none"} news=${res.news} options=${res.options} intraday=${res.intraday}`);
-    } catch (e: any) {      console.error(`[${r.symbol}] sync failed: ${e.message}`);
+      results.push({ symbol: r.symbol, status: res.status });
+      console.log(
+        `[${r.symbol}] status=${res.status} bars=${res.bars} source=${res.barSource ?? "none"} news=${res.news} options=${res.options} intraday=${res.intraday}`
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      results.push({ symbol: r.symbol, status: "failed", error: message });
+      console.error(`[${r.symbol}] status=failed sync failed: ${message}`);
     }
   }
+
+  return {
+    status: summarizeBatchSyncStatus(results.map((result) => result.status)),
+    results,
+  };
 }
 
 // ── sector data (GICS sector ETFs + top holdings) ──────────────
