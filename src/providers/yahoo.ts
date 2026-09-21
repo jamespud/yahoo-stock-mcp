@@ -249,6 +249,29 @@ export async function fetchYahooNews(symbol: string, count: number): Promise<New
 
 // ── fundamentals time series (no auth) ──────────────────────────
 
+const YAHOO_FINANCIAL_STATEMENT_BY_FIELD: Record<
+  string,
+  FinancialField["statementType"]
+> = {
+  TotalRevenue: "INCOME",
+  NetIncome: "INCOME",
+  GrossProfit: "INCOME",
+  OperatingIncome: "INCOME",
+  TotalAssets: "BALANCE",
+  TotalLiabilities: "BALANCE",
+  StockholdersEquity: "BALANCE",
+  OperatingCashFlow: "CASHFLOW",
+  CapitalExpenditure: "CASHFLOW",
+  FreeCashFlow: "CASHFLOW",
+};
+
+export function classifyYahooFinancialStatement(
+  typeName: string
+): FinancialField["statementType"] | null {
+  const field = typeName.replace(/^(annual|quarterly)/, "");
+  return YAHOO_FINANCIAL_STATEMENT_BY_FIELD[field] ?? null;
+}
+
 export async function fetchYahooFundamentals(
   symbol: string,
   types: string[]
@@ -260,11 +283,8 @@ export async function fetchYahooFundamentals(
     const typeName: string = result.meta?.type?.[0] ?? "";
     const annual = typeName.startsWith("annual");
     const periodType: "ANNUAL" | "QUARTERLY" = annual ? "ANNUAL" : "QUARTERLY";
-    const statementType = typeName.includes("TotalRevenue") || typeName.includes("NetIncome")
-      ? "INCOME"
-      : typeName.includes("TotalAssets") || typeName.includes("TotalLiabilities") || typeName.includes("StockholdersEquity")
-        ? "BALANCE"
-        : "CASHFLOW";
+    const statementType = classifyYahooFinancialStatement(typeName);
+    if (!statementType) continue;
     const key = Object.keys(result).find((k) => k !== "meta" && k !== "timestamp");
     if (!key) continue;
     const fieldName = humanizeField(typeName);

@@ -14,7 +14,12 @@ import {
   priorityUpdate,
   shouldOverride,
 } from "../src/providers/priority.js";
-import { extractCalendarEvents, extractDividendsFromSummary, extractShortInterest } from "../src/providers/yahoo.js";
+import {
+  classifyYahooFinancialStatement,
+  extractCalendarEvents,
+  extractDividendsFromSummary,
+  extractShortInterest,
+} from "../src/providers/yahoo.js";
 
 // ── canonical ratio vocabulary / units ──
 
@@ -349,6 +354,55 @@ assert.match(fieldMerge.sql, /COALESCE\(VALUES\(amount\), amount\)/, "primary NU
 assert.match(fieldMerge.sql, /COALESCE\(pay_date, VALUES\(pay_date\)\)/, "fallback may fill a primary NULL");
 assert.ok(fieldMerge.sql.endsWith("source = IF(VALUES(source) = ? OR source <> ?, VALUES(source), source)"));
 assert.deepEqual(fieldMerge.params, ["yahoo", "yahoo", "yahoo", "yahoo", "yahoo", "yahoo"]);
+
+// ── Yahoo fundamentals: explicit financial-statement classification ──
+
+for (const typeName of [
+  "annualTotalRevenue",
+  "annualNetIncome",
+  "annualGrossProfit",
+  "annualOperatingIncome",
+  "quarterlyTotalRevenue",
+  "quarterlyNetIncome",
+]) {
+  assert.equal(
+    classifyYahooFinancialStatement(typeName),
+    "INCOME",
+    `${typeName} should be classified as INCOME`
+  );
+}
+
+for (const typeName of [
+  "annualTotalAssets",
+  "annualTotalLiabilities",
+  "annualStockholdersEquity",
+  "quarterlyTotalAssets",
+]) {
+  assert.equal(
+    classifyYahooFinancialStatement(typeName),
+    "BALANCE",
+    `${typeName} should be classified as BALANCE`
+  );
+}
+
+for (const typeName of [
+  "annualOperatingCashFlow",
+  "annualCapitalExpenditure",
+  "annualFreeCashFlow",
+  "quarterlyFreeCashFlow",
+]) {
+  assert.equal(
+    classifyYahooFinancialStatement(typeName),
+    "CASHFLOW",
+    `${typeName} should be classified as CASHFLOW`
+  );
+}
+
+assert.equal(
+  classifyYahooFinancialStatement("annualUnknownMetric"),
+  null,
+  "unknown Yahoo fundamentals must not silently default to CASHFLOW"
+);
 
 // ── dividends: never synthesize a provider date ──
 
