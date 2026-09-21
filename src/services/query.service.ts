@@ -401,7 +401,7 @@ export async function getCompanyEvents(symbol: string, limit = 20) {
   if (!inst) return null;
   const rows = await query<any[]>(
     `SELECT event_type, event_date, details, source FROM company_events
-     WHERE instrument_id = ?
+     WHERE instrument_id = ? AND event_date >= CURDATE()
      ORDER BY event_date ASC LIMIT ${Math.max(1, Math.min(limit, 100))}`,
     [inst.id]
   );
