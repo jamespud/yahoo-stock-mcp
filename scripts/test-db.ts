@@ -11,6 +11,8 @@ import {
   saveCompanyEvents,
   saveDividends,
   saveNews,
+  saveYahooOptionsSnapshot,
+  saveYahooSectorMembersSnapshot,
   summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
@@ -611,6 +613,13 @@ async function main() {
     assert.equal(await q.getOptions("QQQQNOPE"), null);
     assert.equal(await q.getNews("QQQQNOPE"), null);
 
+    await saveYahooOptionsSnapshot(id, []);
+    assert.equal(
+      (await q.getOptions(TEST_SYMBOL))?.legs.length,
+      0,
+      "a successful empty options snapshot must clear stale Yahoo contracts"
+    );
+
     // --- data-checklist queries ---
     const evts = await q.getCompanyEvents(TEST_SYMBOL);
     assert.equal(evts?.events.length, 2, "company_events seeded");
@@ -711,6 +720,16 @@ async function main() {
     const memAfterRollback = await q.getSectorMembers("ZZSEC", 5);
     assert.equal(memAfterRollback?.members.length, 1);
     assert.equal(memAfterRollback?.members[0].symbol, "ZZTEST", "failed member replacement must preserve the old snapshot");
+
+    await saveYahooSectorMembersSnapshot("ZZSEC", []);
+    assert.equal(
+      Number((await query<any[]>(
+        "SELECT COUNT(*) AS n FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
+        ["ZZSEC"]
+      ))[0].n),
+      0,
+      "a successful empty holdings snapshot must clear stale Yahoo sector members"
+    );
     assert.equal(await q.getSectorMembers("QQQQNOPE"), null);
 
     console.log("db tests OK");

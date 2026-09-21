@@ -15,6 +15,7 @@ import {
   extractShortInterest,
   extractTopHoldings,
   extractUpgradeDowngrades,
+  type SectorHolding,
   yahooNum,
   fetchYahooBars,
   fetchYahooFundamentals,
@@ -23,7 +24,7 @@ import {
   fetchYahooOptions,
   fetchYahooSummary,
 } from "../providers/yahoo.js";
-import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, NewsItem, RatioValue } from "../providers/types.js";
+import type { Bar, CompanyEvent, Dividend, FinancialField, IntradayBar, NewsItem, OptionLeg, RatioValue } from "../providers/types.js";
 
 interface InstrumentRow {
   id: number;
@@ -427,6 +428,51 @@ export async function saveNews(instrumentId: number, news: NewsItem[]): Promise<
   await runBatch(statements);
 }
 
+export async function saveYahooOptionsSnapshot(
+  instrumentId: number,
+  legs: OptionLeg[]
+): Promise<void> {
+  const statements = legs.map((leg): [string, any[]] => [
+    `INSERT INTO options (instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`,
+    [
+      instrumentId,
+      leg.contractSymbol,
+      leg.expiration,
+      leg.optionType,
+      leg.strike,
+      leg.lastPrice,
+      leg.bid,
+      leg.ask,
+      leg.volume,
+      leg.openInterest,
+      leg.impliedVol,
+      leg.inTheMoney ? 1 : 0,
+      leg.currency,
+    ],
+  ]);
+  await replaceBatch(
+    ["DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [instrumentId]],
+    statements
+  );
+}
+
+export async function saveYahooSectorMembersSnapshot(
+  sectorCode: string,
+  members: SectorHolding[]
+): Promise<void> {
+  const statements = members.map((member): [string, any[]] => [
+    `INSERT INTO sector_members (sector_code, symbol, name, weight, source)
+     VALUES (?, ?, ?, ?, 'yahoo')
+     ON DUPLICATE KEY UPDATE name = VALUES(name), weight = VALUES(weight)`,
+    [sectorCode, member.symbol, member.name, member.weight],
+  ]);
+  await replaceBatch(
+    ["DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sectorCode]],
+    statements
+  );
+}
+
 // ── data-checklist persistence (Yahoo modules / Investing calendar) ──
 
 /** Persist the new data-checklist rows from the already-fetched Yahoo quoteSummary modules. */
@@ -813,19 +859,8 @@ export async function syncOne(
   // 6. options (snapshot of near-term chain)
   try {
     const legs = await fetchYahooOptions(instrument.yahoo_symbol ?? symbol);
-    if (legs.length) {
-      const optStmts = legs.map((l): [string, any[]] => [
-        `INSERT INTO options (instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`,
-        [instrument.id, l.contractSymbol, l.expiration, l.optionType, l.strike, l.lastPrice, l.bid, l.ask,
-         l.volume, l.openInterest, l.impliedVol, l.inTheMoney ? 1 : 0, l.currency],
-      ]);
-      await replaceBatch(
-        ["DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [instrument.id]],
-        optStmts
-      );
-      result.options = legs.length;
-    }
+    await saveYahooOptionsSnapshot(instrument.id, legs);
+    result.options = legs.length;
     components.options = { status: "ok", count: result.options };
   } catch (e) {
     failed("options", e);
@@ -927,19 +962,8 @@ async function syncSectorEtf(
   let membersN = 0;
   if (opts.members && summary) {
     const members = extractTopHoldings(summary.modules);
-    if (members.length) {
-      const stmts = members.map((m): [string, any[]] => [
-        `INSERT INTO sector_members (sector_code, symbol, name, weight, source)
-         VALUES (?, ?, ?, ?, 'yahoo')
-         ON DUPLICATE KEY UPDATE name = VALUES(name), weight = VALUES(weight)`,
-        [sector.sector_code, m.symbol, m.name, m.weight],
-      ]);
-      await replaceBatch(
-        ["DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sector.sector_code]],
-        stmts
-      );
-      membersN = members.length;
-    }
+    await saveYahooSectorMembersSnapshot(sector.sector_code, members);
+    membersN = members.length;
   }
 
   return { bars: barsN, members: membersN };
