@@ -48,6 +48,12 @@ async function main() {
     );
 
     // Simulate an existing pre-0002 database, add cross-provider duplicates, then replay 0002.
+    const seededEarningsDate = new Date(
+      (await query<any[]>(
+        "SELECT event_date FROM company_events WHERE instrument_id = ? AND event_type = 'EARNINGS'",
+        [id]
+      ))[0].event_date
+    ).toISOString().slice(0, 10);
     await query("ALTER TABLE dividends DROP PRIMARY KEY, ADD PRIMARY KEY (instrument_id, ex_date, source)");
     await query("ALTER TABLE company_events DROP PRIMARY KEY, ADD PRIMARY KEY (instrument_id, event_type, source)");
     await query(
@@ -57,8 +63,8 @@ async function main() {
     );
     await query(
       `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
-       VALUES (?, 'EARNINGS', '2026-08-21', 'fallback detail', 'investing')`,
-      [id]
+       VALUES (?, 'EARNINGS', DATE_ADD(?, INTERVAL 1 DAY), 'fallback detail', 'investing')`,
+      [id, seededEarningsDate]
     );
     await query("DELETE FROM schema_migrations WHERE version = '0002_canonical_provider_rows'");
     assert.deepEqual(
@@ -85,7 +91,11 @@ async function main() {
     );
     assert.equal(migratedEventRows.length, 1);
     assert.equal(migratedEventRows[0].source, "yahoo");
-    assert.equal(new Date(migratedEventRows[0].event_date).toISOString().slice(0, 10), "2026-08-20");
+    assert.equal(
+      new Date(migratedEventRows[0].event_date).toISOString().slice(0, 10),
+      seededEarningsDate,
+      "migration should keep the primary provider's seeded event date"
+    );
     assert.equal(migratedEventRows[0].details, "fallback detail");
 
     for (const [table, expected] of [
@@ -975,10 +985,23 @@ async function main() {
     );
 
     // --- data-checklist queries ---
+    await query(
+      `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
+       VALUES (?, 'EARNINGS_CALL', DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'expired fixture', 'yahoo')`,
+      [id]
+    );
     const evts = await q.getCompanyEvents(TEST_SYMBOL);
-    assert.equal(evts?.events.length, 2, "company_events seeded");
+    assert.equal(evts?.events.length, 2, "forward calendar should exclude expired canonical rows");
     assert.equal(evts?.events[0].event_type, "EARNINGS", "events ordered by date");
+    assert.ok(
+      evts?.events.every((event: any) => event.event_type !== "EARNINGS_CALL"),
+      "past-dated events must not be exposed by the forward-looking query"
+    );
     assert.equal(await q.getCompanyEvents("QQQQNOPE"), null);
+    await query(
+      "DELETE FROM company_events WHERE instrument_id = ? AND event_type = 'EARNINGS_CALL'",
+      [id]
+    );
 
     assert.equal((await q.getInsiderTransactions(TEST_SYMBOL, 5))?.transactions.length, 1);
     assert.equal((await q.getInsiderTransactions(TEST_SYMBOL, 0))?.transactions.length, 1, "limit clamped >= 1");

@@ -137,8 +137,8 @@ export async function seedTestData(): Promise<number> {
 
   await pool.query(
     `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
-     VALUES (?, 'EARNINGS', '2026-08-20', NULL, 'yahoo'),
-            (?, 'EX_DIVIDEND', '2026-09-01', NULL, 'yahoo')`,
+     VALUES (?, 'EARNINGS', DATE_ADD(CURDATE(), INTERVAL 10 DAY), NULL, 'yahoo'),
+            (?, 'EX_DIVIDEND', DATE_ADD(CURDATE(), INTERVAL 20 DAY), NULL, 'yahoo')`,
     [id, id]
   );
 
