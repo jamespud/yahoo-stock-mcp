@@ -4,96 +4,27 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-MCP server（TypeScript / Node.js）通过 **Yahoo Finance 与 Investing.com（GraphQL + TVC）的非官方集成** 获取股票市场数据，持久化到 **外部 MySQL**（通过 `YAHOO_STOCK_MCP_DATABASE_URL` 连接串配置，不随 server 内置），按标的代码查询。
+> **非官方 Provider / 数据使用提示**
+>
+> 本项目中的 Yahoo Finance 与 Investing.com 集成均为非官方集成。本项目与 Yahoo、Investing.com / Fusion Media 不存在隶属、赞助、背书或授权关系。
+>
+> 上游数据的访问、存储、复用或再分发可能受服务条款和数据许可限制。用户需要自行判断其使用方式——包括全量历史同步、`sync --all`、本地留存及下游使用——是否符合适用的服务条款、数据许可和法律要求。本项目不会授予任何上游数据权利。
+>
+> **Provider 访问规范：** transport compatibility 仅可使用协议层的普通兼容选项，例如标准 TLS 版本选择、正常的 HTTP header 大小写以及用户主动配置的正向代理；允许在有限的受支持 TLS profile 之间做 bounded fallback。项目不得实现 CAPTCHA / JavaScript challenge 求解、IP / 账号 / 身份轮换、凭据伪装，或以突破明确拒绝为目的的无限重试。已识别的 challenge / access-denial 响应必须作为 provider 失败显式暴露。
+>
+> 服务条款可能变化；请根据实际司法辖区和使用场景查看最新的 [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) 与 [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions)。
 
-架构上 MCP server 保持轻量：它只是一个薄查询层 + 同步触发器，数据库是完全外部的依赖。
+这是一个 TypeScript / Node.js MCP server，通过 Yahoo Finance 与 Investing.com 的非官方集成获取股票市场数据，写入外部 MySQL，并通过 MCP tools 查询。
 
-## 安装
+## 文档
 
-```bash
-npm install -g yahoo-stock-mcp
-```
+- **[安装 / 使用 / 配置](./docs/USAGE.zh-CN.md)**
+- **[English usage](./docs/USAGE.md)**
+- MCP 与 provider 行为摘要见下文。
 
-需要 Node.js >= 20 与一个外部 MySQL（见下方 `.env` 配置）。
+## 架构
 
-## 快速开始（npm 全局安装）
-
-包内已自带编译好的 `dist/`，无需本地构建，直接用 `yahoo-stock-mcp` 命令：
-
-```bash
-
-# 0. CLI 基础（无需数据库）
-yahoo-stock-mcp --version        # 打印版本号
-yahoo-stock-mcp --help           # 打印使用说明（也可用：yahoo-stock-mcp help sync）
-
-# 1. 配置外部 MySQL 连接（.env）
-#    YAHOO_STOCK_MCP_DATABASE_URL=mysql://user:pass@host:3306/yahoo_stock_mcp
-#    本地临时开发库可用 deploy/docker-compose.mysql.yml 起一个：
-#    docker compose -f deploy/docker-compose.mysql.yml up -d
-
-# 2. 初始化配置的数据库。
-#    如果目标库不存在且当前账号拥有 CREATE DATABASE 权限，db:init 会先创建数据库。
-yahoo-stock-mcp db:init
-
-# 已有数据库升级：只执行尚未应用的迁移
-yahoo-stock-mcp db:migrate
-
-# 3. 全量同步一只股票（从 2000-01-01 开始拉历史 + 全部基本面）
-yahoo-stock-mcp sync --symbol NVDA --full
-
-# 之后增量同步（只拉新增数据）
-yahoo-stock-mcp sync --symbol NVDA
-
-# 增量同步并同时拉取 15 分钟线（1m/5m/15m/30m/60m）
-yahoo-stock-mcp sync --symbol NVDA --intraday 15m
-
-# 同步所有已入库标的
-yahoo-stock-mcp sync --all --full
-
-# 同步全部 GICS 板块 ETF 行情 + 成分股（板块轮动数据）
-yahoo-stock-mcp sync --sectors
-
-# 4. 启动 MCP server（stdio）
-yahoo-stock-mcp server
-```
-
-## 命令参考
-
-```text
-Usage: yahoo-stock-mcp <command> [options]
-
-Commands:
-  server                启动 MCP server（stdio，无参数时默认执行）
-  db:init               缺库时先创建，再安装 bootstrap schema 与全部迁移
-  db:migrate            对已有数据库执行尚未应用的迁移
-  sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 MySQL
-  version               打印版本号
-  help [command]        查看总帮助或某个命令的帮助
-
-Options:
-  -h, --help            查看帮助
-  -v, --version         打印版本号
-```
-
-运行 `yahoo-stock-mcp help sync`（或 `yahoo-stock-mcp sync --help`）查看 sync 的选项。
-`--version` / `-v` / `version` 都会输出 `yahoo-stock-mcp <版本号>`。
-
-## 从源码运行（开发 / 贡献）
-
-```bash
-npm install
-npm run build       # TypeScript
-npm run server      # stdio；其余命令用 npm run sync -- ... 或 npm run dev
-npm run db:migrate  # 执行尚未应用的数据库迁移
-```
-
-## 数据库迁移
-
-`db/schema.sql` 是 bootstrap baseline。之后发布的结构变更放在 `db/migrations/` 下，按编号顺序执行且发布后不可修改；
-已应用版本和 SHA-256 checksum 记录在 `schema_migrations`。新数据库使用 `db:init`，已有安装升级使用
-`db:migrate`。如果配置的数据库不存在，`db:init` 会先尝试创建；只有首次创建缺失数据库时需要
-`CREATE DATABASE` 权限，目标库已经存在时不需要。bootstrap 接受的数据库名限制为 1–64 位 ASCII 字母、数字或下划线。迁移通过 MySQL advisory lock 串行化。由于 MySQL 的很多 DDL 会隐式提交，迁移文件应尽量保持
-单一、前向且小粒度的结构变更。
+MCP server 保持为薄查询层 + 同步触发器。MySQL 是外部依赖，通过 `YAHOO_STOCK_MCP_DATABASE_URL` 配置，不随 server 内置。
 
 ## 测试
 
@@ -172,30 +103,13 @@ ID 中带 `_pct_` 的指标统一按“百分点”存储，例如 `25.3` 表示
 
 ## 数据源
 
-- **Yahoo Finance（非官方集成）**：K 线（v8 chart）、quoteSummary（需 cookie+crumb）、期权（v7）、新闻（v1 search）、财务（fundamentals-timeseries，免认证）
-- **Investing.com（非官方集成）**：GraphQL `gql.api.investing.com/graphql`（行情/三表/比率/分红/预测/盈利/公司资料/高管/持有人，免认证）、TVC K 线（carrier token）
-
-### Provider 身份与数据使用责任
-
-本项目中的 Yahoo Finance 与 Investing.com 集成均为**非官方集成**。本项目与 Yahoo、Investing.com / Fusion Media 不存在隶属、赞助、背书或授权关系。
-
-上游数据的访问、存储、复用或再分发可能受到服务条款和数据许可限制。用户需要自行判断其使用方式——包括全量历史同步、`sync --all`、本地数据库留存以及对已存数据的后续使用——是否符合适用的服务条款、数据许可和法律要求。本项目不会授予任何上游数据权利。
-
-本项目不声称、也不以突破 CAPTCHA 或数据提供方访问控制为目的。若数据提供方阻止访问，集成应显式暴露失败，而不是把该 provider 表现为可用。除非已取得必要许可或授权，请勿将本软件用于批量镜像、规避访问控制或重新分发数据提供方的数据。
-
-scheduled live-provider canary 仅用于低频 contract 健康检查；它不会把 canary 响应写入项目数据库，也不会将其发布为数据 feed。
-
-服务条款可能发生变化；请根据实际司法辖区和使用场景查看最新的 [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) 与 [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions)。
+- **Yahoo Finance（非官方集成）：** 日线/分钟线、quoteSummary、期权、新闻、fundamentals-timeseries。
+- **Investing.com（非官方集成）：** GraphQL 行情、三表、比率、分红、预测、盈利、公司资料、高管和持有人。
+- **K 线仅使用 Yahoo。** 原 Investing TVC/K-line 通道已删除。
 
 ### 数据源优先级
 
-默认以 **Yahoo 为优先源**：同一条 canonical 数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
-investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，前瞻事件按 `(instrument, event_type)` 唯一；
-`source` 只保留来源信息，不再参与这两类业务键。对这些 canonical 行，主数据源的 NULL 不会抹掉副数据源已经补齐的有效字段。
-`get_financials` 通过 `fieldSources` 保留字段级来源；同一报表期间若同时包含两家数据，则顶层返回 `source: "mixed"`。
-设 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` 可把优先级翻过来。
-新建标的时若 Yahoo 已经给出标的身份，就不再调用 investing —— 新增一只股票或整轮板块同步都不会再
-等 investing 的 403 重试。
+默认以 Yahoo 为优先源。同一条 canonical 数据两家都有值时取 Yahoo，Investing 只补 Yahoo 缺失的数据。设置 `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=investing` 可反转优先级。
 
 ## 数据清单（Data Checklist）
 
@@ -216,60 +130,19 @@ investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，�
 
 > 指数 / ETF / 跨资产（如 `^GSPC`、`^VIX`、`SPY`、`TLT`）可直接当作标的同步：Yahoo 原生支持指数行情，Investing 侧失败会被自动跳过，不影响 Yahoo 数据落库。
 
-## 客户端接入示例（Claude Desktop / Cursor / Codex）
+## Investing.com transport 与可用性
 
-```json
-{
-  "mcpServers": {
-    "yahoo-stock-mcp": {
-      "command": "yahoo-stock-mcp",
-      "args": ["server"],
-      "env": {
-        "YAHOO_STOCK_MCP_DATABASE_URL": "mysql://user:pass@host:3306/yahoo_stock_mcp",
-        "YAHOO_STOCK_MCP_PROXY_URL": "http://127.0.0.1:17890"
-      }
-    }
-  }
-}
-```
+`src/providers/investing-transport.ts` 只服务 `https://gql.api.investing.com/graphql`。
 
-> `command` 依赖 `yahoo-stock-mcp` 在 PATH 上（npm 全局安装后即满足）；若未全局安装，也可改用源码路径 `node /path/to/yahoo-stock-mcp/dist/cli.js server`。所有配置变量都带 `YAHOO_STOCK_MCP_` 前缀，避免与其它应用的 `DATABASE_URL` / `PROXY_URL` / `USER_AGENT` 冲突。
+transport 使用 Node `net` / `tls`，支持：
 
-## 说明
+- 直连，或 HTTP / HTTPS 正向代理 CONNECT 隧道；
+- 从 `YAHOO_STOCK_MCP_PROXY_URL` 读取可选的 Basic proxy credentials；
+- 有界的 TLS compatibility profile（先 TLS 1.3，失败后回退 TLS 1.2）；
+- 浏览器风格的 HTTP/1.1 header 大小写；
+- 使用 Node 自带 HTTP parser 处理 Content-Length/chunked，以及 gzip/deflate/brotli。
 
-- 全量同步：从 `YAHOO_STOCK_MCP_BARS_START_DATE`（默认 2000-01-01）拉全部日 K + 全部基本面 + 期权快照 + 新闻 + 数据清单（事件/内部人/分析师/盈利趋势/空头/基金等）。
-- 增量同步：会围绕 `sync_state.last_bar_date` 重拉一小段近期日 K 并幂等 upsert，用于刷新盘中未收盘 K 线和数据源后续修正；同时刷新行情、比率、预测、新闻、期权快照与数据清单。
-- 分钟线：`--intraday <1m|5m|15m|30m|60m>` 拉取最近 7 天分钟 K 到 `intraday_bars`（幂等 upsert）。
-- 板块：`sync --sectors` 一键同步 11 个 GICS 板块 ETF（XLC..XLU）+ SPY 基准的行情与 `topHoldings` 成分股，`get_sector_performance` 输出板块轮动排名。
-- 期权行情：`get_options` 读取同步入库的快照；`get_option_quote` 每次直接从 Yahoo 按需拉取最新报价（含标的现价、可选到期日、行权价、方向过滤），无需先执行同步。
-- 新闻采用规范化存储：共享文章元数据写入 `news_articles`，标的关联写入 `instrument_news`；同一篇 Yahoo 文章可以同时关联多个已同步标的，而不会重复保存文章内容。
-- Yahoo 历史分红只有在数据源同时提供分红金额和除息日时才写入；缺失日期不会用本机当前日期补造。
-- 所有写入均为幂等 upsert（`INSERT ... ON DUPLICATE KEY UPDATE`），可重复执行。
-- Node HTTP 请求使用进程级共享限流（默认请求启动间隔 300ms，Yahoo 与 Investing Node transport 共用；并发调用会预留不同发送时隙），Yahoo crumb 缓存 25 分钟。
+这些行为属于上方 Provider 访问规范定义的协议层兼容选项。transport 不求解 challenge 页面。如果全部受支持 profile 均收到已识别的 Cloudflare challenge / access-denial 响应，请求会失败，sync 会把 Investing 组件报告为不可用。
 
-## Investing.com 传输与 Cloudflare 可用性
+Investing 的可用性仍取决于运行环境。scheduled live-provider canary 现在同时 gate Yahoo 和 Investing，并检查三表单位归一化；它只是低频 contract 健康检查，不会把响应写入项目数据库，也不会发布成数据 feed。
 
-Investing.com 位于 Cloudflare bot management 之后，它会同时指纹化 TLS 握手和 HTTP/1.1 header 名的大小写。Node 默认客户端（`fetch` / `undici` / `https.Agent`）会收到裸 `403`，因此 `src/providers/investing-transport.ts` 直接用 `node:net` + `node:tls` 完成握手：
-
-- 设置了 `YAHOO_STOCK_MCP_PROXY_URL` 时先走正向代理 `CONNECT` 隧道，否则直连；
-- 版本受限的 TLS 握手（`minVersion: TLSv1.3`，内部回退到仅 TLS 1.2）。这是实现细节，不是配置项；
-- 浏览器大小写的请求头。
-
-响应分帧（chunked、`Content-Length`、gzip/brotli）交给 Node 自带的 HTTP parser，只有 CONNECT + TLS 这一层是自定义的。
-
-该 transport 只服务 `https://gql.api.investing.com/graphql`。K 线改为仅 Yahoo：旧的 TVC 通道需要浏览器级别的 Cloudflare 挑战求解，因此直接删除，而不是保留一个注定失败的 provider。现在不再涉及 Go sidecar、cookie 文件或传输选择环境变量。
-
-Investing 的可用性仍取决于网络环境。若 Investing 不可达，sync 会把它记为 `investingSnapshot` 组件失败/警告，而不是假装数据存在，因此 Yahoo 组件全部成功的 sync 仍可能报 `partial`。
-
-## 环境变量
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `YAHOO_STOCK_MCP_DATABASE_URL` | 由 `DB_*` 推导 | 完整 MySQL 连接串，例如 `mysql://user:pass@host:3306/yahoo_stock_mcp`；优先于 `DB_*` |
-| `YAHOO_STOCK_MCP_DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | 127.0.0.1/3306/stock/stock123/yahoo_stock_mcp | MySQL 连接（未设置 `DATABASE_URL` 时使用） |
-| `YAHOO_STOCK_MCP_USER_AGENT` | Chrome 148 UA | 请求指纹 |
-| `YAHOO_STOCK_MCP_REQUEST_DELAY_MS` | 300 | 请求间隔限流 |
-| `YAHOO_STOCK_MCP_PROXY_URL` | 无 | 所有 Node fetch 请求使用的 HTTP(S) 代理，例如 `http://127.0.0.1:17890`；Yahoo 在大陆需配置 |
-| `YAHOO_STOCK_MCP_BARS_START_DATE` | 2000-01-01 | 全量同步起点 |
-| `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | 两家都有值时以谁为准（yahoo/investing），另一家只补主源缺失的数据 |
-| `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | 每次抓取的新闻条数 |
