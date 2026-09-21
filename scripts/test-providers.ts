@@ -1,6 +1,6 @@
 // Data-source priority: pure-function tests (no DB, no network).
 import assert from "node:assert/strict";
-import { parseInvestingTransport } from "../src/config.js";
+import { parseInvestingTransport, parseNumericEnv } from "../src/config.js";
 import { RateLimiter } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
@@ -72,6 +72,19 @@ assert.equal(
   25.3,
   "canonical ID wins a same-provider same-date tie over a legacy alias"
 );
+
+// ── Numeric env parsing ──
+
+assert.equal(parseNumericEnv(undefined, 3306), 3306);
+assert.equal(parseNumericEnv(null, 20), 20);
+assert.equal(parseNumericEnv("", 300), 300);
+assert.equal(parseNumericEnv("   ", 300), 300);
+assert.equal(parseNumericEnv("0", 300), 0, "explicit zero must remain an intentional value");
+assert.equal(parseNumericEnv("3307", 3306), 3307);
+assert.equal(parseNumericEnv("-5", 20), -5);
+assert.equal(parseNumericEnv("12.5", 20), 12.5);
+assert.equal(parseNumericEnv("not-a-number", 20), 20);
+assert.equal(parseNumericEnv("Infinity", 20), 20);
 
 // ── Investing transport config parsing ──
 
