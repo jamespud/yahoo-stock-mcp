@@ -405,9 +405,12 @@ export function extractDividendsFromSummary(modules: Record<string, any>): Divid
 // ── data-checklist extraction (quoteSummary modules) ───────────
 
 function unixToDate(u: any): string | null {
-  const n = num(u);
-  if (n == null) return null;
-  return new Date(n * 1000).toISOString().slice(0, 10);
+  const raw = num(u);
+  const n = Number(raw);
+  if (raw == null || !Number.isFinite(n)) return null;
+  const date = new Date(n * 1000);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }
 
 export function extractShortInterest(modules: Record<string, any>): ShortInterest | null {
