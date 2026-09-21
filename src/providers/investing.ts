@@ -1,19 +1,12 @@
 import { canonicalizeRatio } from "./ratios.js";
 import { normalizeInvestingStatementValue } from "./financial-units.js";
-import { investingFetch } from "./investing-transport.js";
+import { investingFetch, isCloudflareBlock } from "./investing-transport.js";
 import type { AnalystForecast, Dividend, EarningsRecord, FinancialField, Holder, RatioValue } from "./types.js";
 
 const GQL_URL = "https://gql.api.investing.com/graphql";
 
 export function isInvestingCloudflareChallenge(status: number, text: string): boolean {
-  if (status !== 403) return false;
-  const body = text.toLowerCase();
-  return (
-    body.includes("just a moment") ||
-    body.includes("challenge-platform") ||
-    body.includes("cf-chl-") ||
-    body.includes("__cf_chl")
-  );
+  return isCloudflareBlock(status, text);
 }
 
 export function formatInvestingHttpError(scope: string, status: number, text: string): string {
@@ -24,6 +17,31 @@ export function formatInvestingHttpError(scope: string, status: number, text: st
   return excerpt
     ? `investing ${scope} HTTP ${status}: ${excerpt}`
     : `investing ${scope} HTTP ${status}`;
+}
+
+/** Whether an Investing failure represents upstream/network availability rather than a data contract failure. */
+export function isInvestingAvailabilityError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+
+  const code = (err as NodeJS.ErrnoException).code;
+  if (
+    code != null &&
+    ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "EPIPE"].includes(code)
+  ) {
+    return true;
+  }
+
+  const message = err.message;
+  if (/^investing \S+ HTTP 403: Cloudflare challenge blocked the request$/i.test(message)) return true;
+  if (/^investing \S+ HTTP (?:429|5\d\d)(?::|$)/i.test(message)) return true;
+  if (
+    /investing transport: (?:TCP connect|proxy CONNECT|TLS handshake|request timed out)/i.test(message) ||
+    /(?:getaddrinfo|socket hang up|network socket disconnected|connect ETIMEDOUT)/i.test(message)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /** POST/GET the Investing GraphQL endpoint through the native TLS transport. */
