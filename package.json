@@ -59,6 +59,7 @@
     "verify:sidecar": "node scripts/verify-sidecar.mjs",
     "verify:sidecars": "node scripts/verify-sidecar.mjs --all",
     "verify:package": "node scripts/verify-sidecar.mjs --package",
+    "verify:release-tag": "node scripts/verify-release-tag.mjs",
     "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts"
   },
   "dependencies": {
