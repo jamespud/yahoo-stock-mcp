@@ -260,6 +260,7 @@ const YAHOO_FINANCIAL_STATEMENT_BY_FIELD: Record<
   OperatingIncome: "INCOME",
   TotalAssets: "BALANCE",
   TotalLiabilities: "BALANCE",
+  TotalLiabilitiesNetMinorityInterest: "BALANCE",
   StockholdersEquity: "BALANCE",
   OperatingCashFlow: "CASHFLOW",
   CapitalExpenditure: "CASHFLOW",
