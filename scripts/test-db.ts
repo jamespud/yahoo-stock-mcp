@@ -15,6 +15,7 @@ import {
   saveNews,
   saveYahooOptionsSnapshot,
   saveYahooSectorMembersSnapshot,
+  runChecklistTasks,
   summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
@@ -371,6 +372,62 @@ async function main() {
       "DELETE FROM analyst_actions WHERE instrument_id = ? AND action_date = '2026-08-15' AND firm IS NULL",
       [id]
     );
+
+    const checklistOrder: string[] = [];
+    const isolatedChecklist = await runChecklistTasks([
+      {
+        name: "insider_transactions",
+        run: async () => {
+          checklistOrder.push("insider_transactions");
+          throw new Error("injected write failure");
+        },
+      },
+      {
+        name: "analyst_actions",
+        run: async () => {
+          checklistOrder.push("analyst_actions");
+        },
+      },
+    ]);
+    assert.deepEqual(
+      checklistOrder,
+      ["insider_transactions", "analyst_actions"],
+      "one checklist failure must not stop later checklist datasets"
+    );
+    assert.equal(isolatedChecklist.attempted, 2);
+    assert.equal(isolatedChecklist.completed, 1);
+    assert.deepEqual(
+      isolatedChecklist.warnings,
+      ["yahooChecklist.insider_transactions: injected write failure"],
+      "structured warning should identify the failed checklist dataset"
+    );
+    assert.equal(
+      summarizeSyncStatus({
+        yahooSummary: { status: "ok" },
+        yahooChecklist: { status: "failed", error: isolatedChecklist.warnings[0] },
+      }),
+      "partial",
+      "a checklist failure beside a successful Yahoo summary should produce partial status"
+    );
+
+    await persistSyncState(id, false, "2026-08-04", isolatedChecklist.warnings, true);
+    const checklistFailureState = (await query<any[]>(
+      "SELECT error_count, last_error FROM sync_state WHERE instrument_id = ?",
+      [id]
+    ))[0];
+    assert.equal(Number(checklistFailureState.error_count), 1);
+    assert.equal(
+      checklistFailureState.last_error,
+      "yahooChecklist.insider_transactions: injected write failure",
+      "checklist warning should flow into sync_state"
+    );
+
+    const successfulChecklist = await runChecklistTasks([
+      { name: "company_events", run: async () => undefined },
+      { name: "fund_holders", run: async () => undefined },
+    ]);
+    assert.equal(successfulChecklist.completed, 2);
+    assert.deepEqual(successfulChecklist.warnings, [], "fully successful checklist should stay warning-free");
 
     assert.equal(
       summarizeSyncStatus({ bars: { status: "ok" }, news: { status: "failed", error: "boom" } }),

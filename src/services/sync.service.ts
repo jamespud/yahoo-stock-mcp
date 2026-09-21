@@ -91,6 +91,36 @@ export function summarizeSyncStatus(components: Record<string, SyncComponentResu
   return failed === attempted.length ? "failed" : "partial";
 }
 
+export interface ChecklistTask {
+  name: string;
+  run: () => Promise<void>;
+}
+
+export interface ChecklistRunResult {
+  attempted: number;
+  completed: number;
+  warnings: string[];
+}
+
+export async function runChecklistTasks(tasks: ChecklistTask[]): Promise<ChecklistRunResult> {
+  const warnings: string[] = [];
+  let completed = 0;
+
+  for (const task of tasks) {
+    try {
+      await task.run();
+      completed++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const warning = `yahooChecklist.${task.name}: ${message}`;
+      warnings.push(warning);
+      console.warn(`[checklist:${task.name}] failed: ${message}`);
+    }
+  }
+
+  return { attempted: tasks.length, completed, warnings };
+}
+
 export async function persistSyncState(
   instrumentId: number,
   full: boolean,
@@ -564,18 +594,17 @@ export async function saveYahooSectorMembersSnapshot(
 // ── data-checklist persistence (Yahoo modules / Investing calendar) ──
 
 /** Persist the new data-checklist rows from the already-fetched Yahoo quoteSummary modules. */
-async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<string, any>): Promise<void> {
-  // Each dataset is guarded independently so a single provider edge-case never
-  // aborts the rest of the checklist.
-  const safe = async (name: string, fn: () => Promise<void>) => {
-    try {
-      await fn();
-    } catch (e: any) {
-      console.warn(`[checklist:${name}] failed: ${e.message}`);
-    }
+async function syncYahooChecklist(
+  instrument: InstrumentRow,
+  modules: Record<string, any>
+): Promise<ChecklistRunResult> {
+  // Collect every dataset first, then run them sequentially with per-task isolation.
+  const tasks: ChecklistTask[] = [];
+  const safe = (name: string, run: () => Promise<void>) => {
+    tasks.push({ name, run });
   };
 
-  await safe("short_interest", async () => {
+  safe("short_interest", async () => {
     const si = extractShortInterest(modules);
     if (!si) return;
     await query(
@@ -588,7 +617,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     );
   });
 
-  await safe("holder_breakdown", async () => {
+  safe("holder_breakdown", async () => {
     const hb = extractHolderBreakdown(modules);
     if (!hb) return;
     await query(
@@ -600,7 +629,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     );
   });
 
-  await safe("insider_transactions", async () => {
+  safe("insider_transactions", async () => {
     const insiders = extractInsiderTransactions(modules);
     if (!insiders.length) return;
     const stmts = insiders.map((t): [string, any[]] => [
@@ -611,7 +640,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     await runBatch(stmts);
   });
 
-  await safe("analyst_actions", async () => {
+  safe("analyst_actions", async () => {
     const actions = extractUpgradeDowngrades(modules);
     if (!actions.length) return;
     const stmts = actions.map((a): [string, any[]] => [
@@ -624,11 +653,11 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     await runBatch(stmts);
   });
 
-  await safe("company_events", async () => {
+  safe("company_events", async () => {
     await saveCompanyEvents(instrument.id, extractCalendarEvents(modules));
   });
 
-  await safe("earnings_trend", async () => {
+  safe("earnings_trend", async () => {
     const etrend = extractEarningsTrend(modules);
     if (!etrend.length) return;
     const stmts = etrend.map((t): [string, any[]] => [
@@ -648,7 +677,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     await runBatch(stmts);
   });
 
-  await safe("recommendation_trend", async () => {
+  safe("recommendation_trend", async () => {
     const rectrend = extractRecommendationTrend(modules);
     if (!rectrend.length) return;
     const stmts = rectrend.map((t): [string, any[]] => [
@@ -661,7 +690,7 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     await runBatch(stmts);
   });
 
-  await safe("fund_holders", async () => {
+  safe("fund_holders", async () => {
     const funds = extractFundHolders(modules);
     if (!funds.length) return;
     const stmts = funds.map((f): [string, any[]] => [
@@ -673,6 +702,8 @@ async function syncYahooChecklist(instrument: InstrumentRow, modules: Record<str
     ]);
     await runBatch(stmts);
   });
+
+  return runChecklistTasks(tasks);
 }
 
 async function syncInvestingCalendar(instrument: InstrumentRow, nextEarningsDate: string | null): Promise<void> {
@@ -728,6 +759,7 @@ export async function syncOne(
   const components: Record<string, SyncComponentResult> = {
     bars: { status: "skipped" },
     yahooSummary: { status: "skipped" },
+    yahooChecklist: { status: "skipped" },
     investingSnapshot: { status: "skipped" },
     profile: { status: "skipped" },
     yahooFundamentals: { status: "skipped" },
@@ -813,12 +845,21 @@ export async function syncOne(
 
     // data checklist: short interest / holder breakdown / insiders / analyst actions /
     // forward events / earnings trend / recommendation trend / fund holders
-      try {
-        await syncYahooChecklist(instrument, modules);
-      } catch (e: any) {
-        console.warn(`[${symbol}] yahoo checklist failed: ${e.message}`);
-      }
       components.yahooSummary = { status: "ok" };
+      try {
+        const checklist = await syncYahooChecklist(instrument, modules);
+        if (checklist.warnings.length) {
+          components.yahooChecklist = {
+            status: "failed",
+            error: checklist.warnings.join("; "),
+          };
+          warnings.push(...checklist.warnings);
+        } else {
+          components.yahooChecklist = { status: "ok", count: checklist.completed };
+        }
+      } catch (e) {
+        failed("yahooChecklist", e);
+      }
     } catch (e) {
       failed("yahooSummary", e);
     }
