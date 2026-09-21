@@ -15,15 +15,14 @@ export async function getInstrument(symbol: string) {
 }
 
 async function getBarSource(instrumentId: number): Promise<string | null> {
-  const preferred = config.barsProvider;
   const rows = await query<Array<{ source: string }>>(
     `SELECT source
      FROM daily_bars
      WHERE instrument_id = ?
      GROUP BY source
-     ORDER BY (source = ?) DESC, MAX(trade_date) DESC, source ASC
+     ORDER BY (source = 'yahoo') DESC, MAX(trade_date) DESC, source ASC
      LIMIT 1`,
-    [instrumentId, preferred]
+    [instrumentId]
   );
   return rows[0]?.source ?? null;
 }

@@ -41,12 +41,17 @@ export class RateLimiter {
 
 const limiter = new RateLimiter(config.requestDelayMs);
 
+/** Reserve the next process-wide request slot. Shared by every provider transport. */
+export async function applyRateLimit(): Promise<void> {
+  await limiter.wait();
+}
+
 /**
  * Node fetch with the optional HTTP(S) proxy and the process-wide request limiter applied.
  * Yahoo and Investing Node transport therefore share the same request-start spacing.
  */
 export async function httpFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  await limiter.wait();
+  await applyRateLimit();
   return fetch(url, { ...init, dispatcher });
 }
 

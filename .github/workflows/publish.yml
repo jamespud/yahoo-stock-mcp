@@ -42,11 +42,6 @@ jobs:
         if: github.event_name == 'push'
         run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: cmd/gqlproxy/go.mod
-          cache-dependency-path: cmd/gqlproxy/go.mod
-
       - run: npm ci
 
       - name: Validate TypeScript and tests
@@ -54,20 +49,11 @@ jobs:
           npm run typecheck
           npm test
 
-      - name: Validate Go sidecar
-        working-directory: cmd/gqlproxy
-        run: |
-          go test ./...
-          go vet ./...
-
-      - name: Build TypeScript + cross-platform gqlproxy sidecars
-        run: npm run build:all
-
-      - name: Verify sidecar artifacts
-        run: npm run verify:sidecars
+      - name: Build TypeScript
+        run: npm run build
 
       - name: Verify package contents
-        run: npm run verify:package
+        run: npm pack --dry-run --ignore-scripts
 
       - name: Publish
         run: npm publish --ignore-scripts

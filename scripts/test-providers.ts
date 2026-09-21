@@ -6,14 +6,13 @@ import {
   parseBarsStartDate,
   parseBoundedNumericEnv,
   parseDatabaseUrl,
-  parseInvestingTransport,
   parseNumericEnv,
 } from "../src/config.js";
 import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
 import {
   formatInvestingHttpError,
   isInvestingCloudflareChallenge,
-  sidecarBinaryName,
+  parseGqlResponse,
 } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
 import {
@@ -205,29 +204,23 @@ assert.throws(
   /YAHOO_STOCK_MCP_DATABASE_URL=.*mysql:\/\//
 );
 
-// ── Investing transport config parsing ──
+// ── Investing GraphQL response handling ──
 
-assert.equal(parseInvestingTransport(undefined), "auto");
-assert.equal(parseInvestingTransport(null), "auto");
-assert.equal(parseInvestingTransport(""), "auto");
-assert.equal(parseInvestingTransport(" auto "), "auto");
-assert.equal(parseInvestingTransport("NODE"), "node");
-assert.equal(parseInvestingTransport(" go "), "go");
+assert.deepEqual(parseGqlResponse(200, '{"data":{"investingAsset":{"investingID":"6408"}}}'), {
+  investingAsset: { investingID: "6408" },
+});
 assert.throws(
-  () => parseInvestingTransport("foo"),
-  /YAHOO_STOCK_MCP_INVESTING_TRANSPORT=.*foo.*auto.*node.*go/,
-  "invalid transport must fail fast with the env var and accepted values"
+  () => parseGqlResponse(200, '{"errors":[{"message":"asset not found"}]}'),
+  /investing gql: asset not found/,
+  "GraphQL-level errors must not be treated as data"
+);
+assert.throws(() => parseGqlResponse(403, "403"), /HTTP 403/);
+assert.throws(
+  () => parseGqlResponse(403, "<html><title>Just a moment...</title></html>"),
+  /Cloudflare challenge/,
+  "challenge bodies must surface the Cloudflare-specific message"
 );
 
-// ── gqlproxy platform resolution ──
-
-assert.equal(sidecarBinaryName("linux", "x64"), "gqlproxy-linux-x64");
-assert.equal(sidecarBinaryName("linux", "arm64"), "gqlproxy-linux-arm64");
-assert.equal(sidecarBinaryName("darwin", "x64"), "gqlproxy-darwin-x64");
-assert.equal(sidecarBinaryName("darwin", "arm64"), "gqlproxy-darwin-arm64");
-assert.equal(sidecarBinaryName("win32", "x64"), "gqlproxy-win32-x64.exe");
-assert.equal(sidecarBinaryName("win32", "arm64"), "gqlproxy-win32-arm64.exe");
-assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets should fail explicitly");
 
 assert.equal(
   isInvestingCloudflareChallenge(403, "<html><title>Just a moment...</title></html>"),
