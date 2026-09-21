@@ -11,7 +11,7 @@ import {
   priorityUpdate,
   shouldOverride,
 } from "../src/providers/priority.js";
-import { extractCalendarEvents, extractDividendsFromSummary } from "../src/providers/yahoo.js";
+import { extractCalendarEvents, extractDividendsFromSummary, extractShortInterest } from "../src/providers/yahoo.js";
 
 // ── canonical ratio vocabulary / units ──
 
@@ -214,6 +214,43 @@ assert.deepEqual(
   extractDividendsFromSummary({ summaryDetail: { lastDividendDate: { raw: dividendTs } } }),
   [],
   "date without amount should not create a dividend row"
+);
+
+// ── short interest: provider observation date is the snapshot identity ──
+
+const shortInterestTs = Date.UTC(2026, 7, 31) / 1000;
+assert.deepEqual(
+  extractShortInterest({
+    defaultKeyStatistics: {
+      sharesShort: { raw: 123456 },
+      sharesShortPriorMonth: { raw: 120000 },
+      shortRatio: { raw: 2.5 },
+      shortPercentOfFloat: { raw: 0.04 },
+      sharesPercentSharesOut: { raw: 0.03 },
+      dateShortInterest: { raw: shortInterestTs },
+    },
+  }),
+  {
+    asOf: "2026-08-31",
+    sharesShort: 123456,
+    sharesShortPriorMonth: 120000,
+    shortRatio: 2.5,
+    shortPercentOfFloat: 0.04,
+    sharesPercentSharesOut: 0.03,
+    shortDate: "2026-08-31",
+    source: "yahoo",
+  },
+  "short-interest snapshot key should use Yahoo's observation date"
+);
+assert.equal(
+  extractShortInterest({ defaultKeyStatistics: { sharesShort: { raw: 123456 } } }),
+  null,
+  "shares without a provider observation date must not fabricate today's date"
+);
+assert.equal(
+  extractShortInterest({ defaultKeyStatistics: { dateShortInterest: { raw: shortInterestTs } } }),
+  null,
+  "provider date without shares should not create a snapshot"
 );
 
 // ── calendar events: earnings and earnings-call dates are independent ──
