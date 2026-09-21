@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import {
   parseBarsStartDate,
   parseBoundedNumericEnv,
+  parseDatabaseUrl,
   parseInvestingTransport,
   parseNumericEnv,
 } from "../src/config.js";
@@ -162,6 +163,37 @@ assert.equal(
   parseBoundedNumericEnv("NEWS_COUNT", "not-a-number", 20, { min: 0, integer: true }),
   20,
   "malformed numeric strings keep the existing fallback behavior"
+);
+
+// ── Database URL scheme validation ──
+
+assert.deepEqual(
+  parseDatabaseUrl("mysql://user:p%40ss@db.example.com:3307/app%5Fdb"),
+  {
+    host: "db.example.com",
+    port: 3307,
+    user: "user",
+    password: "p@ss",
+    database: "app_db",
+    url: "mysql://user:p%40ss@db.example.com:3307/app%5Fdb",
+  }
+);
+assert.equal(
+  parseDatabaseUrl("mysql://user:pass@db.example.com/app").port,
+  3306,
+  "valid MySQL URLs without an explicit port should default to 3306"
+);
+assert.throws(
+  () => parseDatabaseUrl("postgres://user:pass@db.example.com/app"),
+  /YAHOO_STOCK_MCP_DATABASE_URL=.*postgres.*mysql:\/\//
+);
+assert.throws(
+  () => parseDatabaseUrl("https://db.example.com/app"),
+  /YAHOO_STOCK_MCP_DATABASE_URL=.*https.*mysql:\/\//
+);
+assert.throws(
+  () => parseDatabaseUrl("not a connection URL"),
+  /YAHOO_STOCK_MCP_DATABASE_URL=.*mysql:\/\//
 );
 
 // ── Investing transport config parsing ──
