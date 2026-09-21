@@ -19,6 +19,31 @@ export function parseNumericEnv(
   return Number.isFinite(n) ? n : fallback;
 }
 
+export function parseBoundedNumericEnv(
+  name: string,
+  raw: string | undefined | null,
+  fallback: number,
+  opts: { min?: number; max?: number; integer?: boolean } = {}
+): number {
+  const value = parseNumericEnv(raw, fallback);
+  const { min, max, integer = false } = opts;
+  if (
+    (integer && !Number.isInteger(value)) ||
+    (min != null && value < min) ||
+    (max != null && value > max)
+  ) {
+    const constraints = [
+      integer ? "an integer" : "a number",
+      min != null ? `>= ${min}` : null,
+      max != null ? `<= ${max}` : null,
+    ].filter(Boolean).join(" ");
+    throw new Error(
+      `Invalid YAHOO_STOCK_MCP_${name}=${JSON.stringify(raw)}; expected ${constraints}`
+    );
+  }
+  return value;
+}
+
 export function parseBarsStartDate(
   raw: string | undefined | null,
   fallback = "2000-01-01"
@@ -83,7 +108,7 @@ function buildDatabaseConfig(): DbTarget {
   if (url) return parseDatabaseUrl(url);
   return {
     host: env("DB_HOST") ?? "127.0.0.1",
-    port: parseNumericEnv(env("DB_PORT"), 3306),
+    port: parseBoundedNumericEnv("DB_PORT", env("DB_PORT"), 3306, { min: 1, max: 65535, integer: true }),
     user: env("DB_USER") ?? "stock",
     password: env("DB_PASSWORD") ?? "stock123",
     database: env("DB_NAME") ?? DEFAULT_DB,
@@ -99,7 +124,7 @@ export const config = {
   userAgent:
     env("USER_AGENT") ??
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-  requestDelayMs: parseNumericEnv(env("REQUEST_DELAY_MS"), 300),
+  requestDelayMs: parseBoundedNumericEnv("REQUEST_DELAY_MS", env("REQUEST_DELAY_MS"), 300, { min: 0 }),
   barsStartDate: parseBarsStartDate(env("BARS_START_DATE")),
   barsProvider: parseBarsProvider(env("BARS_PROVIDER")),
   investingTransport: parseInvestingTransport(env("INVESTING_TRANSPORT")),
@@ -108,7 +133,7 @@ export const config = {
    * primary lacks). `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`, default yahoo.
    */
   primaryProvider: parsePrimaryProvider(env("PRIMARY_PROVIDER")),
-  newsCount: parseNumericEnv(env("NEWS_COUNT"), 20),
+  newsCount: parseBoundedNumericEnv("NEWS_COUNT", env("NEWS_COUNT"), 20, { min: 0, integer: true }),
   /** Optional HTTP(S) proxy for all Node fetch requests, e.g. http://127.0.0.1:17890 */
   proxyUrl: env("PROXY_URL")?.trim() || null,
 };
