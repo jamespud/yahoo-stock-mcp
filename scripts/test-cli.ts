@@ -9,6 +9,7 @@ import {
   incrementalBarsStartFromCoverage,
   INCREMENTAL_BAR_REPLAY_DAYS,
   shouldSyncSectorMembers,
+  summarizeBatchSyncStatus,
 } from "../src/services/sync.service.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,6 +50,34 @@ async function main() {
   assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");
   assert.equal(shouldSyncSectorMembers({ members: true }), true, "members=true stays enabled");
   assert.equal(shouldSyncSectorMembers({ members: false }), false, "members=false disables holdings sync");
+
+  assert.equal(summarizeBatchSyncStatus([]), "success", "empty batch should be successful");
+  assert.equal(summarizeBatchSyncStatus(["success"]), "success", "single success should stay successful");
+  assert.equal(
+    summarizeBatchSyncStatus(["success", "success"]),
+    "success",
+    "all-success batch should stay successful"
+  );
+  assert.equal(
+    summarizeBatchSyncStatus(["success", "partial"]),
+    "partial",
+    "any partial result should make a mixed batch partial"
+  );
+  assert.equal(
+    summarizeBatchSyncStatus(["success", "failed"]),
+    "partial",
+    "a failed symbol beside a successful symbol should make the batch partial"
+  );
+  assert.equal(
+    summarizeBatchSyncStatus(["partial", "failed"]),
+    "partial",
+    "mixed incomplete statuses should remain partial unless every symbol failed"
+  );
+  assert.equal(
+    summarizeBatchSyncStatus(["failed", "failed"]),
+    "failed",
+    "an all-failed batch should be failed"
+  );
 
   assert.equal(INCREMENTAL_BAR_REPLAY_DAYS, 3, "incremental replay window should stay explicit");
   assert.equal(

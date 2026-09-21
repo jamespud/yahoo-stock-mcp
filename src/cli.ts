@@ -201,10 +201,15 @@ async function main() {
       if (sectors) {
         await syncSectors({ members: sectorMembers });
       } else if (all) {
-        await syncAll({ full, intraday });
+        const r = await syncAll({ full, intraday });
+        console.log(`sync --all status=${r.status} symbols=${r.results.length}`);
+        if (r.status !== "success") process.exitCode = 1;
       } else if (symbol) {
         const r = await syncOne(symbol, { full, intraday });
-        console.log(`synced ${symbol}: bars=${r.bars} news=${r.news} options=${r.options} intraday=${r.intraday}`);
+        console.log(
+          `synced ${symbol}: status=${r.status} bars=${r.bars} news=${r.news} options=${r.options} intraday=${r.intraday}`
+        );
+        if (r.status !== "success") process.exitCode = 1;
       } else {
         printHelp("sync");
         process.exitCode = 1;
