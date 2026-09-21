@@ -46,8 +46,18 @@ export interface InvestingFetchResult {
 }
 
 /** `CONNECT host:port HTTP/1.1` request head for a plain-HTTP forward proxy. */
-export function buildConnectRequest(host: string, port: number): string {
-  return `CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\nProxy-Connection: keep-alive\r\n\r\n`;
+export function buildConnectRequest(
+  host: string,
+  port: number,
+  authorization: string | null = null
+): string {
+  const lines = [
+    `CONNECT ${host}:${port} HTTP/1.1`,
+    `Host: ${host}:${port}`,
+    "Proxy-Connection: keep-alive",
+  ];
+  if (authorization) lines.push(`Proxy-Authorization: ${authorization}`);
+  return `${lines.join("\r\n")}\r\n\r\n`;
 }
 
 /** Status code from a CONNECT response head. Returns 0 when the head is malformed. */
@@ -116,6 +126,8 @@ export interface ProxyEndpoint {
   host: string;
   port: number;
   secure: boolean;
+  /** Precomputed Proxy-Authorization value. Never include it in error messages. */
+  authorization: string | null;
 }
 
 export function resolveProxyEndpoint(proxyUrl: string | null | undefined): ProxyEndpoint | null {
@@ -126,10 +138,23 @@ export function resolveProxyEndpoint(proxyUrl: string | null | undefined): Proxy
       `Unsupported proxy protocol for investing transport: ${proxy.protocol} (expected http: or https:)`
     );
   }
+  let authorization: string | null = null;
+  if (proxy.username || proxy.password) {
+    let username: string;
+    let password: string;
+    try {
+      username = decodeURIComponent(proxy.username);
+      password = decodeURIComponent(proxy.password);
+    } catch {
+      throw new Error("Invalid percent-encoding in proxy credentials");
+    }
+    authorization = `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+  }
   return {
     host: proxy.hostname,
     port: proxy.port ? Number(proxy.port) : proxy.protocol === "https:" ? 443 : 80,
     secure: proxy.protocol === "https:",
+    authorization,
   };
 }
 
@@ -151,7 +176,7 @@ export function connectRaw(host: string, port: number, timeoutMs: number): Promi
   });
 }
 
-/** Open the forward-proxy tunnel and read the CONNECT response head. */
+/** Open an HTTP or HTTPS forward-proxy tunnel and read the CONNECT response head. */
 export function openProxyTunnel(
   proxy: ProxyEndpoint,
   targetHost: string,
@@ -160,51 +185,64 @@ export function openProxyTunnel(
 ): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const raw = net.connect({ host: proxy.host, port: proxy.port });
+    let channel: net.Socket = raw;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      fail(new Error(`investing transport: proxy CONNECT to ${proxy.host}:${proxy.port} timed out`));
+    }, timeoutMs);
+
     const fail = (err: Error) => {
-      raw.destroy();
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      channel.destroy();
+      if (channel !== raw) raw.destroy();
       reject(err);
     };
-    const timer = setTimeout(
-      () => fail(new Error(`investing transport: proxy CONNECT to ${proxy.host}:${proxy.port} timed out`)),
-      timeoutMs
-    );
 
-    const onConnected = () => {
-      const sendConnect = (socket: net.Socket) => socket.write(buildConnectRequest(targetHost, targetPort));
-      if (!proxy.secure) {
-        sendConnect(raw);
-        return;
-      }
-      const wrapped = tls.connect({ socket: raw, servername: proxy.host });
-      wrapped.once("secureConnect", () => sendConnect(wrapped));
-      wrapped.once("error", (err) => {
+    const beginConnect = (socket: net.Socket) => {
+      channel = socket;
+      let buffered = Buffer.alloc(0);
+
+      const onData = (chunk: Buffer) => {
+        buffered = Buffer.concat([buffered, chunk]);
+        const end = buffered.indexOf("\r\n\r\n");
+        if (end < 0) return;
+
+        socket.removeListener("data", onData);
+        const head = buffered.subarray(0, end + 4).toString("latin1");
+        const status = parseConnectResponseHead(head);
+        if (status !== 200) {
+          fail(new Error(`investing transport: proxy CONNECT rejected with HTTP ${status || "?"}`));
+          return;
+        }
+
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        fail(err);
-      });
+        resolve(socket);
+      };
+
+      socket.on("data", onData);
+      socket.once("error", fail);
+      socket.write(buildConnectRequest(targetHost, targetPort, proxy.authorization));
     };
 
-    raw.once("connect", onConnected);
-    raw.once("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-
-    let buffered = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      buffered = Buffer.concat([buffered, chunk]);
-      const end = buffered.indexOf("\r\n\r\n");
-      if (end < 0) return;
-      raw.removeListener("data", onData);
-      clearTimeout(timer);
-      const head = buffered.subarray(0, end + 4).toString("latin1");
-      const status = parseConnectResponseHead(head);
-      if (status !== 200) {
-        fail(new Error(`investing transport: proxy CONNECT rejected with HTTP ${status || "?"}`));
+    raw.once("connect", () => {
+      if (!proxy.secure) {
+        beginConnect(raw);
         return;
       }
-      resolve(raw);
-    };
-    raw.on("data", onData);
+
+      // For an HTTPS forward proxy, CONNECT itself travels inside the TLS session to the proxy.
+      // Return that wrapped channel so the caller can layer the target-host TLS session over it.
+      const wrapped = tls.connect({ socket: raw, servername: proxy.host });
+      channel = wrapped;
+      wrapped.once("secureConnect", () => beginConnect(wrapped));
+      wrapped.once("error", fail);
+    });
+    raw.once("error", fail);
   });
 }
 
