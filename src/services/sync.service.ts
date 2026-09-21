@@ -356,7 +356,7 @@ export async function saveFinancials(
 ): Promise<void> {
   const observed = fields.filter((f) => f.value != null);
   if (observed.length === 0) return;
-  const keep = priorityUpdate(primary, ["value"]);
+  const keep = priorityUpdate(primary, ["value", "currency"]);
   const sql =
     `INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)

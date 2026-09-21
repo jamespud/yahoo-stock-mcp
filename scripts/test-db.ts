@@ -659,6 +659,67 @@ async function main() {
       "numeric zero is a real primary observation and must override"
     );
 
+    // Winning financial provider must move value, currency and source as one canonical observation.
+    const FIN_CURRENCY_PERIOD = "2026-01-03";
+    const currencyProbe = (
+      value: number,
+      currency: string,
+      source: "yahoo" | "investing"
+    ) => ({
+      statementType: "INCOME" as const,
+      periodType: "ANNUAL" as const,
+      periodEnd: FIN_CURRENCY_PERIOD,
+      fieldName: "currency_priority_financial",
+      value,
+      currency,
+      source,
+    });
+    const readCurrencyProbe = async () => {
+      const rows = await query<any[]>(
+        `SELECT value, currency, source FROM financial_statements
+         WHERE instrument_id = ? AND statement_type = 'INCOME' AND period_type = 'ANNUAL'
+           AND period_end = ? AND field_name = 'currency_priority_financial'`,
+        [id, FIN_CURRENCY_PERIOD]
+      );
+      return rows[0]
+        ? { value: Number(rows[0].value), currency: rows[0].currency, source: rows[0].source }
+        : null;
+    };
+
+    await saveFinancials(id, [currencyProbe(100, "USD", "investing")], "yahoo");
+    assert.deepEqual(await readCurrencyProbe(), { value: 100, currency: "USD", source: "investing" });
+    await saveFinancials(id, [currencyProbe(90, "JPY", "yahoo")], "yahoo");
+    assert.deepEqual(
+      await readCurrencyProbe(),
+      { value: 90, currency: "JPY", source: "yahoo" },
+      "Yahoo primary override must update value and currency together"
+    );
+    await saveFinancials(id, [currencyProbe(120, "EUR", "investing")], "yahoo");
+    assert.deepEqual(
+      await readCurrencyProbe(),
+      { value: 90, currency: "JPY", source: "yahoo" },
+      "fallback provider must not change currency on a primary-owned row"
+    );
+
+    await saveFinancials(id, [currencyProbe(80, "EUR", "investing")], "investing");
+    assert.deepEqual(
+      await readCurrencyProbe(),
+      { value: 80, currency: "EUR", source: "investing" },
+      "flipped primary must mirror value/currency ownership"
+    );
+    await saveFinancials(id, [currencyProbe(70, "GBP", "yahoo")], "investing");
+    assert.deepEqual(await readCurrencyProbe(), { value: 80, currency: "EUR", source: "investing" });
+    await saveFinancials(id, [currencyProbe(0, "CAD", "investing")], "investing");
+    assert.deepEqual(
+      await readCurrencyProbe(),
+      { value: 0, currency: "CAD", source: "investing" },
+      "numeric zero must still carry the winning provider currency"
+    );
+    await query(
+      "DELETE FROM financial_statements WHERE instrument_id = ? AND field_name = 'currency_priority_financial'",
+      [id]
+    );
+
     const NULL_RATIO_AS_OF = "2026-01-04";
     const ratioNullProbe = (
       metric: string,
