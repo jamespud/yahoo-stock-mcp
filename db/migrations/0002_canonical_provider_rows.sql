@@ -1,7 +1,9 @@
 -- Canonicalize dividends/company_events across providers.
 -- db.ts sets @yahoo_stock_mcp_primary_provider from runtime config; default to Yahoo
 -- when this file is executed manually.
-SET @canonical_primary_provider = COALESCE(@yahoo_stock_mcp_primary_provider, 'yahoo');
+SET @canonical_primary_provider =
+  CONVERT(COALESCE(@yahoo_stock_mcp_primary_provider, 'yahoo') USING utf8mb4)
+  COLLATE utf8mb4_unicode_ci;
 
 -- Preserve useful nullable dividend fields from the fallback row before removing it.
 UPDATE dividends p
