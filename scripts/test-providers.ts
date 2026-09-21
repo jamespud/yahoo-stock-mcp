@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { parseInvestingTransport, parseNumericEnv } from "../src/config.js";
-import { HttpError, httpText, RateLimiter } from "../src/providers/http.js";
+import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
 import {
@@ -112,6 +112,26 @@ assert.equal(sidecarBinaryName("win32", "x64"), "gqlproxy-win32-x64.exe");
 assert.equal(sidecarBinaryName("win32", "arm64"), "gqlproxy-win32-arm64.exe");
 assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets should fail explicitly");
 
+// ── HTTP error URL redaction ──
+
+assert.equal(
+  redactUrlForError("https://query1.finance.yahoo.com/path?crumb=secret-token&symbol=NVDA"),
+  "https://query1.finance.yahoo.com/path?crumb=%5BREDACTED%5D&symbol=NVDA"
+);
+assert.equal(redactUrlForError("not a url"), "not a url", "malformed display URLs must remain safe to format");
+
+{
+  const err = new HttpError(
+    401,
+    "https://query1.finance.yahoo.com/path?crumb=secret-token&symbol=NVDA",
+    "unauthorized"
+  );
+  assert.equal(err.url.includes("secret-token"), true, "raw URL remains available programmatically");
+  assert.equal(err.message.includes("secret-token"), false, "user-visible message must not expose crumb");
+  assert.match(err.message, /REDACTED/);
+  assert.match(err.message, /symbol=NVDA/);
+}
+
 // ── text HTTP retry / timeout behavior ──
 
 {
@@ -131,6 +151,16 @@ assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets sho
     }
     if (req.url === "/not-found") {
       notFoundHits++;
+      res.statusCode = 404;
+      res.end("missing");
+      return;
+    }
+    if (req.url?.startsWith("/redact-retry")) {
+      res.statusCode = 503;
+      res.end("temporary");
+      return;
+    }
+    if (req.url?.startsWith("/redact-http-error")) {
       res.statusCode = 404;
       res.end("missing");
       return;
@@ -162,6 +192,30 @@ assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets sho
       (err: unknown) => err instanceof HttpError && err.status === 404
     );
     assert.equal(notFoundHits, 1, "non-retry 404 should fail without another request");
+
+    const sensitiveQuery = "crumb=super-secret-crumb&symbol=NVDA";
+    await assert.rejects(
+      httpJson(`${base}/redact-retry?${sensitiveQuery}`, { retries: 0, timeoutMs: 1000 }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal(err.message.includes("super-secret-crumb"), false);
+        assert.match(err.message, /REDACTED/);
+        assert.match(err.message, /symbol=NVDA/);
+        return true;
+      },
+      "retry exhaustion must redact sensitive query values"
+    );
+    await assert.rejects(
+      httpText(`${base}/redact-http-error?${sensitiveQuery}`, { retries: 0, timeoutMs: 1000 }),
+      (err: unknown) => {
+        assert.ok(err instanceof HttpError);
+        assert.equal(err.message.includes("super-secret-crumb"), false);
+        assert.match(err.message, /REDACTED/);
+        assert.match(err.message, /symbol=NVDA/);
+        return true;
+      },
+      "HttpError messages must redact sensitive query values"
+    );
 
     await assert.rejects(
       httpText(`${base}/hang`, { retries: 0, timeoutMs: 50 }),
