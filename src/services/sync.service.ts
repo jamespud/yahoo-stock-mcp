@@ -10,7 +10,6 @@ import {
   extractFundHolders,
   extractHolderBreakdown,
   extractInstitutionalHolders,
-  extractYahooIncomeStatements,
   extractInsiderTransactions,
   extractRatiosFromSummary,
   extractRecommendationTrend,
@@ -785,7 +784,6 @@ export async function syncOne(
     yahooChecklist: { status: "skipped" },
     investingSnapshot: { status: "skipped" },
     profile: { status: "skipped" },
-    yahooIncomeStatements: { status: "skipped" },
     yahooFundamentals: { status: "skipped" },
     news: { status: "skipped" },
     options: { status: "skipped" },
@@ -820,14 +818,6 @@ export async function syncOne(
       return null;
     });
   if (summary) {
-    try {
-      const incomeStatements = extractYahooIncomeStatements(summary.modules);
-      await saveFinancials(instrument.id, incomeStatements);
-      components.yahooIncomeStatements = { status: "ok", count: incomeStatements.length };
-    } catch (e) {
-      failed("yahooIncomeStatements", e);
-    }
-
     try {
       const modules = summary.modules;
     await saveRatios(instrument.id, extractRatiosFromSummary(modules, symbol, today));
