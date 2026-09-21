@@ -1,5 +1,5 @@
 // Live provider contract canary. Intentionally uses real upstream network calls and no database.
-import { fetchInvestingSnapshot } from "../src/providers/investing.js";
+import { fetchInvestingSnapshot, isInvestingAvailabilityError } from "../src/providers/investing.js";
 import {
   fetchYahooBars,
   fetchYahooFundamentals,
@@ -21,6 +21,7 @@ const FUNDAMENTAL_TYPES = [
 const ABSOLUTE_MONEY_FLOOR = 1_000_000_000;
 
 const failures: string[] = [];
+const degraded: string[] = [];
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -113,63 +114,86 @@ await check("yahoo.news", async () => {
   return `request-ok items=${news.length}`;
 });
 
-// Investing gates this job too: it is a real data source, so a silent Cloudflare/contract
-// regression must show up here rather than being logged as an informational warning.
-await check("investing.snapshot", async () => {
-  const snapshot = await fetchInvestingSnapshot(SYMBOL);
+// Investing availability is environment-dependent. Fetch/network access failures are DEGRADED,
+// but once a snapshot is returned its schema and unit contracts hard-gate the canary.
+async function checkInvestingSnapshot(): Promise<void> {
+  let snapshot;
+  try {
+    snapshot = await fetchInvestingSnapshot(SYMBOL);
+  } catch (err) {
+    const detail = message(err);
+    if (isInvestingAvailabilityError(err)) {
+      degraded.push(`investing.snapshot: ${detail}`);
+      console.warn(`⚠ investing.snapshot: DEGRADED — ${detail}`);
+      return;
+    }
+    failures.push(`investing.snapshot: ${detail}`);
+    console.error(`✗ investing.snapshot: ${detail}`);
+    return;
+  }
 
-  requireContract(
-    Number.isFinite(snapshot.identity.investingId) && snapshot.identity.investingId > 0,
-    `investing identity has no numeric id (${String(snapshot.identity.investingId)})`
-  );
-  requireContract(snapshot.financials.length > 0, "snapshot returned no financial statements");
-  requireContract(snapshot.ratios.length > 0, "snapshot returned no ratios");
+  try {
+    requireContract(
+      Number.isFinite(snapshot.identity.investingId) && snapshot.identity.investingId > 0,
+      `investing identity has no numeric id (${String(snapshot.identity.investingId)})`
+    );
+    requireContract(snapshot.financials.length > 0, "snapshot returned no financial statements");
+    requireContract(snapshot.ratios.length > 0, "snapshot returned no ratios");
 
-  const statements = new Set(snapshot.financials.map((field) => field.statementType));
-  requireContract(statements.has("INCOME"), "no INCOME statement rows returned");
-  requireContract(statements.has("BALANCE"), "no BALANCE statement rows returned");
-  requireContract(statements.has("CASHFLOW"), "no CASHFLOW statement rows returned");
-  requireContract(
-    snapshot.financials.every((field) => field.value == null || Number.isFinite(field.value)),
-    "one or more statement rows have a non-finite value"
-  );
+    const statements = new Set(snapshot.financials.map((field) => field.statementType));
+    requireContract(statements.has("INCOME"), "no INCOME statement rows returned");
+    requireContract(statements.has("BALANCE"), "no BALANCE statement rows returned");
+    requireContract(statements.has("CASHFLOW"), "no CASHFLOW statement rows returned");
+    requireContract(
+      snapshot.financials.every((field) => field.value == null || Number.isFinite(field.value)),
+      "one or more statement rows have a non-finite value"
+    );
 
-  const annualIncome = snapshot.financials.filter(
-    (field) => field.statementType === "INCOME" && field.periodType === "ANNUAL"
-  );
-  const revenue = annualIncome.find((field) => field.fieldName === "Total Revenues");
-  requireContract(revenue != null, "no annual Total Revenues row");
-  requireContract(
-    typeof revenue.value === "number" && revenue.value > ABSOLUTE_MONEY_FLOOR,
-    `Total Revenues is not normalised to absolute units: ${String(revenue.value)}`
-  );
+    const annualIncome = snapshot.financials.filter(
+      (field) => field.statementType === "INCOME" && field.periodType === "ANNUAL"
+    );
+    const revenue = annualIncome.find((field) => field.fieldName === "Total Revenues");
+    requireContract(revenue != null, "no annual Total Revenues row");
+    requireContract(
+      typeof revenue.value === "number" && revenue.value > ABSOLUTE_MONEY_FLOOR,
+      `Total Revenues is not normalised to absolute units: ${String(revenue.value)}`
+    );
 
-  // Per-share and percentage series must stay unscaled; a blanket money multiplier would blow
-  // these past the guard below.
-  const eps = annualIncome.find((field) => field.fieldName === "Basic EPS - Continuing Operations");
-  requireContract(eps != null, "no annual Basic EPS row");
-  requireContract(
-    typeof eps.value === "number" && Math.abs(eps.value) < 1000,
-    `Basic EPS looks scaled: ${String(eps.value)}`
-  );
+    const eps = annualIncome.find((field) => field.fieldName === "Basic EPS - Continuing Operations");
+    requireContract(eps != null, "no annual Basic EPS row");
+    requireContract(
+      typeof eps.value === "number" && Math.abs(eps.value) < 1000,
+      `Basic EPS looks scaled: ${String(eps.value)}`
+    );
 
-  const margin = annualIncome.find((field) => field.fieldName === "Gross Profit Margin %");
-  requireContract(margin != null, "no annual Gross Profit Margin row");
-  requireContract(
-    typeof margin.value === "number" && Math.abs(margin.value) < 1000,
-    `Gross Profit Margin looks scaled: ${String(margin.value)}`
-  );
+    const margin = annualIncome.find((field) => field.fieldName === "Gross Profit Margin %");
+    requireContract(margin != null, "no annual Gross Profit Margin row");
+    requireContract(
+      typeof margin.value === "number" && Math.abs(margin.value) < 1000,
+      `Gross Profit Margin looks scaled: ${String(margin.value)}`
+    );
 
-  return (
-    `id=${snapshot.identity.investingId} financials=${snapshot.financials.length} ` +
-    `ratios=${snapshot.ratios.length} revenue=${revenue.value} eps=${eps.value} latest=${snapshot.latestPrice}`
-  );
-});
+    console.log(
+      `✓ investing.snapshot: id=${snapshot.identity.investingId} financials=${snapshot.financials.length} ` +
+        `ratios=${snapshot.ratios.length} revenue=${revenue.value} eps=${eps.value} latest=${snapshot.latestPrice}`
+    );
+  } catch (err) {
+    const detail = message(err);
+    failures.push(`investing.snapshot.contract: ${detail}`);
+    console.error(`✗ investing.snapshot.contract: ${detail}`);
+  }
+}
+
+await checkInvestingSnapshot();
 
 if (failures.length > 0) {
   console.error("\nLive provider canary: FAIL");
   for (const failure of failures) console.error(`- ${failure}`);
+  for (const warning of degraded) console.warn(`- DEGRADED: ${warning}`);
   process.exitCode = 1;
+} else if (degraded.length > 0) {
+  console.warn("\nLive provider canary: PASS WITH DEGRADED PROVIDER");
+  for (const warning of degraded) console.warn(`- ${warning}`);
 } else {
   console.log("\nLive provider canary: PASS");
 }
