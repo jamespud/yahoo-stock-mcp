@@ -268,12 +268,21 @@ export async function getFinancials(symbol: string, statementType?: string, peri
      ORDER BY period_end DESC, field_name LIMIT ${Math.max(1, Math.min(limit * 40, 5000))}`,
     params
   );
-  // pivot: period_end -> { field: value }
+  // pivot: period_end -> values + per-field provenance
   const pivoted = new Map<string, any>();
   for (const r of rows) {
     const key = `${r.statement_type}|${r.period_type}|${r.period_end}`;
-    const entry = pivoted.get(key) ?? { statementType: r.statement_type, periodType: r.period_type, periodEnd: r.period_end, fields: {}, source: r.source };
+    const entry = pivoted.get(key) ?? {
+      statementType: r.statement_type,
+      periodType: r.period_type,
+      periodEnd: r.period_end,
+      fields: {},
+      fieldSources: {},
+      source: r.source,
+    };
     entry.fields[r.field_name] = r.value;
+    entry.fieldSources[r.field_name] = r.source;
+    if (entry.source !== r.source) entry.source = "mixed";
     pivoted.set(key, entry);
   }
   return { symbol: inst.symbol, periods: [...pivoted.values()] };
