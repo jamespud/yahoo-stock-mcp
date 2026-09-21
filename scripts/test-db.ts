@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { closeDb, initSchema, loadMigrations, migrateSchema, query, replaceBatch } from "../src/db.js";
 import * as q from "../src/services/query.service.js";
+import { extractYahooIncomeStatements } from "../src/providers/yahoo.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
 import {
   applyInstrumentProfile,
@@ -918,6 +919,48 @@ async function main() {
 
     // --- data-source priority: primary wins, the other source may only fill gaps ---
     const { saveFinancials, saveRatios } = await import("../src/services/sync.service.js");
+
+    const recoveredIncome = extractYahooIncomeStatements({
+      financialData: { financialCurrency: "USD" },
+      incomeStatementHistory: {
+        incomeStatementHistory: [
+          {
+            endDate: { raw: Date.UTC(2035, 11, 31) / 1000 },
+            totalRevenue: { raw: 123456789 },
+          },
+        ],
+      },
+    });
+    await saveFinancials(id, recoveredIncome, "yahoo");
+    const recoveredIncomeRow = (await query<any[]>(
+      `SELECT statement_type, period_type, period_end, field_name, value, currency, source
+       FROM financial_statements
+       WHERE instrument_id = ? AND statement_type = 'INCOME' AND period_type = 'ANNUAL'
+         AND period_end = '2035-12-31' AND field_name = 'Total Revenue'`,
+      [id]
+    ))[0];
+    assert.equal(recoveredIncomeRow?.statement_type, "INCOME");
+    assert.equal(recoveredIncomeRow?.period_type, "ANNUAL");
+    assert.equal(new Date(recoveredIncomeRow?.period_end).toISOString().slice(0, 10), "2035-12-31");
+    assert.equal(Number(recoveredIncomeRow?.value), 123456789);
+    assert.equal(recoveredIncomeRow?.currency, "USD");
+    assert.equal(recoveredIncomeRow?.source, "yahoo");
+    assert.equal(
+      summarizeSyncStatus({
+        yahooIncomeStatements: { status: "ok", count: recoveredIncome.length },
+        yahooFundamentals: {
+          status: "failed",
+          error: "yahoo fundamentals response contained no requested data series",
+        },
+      }),
+      "partial",
+      "recovered Yahoo income rows must not mask the broken fundamentals-timeseries component"
+    );
+    await query(
+      `DELETE FROM financial_statements
+       WHERE instrument_id = ? AND period_end = '2035-12-31' AND field_name = 'Total Revenue'`,
+      [id]
+    );
     const PROBE_AS_OF = "2026-01-02";
     const readProbe = async (): Promise<{ value: number; source: string } | null> => {
       const rows = await query<any[]>(
