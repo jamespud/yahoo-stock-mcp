@@ -129,6 +129,7 @@ export async function runChecklistTasks(tasks: ChecklistTask[]): Promise<Checkli
 export async function persistSyncState(
   instrumentId: number,
   full: boolean,
+  status: SyncStatus,
   lastBarDate: unknown,
   warnings: string[],
   quoteSucceeded: boolean
@@ -136,13 +137,28 @@ export async function persistSyncState(
   const errorCount = warnings.length;
   const lastError = warnings.length ? warnings[warnings.length - 1] : null;
   if (full) {
+    if (status === "success") {
+      await query(
+        `INSERT INTO sync_state
+           (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
+         VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)
+         ON DUPLICATE KEY UPDATE
+           full_synced = 1,
+           last_full_sync_at = NOW(),
+           last_bar_date = VALUES(last_bar_date),
+           last_quote_at = IF(?, NOW(), last_quote_at),
+           error_count = VALUES(error_count),
+           last_error = VALUES(last_error)`,
+        [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+      );
+      return;
+    }
+
     await query(
       `INSERT INTO sync_state
          (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
-       VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)
+       VALUES (?, 0, NULL, NULL, ?, IF(?, NOW(), NULL), ?, ?)
        ON DUPLICATE KEY UPDATE
-         full_synced = 1,
-         last_full_sync_at = NOW(),
          last_bar_date = VALUES(last_bar_date),
          last_quote_at = IF(?, NOW(), last_quote_at),
          error_count = VALUES(error_count),
@@ -1001,9 +1017,11 @@ export async function syncOne(
     "SELECT MAX(trade_date) AS d FROM daily_bars WHERE instrument_id = ? AND source = ?",
     [instrument.id, config.barsProvider]
   );
+  const status = summarizeSyncStatus(components);
   await persistSyncState(
     instrument.id,
     opts.full,
+    status,
     lastBarDate[0]?.d ?? null,
     warnings,
     components.yahooSummary.status === "ok"
@@ -1011,7 +1029,7 @@ export async function syncOne(
 
   return {
     ...result,
-    status: summarizeSyncStatus(components),
+    status,
     components,
     warnings,
   };
