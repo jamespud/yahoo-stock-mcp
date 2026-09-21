@@ -2,7 +2,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { parseBarsStartDate, parseInvestingTransport, parseNumericEnv } from "../src/config.js";
+import {
+  parseBarsStartDate,
+  parseBoundedNumericEnv,
+  parseInvestingTransport,
+  parseNumericEnv,
+} from "../src/config.js";
 import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
 import { sidecarBinaryName } from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
@@ -107,6 +112,57 @@ assert.equal(parseNumericEnv("-5", 20), -5);
 assert.equal(parseNumericEnv("12.5", 20), 12.5);
 assert.equal(parseNumericEnv("not-a-number", 20), 20);
 assert.equal(parseNumericEnv("Infinity", 20), 20);
+
+// ── Numeric env range validation ──
+
+assert.equal(
+  parseBoundedNumericEnv("DB_PORT", undefined, 3306, { min: 1, max: 65535, integer: true }),
+  3306
+);
+assert.equal(
+  parseBoundedNumericEnv("DB_PORT", "65535", 3306, { min: 1, max: 65535, integer: true }),
+  65535
+);
+assert.throws(
+  () => parseBoundedNumericEnv("DB_PORT", "0", 3306, { min: 1, max: 65535, integer: true }),
+  /YAHOO_STOCK_MCP_DB_PORT=.*>= 1.*<= 65535/
+);
+assert.throws(
+  () => parseBoundedNumericEnv("DB_PORT", "65536", 3306, { min: 1, max: 65535, integer: true }),
+  /DB_PORT/
+);
+assert.throws(
+  () => parseBoundedNumericEnv("DB_PORT", "3306.5", 3306, { min: 1, max: 65535, integer: true }),
+  /DB_PORT/
+);
+
+assert.equal(
+  parseBoundedNumericEnv("REQUEST_DELAY_MS", "0", 300, { min: 0 }),
+  0,
+  "explicit zero request delay remains supported"
+);
+assert.throws(
+  () => parseBoundedNumericEnv("REQUEST_DELAY_MS", "-1", 300, { min: 0 }),
+  /YAHOO_STOCK_MCP_REQUEST_DELAY_MS=.*>= 0/
+);
+
+assert.equal(
+  parseBoundedNumericEnv("NEWS_COUNT", "0", 20, { min: 0, integer: true }),
+  0
+);
+assert.throws(
+  () => parseBoundedNumericEnv("NEWS_COUNT", "-1", 20, { min: 0, integer: true }),
+  /NEWS_COUNT/
+);
+assert.throws(
+  () => parseBoundedNumericEnv("NEWS_COUNT", "2.5", 20, { min: 0, integer: true }),
+  /NEWS_COUNT/
+);
+assert.equal(
+  parseBoundedNumericEnv("NEWS_COUNT", "not-a-number", 20, { min: 0, integer: true }),
+  20,
+  "malformed numeric strings keep the existing fallback behavior"
+);
 
 // ── Investing transport config parsing ──
 
