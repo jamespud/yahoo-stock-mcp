@@ -12,9 +12,14 @@ export type Provider = "yahoo" | "investing";
 /** The `source` column of an existing row: might be the other provider, a legacy value, or empty. */
 export type SourceTag = string | null | undefined;
 
-/** Parses `YAHOO_STOCK_MCP_PRIMARY_PROVIDER`: case/whitespace insensitive, unknown values fall back to yahoo. */
+/** Parses `YAHOO_STOCK_MCP_PRIMARY_PROVIDER`: case/whitespace insensitive; blank defaults to Yahoo. */
 export function parsePrimaryProvider(raw: string | undefined | null): Provider {
-  return (raw ?? "").trim().toLowerCase() === "investing" ? "investing" : "yahoo";
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "" || value === "yahoo") return "yahoo";
+  if (value === "investing") return "investing";
+  throw new Error(
+    `Invalid YAHOO_STOCK_MCP_PRIMARY_PROVIDER=${JSON.stringify(raw)}; expected "yahoo" or "investing"`
+  );
 }
 
 /** Whether an incoming write should override the value already stored in the row. */
