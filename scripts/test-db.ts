@@ -4,6 +4,8 @@ import * as q from "../src/services/query.service.js";
 import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-util.js";
 import {
   applyInstrumentProfile,
+  ensureBarProviderIdentity,
+  incrementalBarsStartForProvider,
   mergeInstrumentProfile,
   persistSyncState,
   saveCompanyEvents,
@@ -205,6 +207,41 @@ async function main() {
     const inst = await q.getInstrument(TEST_SYMBOL);
     assert.ok(inst && inst.id === id);
     assert.equal(await q.getInstrument("QQQQNOPE"), null);
+
+    // --- configured bar provider must hydrate its own identity and watermark ---
+    const barInstrument = (await query<any[]>(
+      "SELECT id, symbol, yahoo_symbol, investing_id FROM instruments WHERE id = ?",
+      [id]
+    ))[0];
+    assert.equal(barInstrument.investing_id, null, "seed starts without an Investing id");
+    let resolvedSymbol: string | null = null;
+    const hydrated = await ensureBarProviderIdentity(
+      barInstrument,
+      "investing",
+      async (symbol) => {
+        resolvedSymbol = symbol;
+        return { investingId: 424242, name: "ZZ Test Corp", ticker: "ZZTEST", exchange: "TEST" };
+      }
+    );
+    assert.equal(resolvedSymbol, TEST_SYMBOL, "Investing identity should resolve from the canonical symbol");
+    assert.equal(hydrated.investing_id, 424242);
+    assert.equal(
+      Number((await query<any[]>("SELECT investing_id FROM instruments WHERE id = ?", [id]))[0].investing_id),
+      424242,
+      "hydrated Investing id should be persisted before bar sync"
+    );
+    await query("UPDATE instruments SET investing_id = NULL WHERE id = ?", [id]);
+
+    assert.equal(
+      await incrementalBarsStartForProvider(id, "yahoo", Date.UTC(2030, 0, 1)),
+      "2026-07-31",
+      "Yahoo incremental watermark should use Yahoo rows"
+    );
+    assert.equal(
+      await incrementalBarsStartForProvider(id, "investing", Date.UTC(2030, 0, 1)),
+      "2000-01-01",
+      "switching to Investing must not reuse Yahoo's watermark; it should backfill full history"
+    );
 
     // --- quote ---
     const quote = await q.getQuote(TEST_SYMBOL);
