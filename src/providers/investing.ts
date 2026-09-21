@@ -40,7 +40,7 @@ export function isInvestingCloudflareChallenge(status: number, text: string): bo
 
 export function formatInvestingHttpError(scope: string, status: number, text: string): string {
   if (isInvestingCloudflareChallenge(status, text)) {
-    return `investing ${scope} HTTP 403: Cloudflare challenge blocked the request after sidecar retries`;
+    return `investing ${scope} HTTP 403: Cloudflare challenge blocked the request`;
   }
   const excerpt = text.replace(/\s+/g, " ").trim().slice(0, 300);
   return excerpt
