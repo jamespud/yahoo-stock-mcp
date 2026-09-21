@@ -555,6 +555,20 @@ assert.deepEqual(
           value: { raw: 111 },
         },
         {
+          reportDate: { raw: "not-a-timestamp" },
+          organization: "Invalid Date Capital",
+          pctHeld: { raw: 0.035 },
+          position: { raw: 777 },
+          value: { raw: 333 },
+        },
+        {
+          reportDate: 1e30,
+          organization: "Out Of Range Partners",
+          pctHeld: { raw: 0.036 },
+          position: { raw: 666 },
+          value: { raw: 444 },
+        },
+        {
           reportDate: { raw: institutionalWrappedTs },
           organization: "",
           pctHeld: { raw: 0.04 },
@@ -586,7 +600,7 @@ assert.deepEqual(
       source: "yahoo",
     },
   ],
-  "institutional holders should keep Yahoo report dates and skip undated/anonymous rows"
+  "institutional holders should keep Yahoo report dates and skip missing, invalid, out-of-range, or anonymous rows"
 );
 
 // ── short interest: provider observation date is the snapshot identity ──
