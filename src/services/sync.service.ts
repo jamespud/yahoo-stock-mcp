@@ -971,7 +971,7 @@ export async function syncOne(
   try {
     const yahooFinancials = await fetchYahooFundamentals(instrument.yahoo_symbol ?? symbol, [
       "annualTotalRevenue", "annualNetIncome", "annualGrossProfit", "annualOperatingIncome",
-      "annualTotalAssets", "annualTotalLiabilities", "annualStockholdersEquity",
+      "annualTotalAssets", "annualTotalLiabilitiesNetMinorityInterest", "annualStockholdersEquity",
       "annualOperatingCashFlow", "annualCapitalExpenditure", "annualFreeCashFlow",
       "quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyTotalAssets",
     ]);

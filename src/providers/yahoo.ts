@@ -114,7 +114,7 @@ export async function fetchYahooBars(
 
 // ── quoteSummary ────────────────────────────────────────────────
 
-const SUMMARY_MODULES = [
+export const YAHOO_SUMMARY_MODULES = [
   "price",
   "summaryDetail",
   "defaultKeyStatistics",
@@ -131,9 +131,10 @@ const SUMMARY_MODULES = [
   "insiderTransactions",
   "upgradeDowngradeHistory",
   "summaryProfile",
-  "esgScores",
   "topHoldings",
-].join(",");
+] as const;
+
+const SUMMARY_MODULES = YAHOO_SUMMARY_MODULES.join(",");
 
 export interface YahooSummary {
   raw: any;
@@ -259,6 +260,7 @@ const YAHOO_FINANCIAL_STATEMENT_BY_FIELD: Record<
   OperatingIncome: "INCOME",
   TotalAssets: "BALANCE",
   TotalLiabilities: "BALANCE",
+  TotalLiabilitiesNetMinorityInterest: "BALANCE",
   StockholdersEquity: "BALANCE",
   OperatingCashFlow: "CASHFLOW",
   CapitalExpenditure: "CASHFLOW",
@@ -322,11 +324,25 @@ export function parseYahooFundamentalsResponse(
   return fields;
 }
 
+export function buildYahooFundamentalsUrl(
+  symbol: string,
+  types: string[],
+  nowMs = Date.now()
+): string {
+  const period2 = Math.floor(nowMs / 1000);
+  const params = new URLSearchParams({
+    type: types.join(","),
+    period1: "0",
+    period2: String(period2),
+  });
+  return `${CHART_HOST}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?${params.toString()}`;
+}
+
 export async function fetchYahooFundamentals(
   symbol: string,
   types: string[]
 ): Promise<FinancialField[]> {
-  const url = `${CHART_HOST}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=${types.join(",")}`;
+  const url = buildYahooFundamentalsUrl(symbol, types);
   const resp = await httpJson<any>(url);
   return parseYahooFundamentalsResponse(resp, types);
 }
@@ -392,7 +408,7 @@ export function extractRatiosFromSummary(modules: Record<string, any>, symbol: s
     ["total_cash", dks.totalCash ?? fd.totalCash],
     ["total_debt", dks.totalDebt ?? fd.totalDebt],
     ["free_cash_flow", fd.freeCashflow],
-    ["operating_cash_flow", fd.operatingCashflows],
+    ["operating_cash_flow", fd.operatingCashflow ?? fd.operatingCashflows],
     ["revenue_growth", fd.revenueGrowth],
     ["earnings_growth", fd.earningsGrowth],
     ["current_ratio", fd.currentRatio],

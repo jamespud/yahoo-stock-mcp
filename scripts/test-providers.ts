@@ -25,7 +25,10 @@ import {
   shouldOverride,
 } from "../src/providers/priority.js";
 import {
+  buildYahooFundamentalsUrl,
   classifyYahooFinancialStatement,
+  extractRatiosFromSummary,
+  YAHOO_SUMMARY_MODULES,
   parseYahooFundamentalsResponse,
   extractCalendarEvents,
   extractDividendsFromSummary,
@@ -491,6 +494,63 @@ assert.deepEqual(fieldMerge.params, ["yahoo", "yahoo", "yahoo", "yahoo", "yahoo"
 
 // ── Yahoo fundamentals: explicit financial-statement classification ──
 
+assert.equal(
+  YAHOO_SUMMARY_MODULES.includes("topHoldings"),
+  true,
+  "ETF topHoldings must remain requested"
+);
+assert.equal(
+  (YAHOO_SUMMARY_MODULES as readonly string[]).includes("esgScores"),
+  false,
+  "unused esgScores module should no longer be requested"
+);
+
+const fundamentalsUrl = new URL(
+  buildYahooFundamentalsUrl(
+    "AAPL",
+    ["annualGrossProfit", "annualTotalAssets", "annualOperatingCashFlow"],
+    Date.UTC(2026, 8, 21, 12, 0, 0)
+  )
+);
+assert.equal(fundamentalsUrl.searchParams.get("period1"), "0");
+assert.equal(
+  fundamentalsUrl.searchParams.get("period2"),
+  String(Math.floor(Date.UTC(2026, 8, 21, 12, 0, 0) / 1000)),
+  "fundamentals period2 should use the current Unix time instead of an unbounded/future sentinel"
+);
+assert.equal(
+  fundamentalsUrl.searchParams.get("type"),
+  "annualGrossProfit,annualTotalAssets,annualOperatingCashFlow",
+  "fundamentals request should preserve the requested series list"
+);
+
+const currentOperatingCashFlow = extractRatiosFromSummary(
+  {
+    financialData: {
+      operatingCashflow: { raw: 123456 },
+      operatingCashflows: { raw: 999999 },
+    },
+  },
+  "AAPL",
+  "2026-09-21"
+).find((row) => row.metric === "operating_cash_flow");
+assert.equal(
+  currentOperatingCashFlow?.value,
+  123456,
+  "current singular operatingCashflow field should take precedence"
+);
+
+const legacyOperatingCashFlow = extractRatiosFromSummary(
+  { financialData: { operatingCashflows: { raw: 654321 } } },
+  "AAPL",
+  "2026-09-21"
+).find((row) => row.metric === "operating_cash_flow");
+assert.equal(
+  legacyOperatingCashFlow?.value,
+  654321,
+  "legacy plural operatingCashflows should remain a compatibility fallback"
+);
+
 for (const typeName of [
   "annualTotalRevenue",
   "annualNetIncome",
@@ -508,7 +568,7 @@ for (const typeName of [
 
 for (const typeName of [
   "annualTotalAssets",
-  "annualTotalLiabilities",
+  "annualTotalLiabilitiesNetMinorityInterest",
   "annualStockholdersEquity",
   "quarterlyTotalAssets",
 ]) {
@@ -536,6 +596,40 @@ assert.equal(
   classifyYahooFinancialStatement("annualUnknownMetric"),
   null,
   "unknown Yahoo fundamentals must not silently default to CASHFLOW"
+);
+
+assert.deepEqual(
+  parseYahooFundamentalsResponse(
+    {
+      timeseries: {
+        result: [
+          {
+            meta: { symbol: ["AAPL"], type: ["annualTotalLiabilitiesNetMinorityInterest"] },
+            annualTotalLiabilitiesNetMinorityInterest: [
+              {
+                asOfDate: "2025-09-27",
+                reportedValue: { raw: 285508000000 },
+                currencyCode: "USD",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ["annualTotalLiabilitiesNetMinorityInterest"]
+  ),
+  [
+    {
+      statementType: "BALANCE",
+      periodType: "ANNUAL",
+      periodEnd: "2025-09-27",
+      fieldName: "Total Liabilities Net Minority Interest",
+      value: 285508000000,
+      currency: "USD",
+      source: "yahoo",
+    },
+  ],
+  "Yahoo's valid liabilities series should be classified and preserved without relabeling"
 );
 
 assert.throws(
