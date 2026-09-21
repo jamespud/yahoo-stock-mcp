@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { parsePrimaryProvider } from "./providers/priority.js";
+import { isValidIsoDate } from "./validation.js";
 
 const ENV_PREFIX = "YAHOO_STOCK_MCP_";
 
@@ -16,6 +17,20 @@ export function parseNumericEnv(
   if (raw == null || raw.trim() === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+
+export function parseBarsStartDate(
+  raw: string | undefined | null,
+  fallback = "2000-01-01"
+): string {
+  const value = (raw ?? "").trim();
+  if (value === "") return fallback;
+  if (!isValidIsoDate(value)) {
+    throw new Error(
+      `Invalid YAHOO_STOCK_MCP_BARS_START_DATE=${JSON.stringify(raw)}; expected a valid YYYY-MM-DD calendar date`
+    );
+  }
+  return value;
 }
 
 export type BarsProvider = "yahoo" | "investing";
@@ -85,7 +100,7 @@ export const config = {
     env("USER_AGENT") ??
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
   requestDelayMs: parseNumericEnv(env("REQUEST_DELAY_MS"), 300),
-  barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
+  barsStartDate: parseBarsStartDate(env("BARS_START_DATE")),
   barsProvider: parseBarsProvider(env("BARS_PROVIDER")),
   investingTransport: parseInvestingTransport(env("INVESTING_TRANSPORT")),
   /**
