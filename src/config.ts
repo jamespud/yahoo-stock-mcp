@@ -9,9 +9,13 @@ export function env(name: string): string | undefined {
   return process.env[`${ENV_PREFIX}${name}`];
 }
 
-function num(v: string | undefined, d: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
+export function parseNumericEnv(
+  raw: string | undefined | null,
+  fallback: number
+): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export type BarsProvider = "yahoo" | "investing";
@@ -64,7 +68,7 @@ function buildDatabaseConfig(): DbTarget {
   if (url) return parseDatabaseUrl(url);
   return {
     host: env("DB_HOST") ?? "127.0.0.1",
-    port: num(env("DB_PORT"), 3306),
+    port: parseNumericEnv(env("DB_PORT"), 3306),
     user: env("DB_USER") ?? "stock",
     password: env("DB_PASSWORD") ?? "stock123",
     database: env("DB_NAME") ?? DEFAULT_DB,
@@ -80,7 +84,7 @@ export const config = {
   userAgent:
     env("USER_AGENT") ??
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-  requestDelayMs: num(env("REQUEST_DELAY_MS"), 300),
+  requestDelayMs: parseNumericEnv(env("REQUEST_DELAY_MS"), 300),
   barsStartDate: env("BARS_START_DATE") ?? "2000-01-01",
   barsProvider: parseBarsProvider(env("BARS_PROVIDER")),
   investingTransport: parseInvestingTransport(env("INVESTING_TRANSPORT")),
@@ -89,7 +93,7 @@ export const config = {
    * primary lacks). `YAHOO_STOCK_MCP_PRIMARY_PROVIDER=yahoo|investing`, default yahoo.
    */
   primaryProvider: parsePrimaryProvider(env("PRIMARY_PROVIDER")),
-  newsCount: num(env("NEWS_COUNT"), 20),
+  newsCount: parseNumericEnv(env("NEWS_COUNT"), 20),
   /** Optional HTTP(S) proxy for all Node fetch requests, e.g. http://127.0.0.1:17890 */
   proxyUrl: env("PROXY_URL")?.trim() || null,
 };
