@@ -1086,11 +1086,27 @@ export function shouldSyncSectorMembers(opts: { members?: boolean } = {}): boole
   return opts.members !== false;
 }
 
+export interface SectorSyncResult {
+  sector_code: string;
+  name: string;
+  bars: number;
+  members: number;
+  status: SyncStatus;
+  components: Record<string, SyncComponentResult>;
+  warnings: string[];
+}
+
+export interface SectorBatchSyncResult {
+  status: SyncStatus;
+  sectors: SectorSyncResult[];
+  warnings: string[];
+}
+
 /** Sync a single sector ETF: quote ratios + incremental bars + optional top holdings -> sector_members. */
 async function syncSectorEtf(
   sector: SectorRow,
   opts: { members: boolean }
-): Promise<{ bars: number; members: number }> {
+): Promise<Omit<SectorSyncResult, "sector_code" | "name">> {
   const today = new Date().toISOString().slice(0, 10);
   const etf = sector.etf_symbol;
   const instrument = await ensureInstrument(etf);
@@ -1099,55 +1115,106 @@ async function syncSectorEtf(
     [instrument.id, sector.sector_code]
   );
 
-  // incremental bars (last ~30 days)
-  const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const bars = await fetchYahooBars(instrument.yahoo_symbol ?? etf, "1d", from, today);
+  const components: Record<string, SyncComponentResult> = {
+    bars: { status: "skipped" },
+    yahooSummary: { status: "skipped" },
+    members: { status: "skipped" },
+  };
+  const warnings: string[] = [];
+  const failed = (component: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    components[component] = { status: "failed", error: message };
+    warnings.push(`${component}: ${message}`);
+    console.warn(`[sector:${sector.sector_code}] ${component} failed: ${message}`);
+  };
+
   let barsN = 0;
-  if (bars.length) {
-    const sql =
-      `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
-       ON DUPLICATE KEY UPDATE open = VALUES(open), high = VALUES(high), low = VALUES(low),
-         close = VALUES(close), adj_close = VALUES(adj_close), volume = VALUES(volume)`;
-    const stmts = bars.map((b): [string, any[]] => [
-      sql, [instrument.id, b.date, b.open, b.high, b.low, b.close, b.adjClose, b.volume],
-    ]);
-    for (let i = 0; i < stmts.length; i += 500) await runBatch(stmts.slice(i, i + 500));
-    barsN = bars.length;
+  try {
+    const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const bars = await fetchYahooBars(instrument.yahoo_symbol ?? etf, "1d", from, today);
+    if (bars.length) {
+      const sql =
+        `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
+         ON DUPLICATE KEY UPDATE open = VALUES(open), high = VALUES(high), low = VALUES(low),
+           close = VALUES(close), adj_close = VALUES(adj_close), volume = VALUES(volume)`;
+      const stmts = bars.map((b): [string, any[]] => [
+        sql, [instrument.id, b.date, b.open, b.high, b.low, b.close, b.adjClose, b.volume],
+      ]);
+      for (let i = 0; i < stmts.length; i += 500) await runBatch(stmts.slice(i, i + 500));
+      barsN = bars.length;
+    }
+    components.bars = { status: "ok", count: barsN };
+  } catch (e) {
+    failed("bars", e);
   }
 
-  // summary ratios
-  const summary = await fetchYahooSummary(instrument.yahoo_symbol ?? etf).catch(() => null);
-  if (summary) {
+  let summary: Awaited<ReturnType<typeof fetchYahooSummary>> | null = null;
+  try {
+    summary = await fetchYahooSummary(instrument.yahoo_symbol ?? etf);
     await saveRatios(instrument.id, extractRatiosFromSummary(summary.modules, etf, today));
+    components.yahooSummary = { status: "ok" };
+  } catch (e) {
+    failed("yahooSummary", e);
   }
 
-  // top holdings -> sector members
   let membersN = 0;
   if (opts.members && summary) {
-    const members = extractTopHoldings(summary.modules);
-    await saveYahooSectorMembersSnapshot(sector.sector_code, members);
-    membersN = members.length;
+    try {
+      const members = extractTopHoldings(summary.modules);
+      await saveYahooSectorMembersSnapshot(sector.sector_code, members);
+      membersN = members.length;
+      components.members = { status: "ok", count: membersN };
+    } catch (e) {
+      failed("members", e);
+    }
   }
 
-  return { bars: barsN, members: membersN };
+  return {
+    bars: barsN,
+    members: membersN,
+    status: summarizeSyncStatus(components),
+    components,
+    warnings,
+  };
 }
 
-export async function syncSectors(opts: { members?: boolean } = {}): Promise<Array<{ sector_code: string; name: string; bars: number; members: number }>> {
+export async function syncSectors(opts: { members?: boolean } = {}): Promise<SectorBatchSyncResult> {
   const rows = await query<SectorRow[]>(
     "SELECT sector_code, name, etf_symbol, is_benchmark, instrument_id FROM sectors ORDER BY is_benchmark, sector_code"
   );
-  const out: Array<{ sector_code: string; name: string; bars: number; members: number }> = [];
+  const sectors: SectorSyncResult[] = [];
+  const warnings: string[] = [];
   const members = shouldSyncSectorMembers(opts);
+
   for (const s of rows) {
     try {
       const r = await syncSectorEtf(s, { members });
-      out.push({ sector_code: s.sector_code, name: s.name, ...r });
-      console.log(`[sector:${s.sector_code}] etf=${s.etf_symbol} bars=${r.bars} members=${r.members}`);
-    } catch (e: any) {
-      console.error(`[sector:${s.sector_code}] sync failed: ${e.message}`);
-      out.push({ sector_code: s.sector_code, name: s.name, bars: 0, members: 0 });
+      sectors.push({ sector_code: s.sector_code, name: s.name, ...r });
+      warnings.push(...r.warnings.map((warning) => `sector.${s.sector_code}: ${warning}`));
+      console.log(
+        `[sector:${s.sector_code}] status=${r.status} etf=${s.etf_symbol} bars=${r.bars} members=${r.members}`
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const warning = `setup: ${message}`;
+      console.error(`[sector:${s.sector_code}] status=failed sync failed: ${message}`);
+      sectors.push({
+        sector_code: s.sector_code,
+        name: s.name,
+        bars: 0,
+        members: 0,
+        status: "failed",
+        components: { setup: { status: "failed", error: message } },
+        warnings: [warning],
+      });
+      warnings.push(`sector.${s.sector_code}: ${warning}`);
     }
   }
-  return out;
+
+  return {
+    status: summarizeBatchSyncStatus(sectors.map((sector) => sector.status)),
+    sectors,
+    warnings,
+  };
 }

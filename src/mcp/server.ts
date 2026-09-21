@@ -438,7 +438,7 @@ server.tool(
   async ({ members }) =>
     guard(async () => {
       const r = await syncSectors({ members });
-      return { synced: r.length, sectors: r };
+      return { synced: r.sectors.length, status: r.status, warnings: r.warnings, sectors: r.sectors };
     })
 );
 
