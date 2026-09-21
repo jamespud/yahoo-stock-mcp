@@ -551,6 +551,25 @@ async function main() {
     const inc = await q.getFinancials(TEST_SYMBOL, "INCOME", "ANNUAL");
     assert.equal(inc?.periods.length, 1);
     assert.ok(inc && "total_revenue" in inc.periods[0].fields, "income fields should be pivoted");
+    assert.equal(inc?.periods[0].source, "investing", "single-source period should preserve provider source");
+    assert.equal(inc?.periods[0].fieldSources.total_revenue, "investing");
+    assert.equal(inc?.periods[0].fieldSources.net_income, "investing");
+
+    await query(
+      `INSERT INTO financial_statements
+         (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source)
+       VALUES (?, 'INCOME', 'ANNUAL', '2025-12-31', 'yahoo_only_metric', 77, 'USD', 'yahoo')`,
+      [id]
+    );
+    const mixedIncome = await q.getFinancials(TEST_SYMBOL, "INCOME", "ANNUAL");
+    assert.equal(mixedIncome?.periods[0].source, "mixed", "mixed provider fields must not masquerade as one source");
+    assert.equal(mixedIncome?.periods[0].fieldSources.total_revenue, "investing");
+    assert.equal(mixedIncome?.periods[0].fieldSources.yahoo_only_metric, "yahoo");
+    assert.equal(Number(mixedIncome?.periods[0].fields.yahoo_only_metric), 77);
+    await query(
+      "DELETE FROM financial_statements WHERE instrument_id = ? AND field_name = 'yahoo_only_metric'",
+      [id]
+    );
 
     // --- ratios / dividends / forecast / earnings ---
     await query(
