@@ -40,7 +40,7 @@ jobs:
 
       - name: Verify release tag matches package version
         if: github.event_name == 'push'
-        run: npm run verify:release-tag -- "$GITHUB_REF_NAME"
+        run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
 
       - uses: actions/setup-go@v5
         with:
