@@ -114,7 +114,7 @@ export async function fetchYahooBars(
 
 // ── quoteSummary ────────────────────────────────────────────────
 
-const SUMMARY_MODULES = [
+export const YAHOO_SUMMARY_MODULES = [
   "price",
   "summaryDetail",
   "defaultKeyStatistics",
@@ -131,9 +131,12 @@ const SUMMARY_MODULES = [
   "insiderTransactions",
   "upgradeDowngradeHistory",
   "summaryProfile",
-  "esgScores",
+  "incomeStatementHistory",
+  "incomeStatementHistoryQuarterly",
   "topHoldings",
-].join(",");
+] as const;
+
+const SUMMARY_MODULES = YAHOO_SUMMARY_MODULES.join(",");
 
 export interface YahooSummary {
   raw: any;
@@ -272,6 +275,53 @@ export function classifyYahooFinancialStatement(
   return YAHOO_FINANCIAL_STATEMENT_BY_FIELD[field] ?? null;
 }
 
+export function extractYahooIncomeStatements(
+  modules: Record<string, any>
+): FinancialField[] {
+  const currencyCandidate =
+    modules.financialData?.financialCurrency ?? modules.price?.currency ?? "USD";
+  const currency =
+    typeof currencyCandidate === "string" && currencyCandidate.trim()
+      ? currencyCandidate.trim()
+      : "USD";
+  const fields: FinancialField[] = [];
+
+  const extractHistory = (
+    moduleValue: any,
+    periodType: "ANNUAL" | "QUARTERLY"
+  ) => {
+    const rows = Array.isArray(moduleValue?.incomeStatementHistory)
+      ? moduleValue.incomeStatementHistory
+      : [];
+
+    for (const row of rows) {
+      const periodEnd = unixToDate(row?.endDate);
+      if (!periodEnd) continue;
+
+      for (const [key, rawValue] of Object.entries(row ?? {})) {
+        if (key === "endDate" || key === "maxAge") continue;
+        const parsed = num(rawValue);
+        const value = parsed == null ? null : Number(parsed);
+        if (value == null || !Number.isFinite(value)) continue;
+
+        fields.push({
+          statementType: "INCOME",
+          periodType,
+          periodEnd,
+          fieldName: humanizeField(key),
+          value,
+          currency,
+          source: "yahoo",
+        });
+      }
+    }
+  };
+
+  extractHistory(modules.incomeStatementHistory, "ANNUAL");
+  extractHistory(modules.incomeStatementHistoryQuarterly, "QUARTERLY");
+  return fields;
+}
+
 export function parseYahooFundamentalsResponse(
   resp: any,
   types: string[]
@@ -392,7 +442,7 @@ export function extractRatiosFromSummary(modules: Record<string, any>, symbol: s
     ["total_cash", dks.totalCash ?? fd.totalCash],
     ["total_debt", dks.totalDebt ?? fd.totalDebt],
     ["free_cash_flow", fd.freeCashflow],
-    ["operating_cash_flow", fd.operatingCashflows],
+    ["operating_cash_flow", fd.operatingCashflow ?? fd.operatingCashflows],
     ["revenue_growth", fd.revenueGrowth],
     ["earnings_growth", fd.earningsGrowth],
     ["current_ratio", fd.currentRatio],
