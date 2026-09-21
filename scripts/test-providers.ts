@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { RateLimiter } from "../src/providers/http.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
+import { sidecarBinaryName } from "../src/providers/investing.js";
 import {
   needsInvestingIdentity,
   parsePrimaryProvider,
@@ -69,6 +70,16 @@ assert.equal(
   25.3,
   "canonical ID wins a same-provider same-date tie over a legacy alias"
 );
+
+// ── gqlproxy platform resolution ──
+
+assert.equal(sidecarBinaryName("linux", "x64"), "gqlproxy-linux-x64");
+assert.equal(sidecarBinaryName("linux", "arm64"), "gqlproxy-linux-arm64");
+assert.equal(sidecarBinaryName("darwin", "x64"), "gqlproxy-darwin-x64");
+assert.equal(sidecarBinaryName("darwin", "arm64"), "gqlproxy-darwin-arm64");
+assert.equal(sidecarBinaryName("win32", "x64"), "gqlproxy-win32-x64.exe");
+assert.equal(sidecarBinaryName("win32", "arm64"), "gqlproxy-win32-arm64.exe");
+assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets should fail explicitly");
 
 // ── RateLimiter: concurrent callers reserve distinct send slots ──
 
