@@ -106,25 +106,46 @@ export class HttpError extends Error {
 }
 
 export async function httpText(url: string, opts: HttpOptions = {}): Promise<string> {
-  const res = await rawFetch(url, opts);
-  return res;
-}
+  const {
+    method = "GET",
+    headers = {},
+    body,
+    timeoutMs = 30000,
+    retries = 3,
+    noRetry = [400, 401, 403, 404],
+  } = opts;
 
-async function rawFetch(url: string, opts: HttpOptions): Promise<string> {
-  const { method = "GET", headers = {}, body, timeoutMs = 30000 } = opts;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await httpFetch(url, {
-      method,
-      headers: { "user-agent": config.userAgent, ...headers },
-      body: body ?? undefined,
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    if (!res.ok) throw new HttpError(res.status, url, text);
-    return text;
-  } finally {
-    clearTimeout(timer);
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, attempt * attempt * 1000));
+    }
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await httpFetch(url, {
+        method,
+        headers: { "user-agent": config.userAgent, ...headers },
+        body: body ?? undefined,
+        signal: ctrl.signal,
+      });
+      const text = await res.text();
+
+      if (res.status === 429 || (res.status >= 500 && !noRetry.includes(res.status))) {
+        lastErr = new HttpError(res.status, url, text);
+        continue;
+      }
+      if (!res.ok) throw new HttpError(res.status, url, text);
+      return text;
+    } catch (err: any) {
+      if (err instanceof HttpError) throw err;
+      if (attempt >= retries) throw err;
+      lastErr = err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  throw lastErr ?? new Error(`request failed: ${url}`);
 }
