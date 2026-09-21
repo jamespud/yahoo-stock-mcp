@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import readline from "node:readline";
 import { closeDb, initSchema, query } from "../src/db.js";
 import { cleanupTestData, seedTestData, TEST_SYMBOL } from "./test-util.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "../src/package-meta.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
@@ -166,7 +167,12 @@ async function main() {
     });
     assert.ok(init.result, `initialize failed: ${JSON.stringify(init)}`);
     assert.equal(init.result.protocolVersion, "2025-11-25");
-    assert.equal(init.result.serverInfo.name, "yahoo-stock-mcp");
+    assert.equal(init.result.serverInfo.name, PACKAGE_NAME);
+    assert.equal(
+      init.result.serverInfo.version,
+      PACKAGE_VERSION,
+      "MCP initialize version must match package.json"
+    );
     assert.ok(init.result.capabilities.tools, "server should declare tools capability");
 
     probe.notify("notifications/initialized");
