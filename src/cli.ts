@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-
 import { closeDb, initSchema, migrateSchema } from "./db.js";
 import { syncAll, syncOne, syncSectors, type IntradayInterval } from "./services/sync.service.js";
 import { startMcpServer } from "./mcp/server.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
 
 const INTRADAY_INTERVALS = ["1m", "5m", "15m", "30m", "60m"] as const;
 
-const NAME = "yahoo-stock-mcp";
-const VERSION = (
-  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
-).version;
+const NAME = PACKAGE_NAME;
+const VERSION = PACKAGE_VERSION;
 
 const GENERAL_HELP = `yahoo-stock-mcp — Yahoo Finance + Investing.com stock data MCP server
 

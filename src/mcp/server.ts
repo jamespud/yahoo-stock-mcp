@@ -7,10 +7,11 @@ import * as q from "../services/query.service.js";
 import { listIndicatorMeta } from "../indicators/registry.js";
 import { getIndicators } from "../services/indicator.service.js";
 import { closeDb } from "../db.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "../package-meta.js";
 
 const server = new McpServer({
-  name: "yahoo-stock-mcp",
-  version: "0.2.3",
+  name: PACKAGE_NAME,
+  version: PACKAGE_VERSION,
 });
 
 function text(data: unknown): any {
