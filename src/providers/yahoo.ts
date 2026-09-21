@@ -389,16 +389,17 @@ function unixToDate(u: any): string | null {
 
 export function extractShortInterest(modules: Record<string, any>): ShortInterest | null {
   const dks = modules.defaultKeyStatistics ?? {};
-  const asOf = new Date().toISOString().slice(0, 10);
   const sharesShort = num(dks.sharesShort);
-  if (sharesShort == null) return null;
+  const shortDate = unixToDate(dks.dateShortInterest);
+  if (sharesShort == null || shortDate == null) return null;
   return {
-    asOf,
+    asOf: shortDate,
     sharesShort,
     sharesShortPriorMonth: num(dks.sharesShortPriorMonth),
-    shortRatio: num(dks.shortRatio),    shortPercentOfFloat: num(dks.shortPercentOfFloat),
+    shortRatio: num(dks.shortRatio),
+    shortPercentOfFloat: num(dks.shortPercentOfFloat),
     sharesPercentSharesOut: num(dks.sharesPercentSharesOut),
-    shortDate: unixToDate(dks.dateShortInterest),
+    shortDate,
     source: "yahoo",
   };
 }
