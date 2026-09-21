@@ -42,7 +42,7 @@
 
 Investing 集成使用原生 Node transport，带有限的 TLS compatibility profile，并支持可选的 HTTP/HTTPS 正向代理。它不会求解 challenge 页面。若受支持 profile 仍被拒绝或 Investing 不可达，provider 失败会被显式暴露，sync 可能返回 `partial`。
 
-scheduled live-provider canary 同时 gate Yahoo 和 Investing，并检查三表单位归一化。它是低频健康检查，不会把响应写入项目数据库，也不会发布数据 feed。
+scheduled live-provider canary 会 hard-gate Yahoo 以及 Investing 的数据契约/单位回归；但 Investing 的网络或访问可用性可能报告为 `DEGRADED`，因为 hosted runner 的出口可能独立被拦截。canary 仍是低频健康检查，不会把响应写入项目数据库，也不会发布数据 feed。
 
 ## 运行要求
 

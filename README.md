@@ -42,7 +42,7 @@ Yahoo is the primary provider by default; Investing fills gaps. Set `YAHOO_STOCK
 
 The Investing integration uses a native Node transport with a bounded TLS compatibility profile and optional HTTP/HTTPS forward proxy support. It does not solve challenge pages. If supported profiles are rejected or Investing is otherwise unreachable, the provider failure is surfaced explicitly and a sync may report `partial`.
 
-The scheduled live-provider canary gates on both Yahoo and Investing and checks statement unit normalization. It is a low-frequency health check; it does not populate the project database or publish a data feed.
+The scheduled live-provider canary hard-gates Yahoo and Investing data-contract/unit regressions. Investing network or access availability may report `DEGRADED` instead of failing the job because hosted-runner egress can be blocked independently of the provider contract. The canary is low-frequency and does not populate the project database or publish a data feed.
 
 ## Requirements
 
