@@ -568,7 +568,7 @@ for (const typeName of [
 
 for (const typeName of [
   "annualTotalAssets",
-  "annualTotalLiabilities",
+  "annualTotalLiabilitiesNetMinorityInterest",
   "annualStockholdersEquity",
   "quarterlyTotalAssets",
 ]) {
@@ -596,6 +596,40 @@ assert.equal(
   classifyYahooFinancialStatement("annualUnknownMetric"),
   null,
   "unknown Yahoo fundamentals must not silently default to CASHFLOW"
+);
+
+assert.deepEqual(
+  parseYahooFundamentalsResponse(
+    {
+      timeseries: {
+        result: [
+          {
+            meta: { symbol: ["AAPL"], type: ["annualTotalLiabilitiesNetMinorityInterest"] },
+            annualTotalLiabilitiesNetMinorityInterest: [
+              {
+                asOfDate: "2025-09-27",
+                reportedValue: { raw: 285508000000 },
+                currencyCode: "USD",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ["annualTotalLiabilitiesNetMinorityInterest"]
+  ),
+  [
+    {
+      statementType: "BALANCE",
+      periodType: "ANNUAL",
+      periodEnd: "2025-09-27",
+      fieldName: "Total Liabilities Net Minority Interest",
+      value: 285508000000,
+      currency: "USD",
+      source: "yahoo",
+    },
+  ],
+  "Yahoo's valid liabilities series should be classified and preserved without relabeling"
 );
 
 assert.throws(
