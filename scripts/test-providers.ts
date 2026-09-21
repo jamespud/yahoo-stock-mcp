@@ -10,7 +10,11 @@ import {
   parseNumericEnv,
 } from "../src/config.js";
 import { HttpError, httpJson, httpText, RateLimiter, redactUrlForError } from "../src/providers/http.js";
-import { sidecarBinaryName } from "../src/providers/investing.js";
+import {
+  formatInvestingHttpError,
+  isInvestingCloudflareChallenge,
+  sidecarBinaryName,
+} from "../src/providers/investing.js";
 import { canonicalizeRatio, canonicalizeStoredRatioRows } from "../src/providers/ratios.js";
 import {
   needsInvestingIdentity,
@@ -221,6 +225,46 @@ assert.equal(sidecarBinaryName("darwin", "arm64"), "gqlproxy-darwin-arm64");
 assert.equal(sidecarBinaryName("win32", "x64"), "gqlproxy-win32-x64.exe");
 assert.equal(sidecarBinaryName("win32", "arm64"), "gqlproxy-win32-arm64.exe");
 assert.equal(sidecarBinaryName("freebsd", "x64"), null, "unsupported targets should fail explicitly");
+
+assert.equal(
+  isInvestingCloudflareChallenge(403, "<html><title>Just a moment...</title></html>"),
+  true,
+  "observed Just a moment page should be classified as a Cloudflare challenge"
+);
+assert.equal(
+  isInvestingCloudflareChallenge(403, '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>'),
+  true,
+  "Cloudflare challenge-platform marker should be recognized"
+);
+assert.equal(
+  isInvestingCloudflareChallenge(403, "forbidden: account is not authorized"),
+  false,
+  "ordinary 403 responses must not be retried as Cloudflare challenges"
+);
+assert.equal(
+  isInvestingCloudflareChallenge(503, "<title>Just a moment...</title>"),
+  false,
+  "challenge markers on a non-403 response should not use the 403 challenge retry path"
+);
+
+const challengeError = formatInvestingHttpError(
+  "gql",
+  403,
+  "<html><title>Just a moment...</title><body>challenge-platform giant html payload</body></html>"
+);
+assert.match(challengeError, /investing gql HTTP 403: Cloudflare challenge/);
+assert.equal(challengeError.includes("<html>"), false, "challenge error should not embed HTML");
+
+assert.equal(
+  formatInvestingHttpError("gql", 403, "forbidden: account is not authorized"),
+  "investing gql HTTP 403: forbidden: account is not authorized",
+  "ordinary 403 should preserve a bounded diagnostic body"
+);
+assert.equal(
+  formatInvestingHttpError("gql", 500, "  upstream\n  failed  "),
+  "investing gql HTTP 500: upstream failed",
+  "ordinary HTTP error should normalize whitespace in its body excerpt"
+);
 
 // ── HTTP error URL redaction ──
 

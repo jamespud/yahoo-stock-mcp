@@ -27,6 +27,27 @@ export function sidecarBinaryName(platform = process.platform, arch = process.ar
   return SIDECAR_FILES[`${platform}/${arch}`] ?? null;
 }
 
+export function isInvestingCloudflareChallenge(status: number, text: string): boolean {
+  if (status !== 403) return false;
+  const body = text.toLowerCase();
+  return (
+    body.includes("just a moment") ||
+    body.includes("challenge-platform") ||
+    body.includes("cf-chl-") ||
+    body.includes("__cf_chl")
+  );
+}
+
+export function formatInvestingHttpError(scope: string, status: number, text: string): string {
+  if (isInvestingCloudflareChallenge(status, text)) {
+    return `investing ${scope} HTTP 403: Cloudflare challenge blocked the request`;
+  }
+  const excerpt = text.replace(/\s+/g, " ").trim().slice(0, 300);
+  return excerpt
+    ? `investing ${scope} HTTP ${status}: ${excerpt}`
+    : `investing ${scope} HTTP ${status}`;
+}
+
 function findSidecar(): string | null {
   const configured = env("GQLPROXY_PATH");
   if (configured) return existsSync(configured) ? configured : null;
@@ -75,9 +96,9 @@ async function sidecarRequest(
   let attempt = 0;
   for (;;) {
     const { status, text } = await sidecarOnce(payload, url, cookieFile);
-    if (status !== 403 || attempt >= 2) return { status, text };
+    if (!isInvestingCloudflareChallenge(status, text) || attempt >= 2) return { status, text };
     attempt++;
-    console.warn(`investing: sidecar got 403 (challenge), retry ${attempt}/2 after backoff`);
+    console.warn(`investing: sidecar got Cloudflare challenge (HTTP 403), retry ${attempt}/2 after backoff`);
     await new Promise((r) => setTimeout(r, attempt * 8000));
   }
 }
@@ -154,7 +175,7 @@ async function gql(query: string, variables?: Record<string, any>): Promise<any>
     { "content-type": "application/json", accept: "application/json" },
     JSON.stringify({ query, variables: variables ?? {} })
   );
-  if (status !== 200) throw new Error(`investing gql HTTP ${status}: ${text.slice(0, 300)}`);
+  if (status !== 200) throw new Error(formatInvestingHttpError("gql", status, text));
   const resp = JSON.parse(text) as GqlResponse;
   if (resp.errors?.length) {
     throw new Error(`investing gql: ${resp.errors.map((e) => e.message).join("; ")}`);
