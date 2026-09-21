@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
   incrementalBarsFrom,
+  incrementalBarsStartFromCoverage,
   INCREMENTAL_BAR_REPLAY_DAYS,
   shouldSyncSectorMembers,
 } from "../src/services/sync.service.js";
@@ -22,9 +23,12 @@ interface RunResult {
   stderr: string;
 }
 
-function runCli(args: string[]): Promise<RunResult> {
+function runCli(args: string[], extraEnv: Record<string, string> = {}): Promise<RunResult> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(tsxBin, [cliEntry, ...args], { cwd: root });
+    const child = spawn(tsxBin, [cliEntry, ...args], {
+      cwd: root,
+      env: { ...process.env, ...extraEnv },
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
@@ -56,6 +60,32 @@ async function main() {
     incrementalBarsFrom(null, Date.UTC(2026, 8, 21, 12)),
     "2026-08-22",
     "first incremental sync should retain the 30-day bootstrap window"
+  );
+  assert.equal(
+    incrementalBarsStartFromCoverage("2026-08-03", "2026-08-03", "2000-01-01", Date.UTC(2030, 0, 1)),
+    "2026-07-31",
+    "existing preferred-source coverage should use the replay window"
+  );
+  assert.equal(
+    incrementalBarsStartFromCoverage(null, "2026-08-03", "2000-01-01", Date.UTC(2030, 0, 1)),
+    "2000-01-01",
+    "switching to a source with no rows should backfill full configured history"
+  );
+  assert.equal(
+    incrementalBarsStartFromCoverage(null, null, "2000-01-01", Date.UTC(2026, 8, 21, 12)),
+    "2026-08-22",
+    "a brand-new instrument keeps the 30-day incremental bootstrap"
+  );
+
+  const invalidBarsProvider = await runCli(
+    ["--version"],
+    { YAHOO_STOCK_MCP_BARS_PROVIDER: "not-a-provider" }
+  );
+  assert.equal(invalidBarsProvider.code, 1, "invalid BARS_PROVIDER should fail during config load");
+  assert.match(
+    invalidBarsProvider.stderr,
+    /Invalid YAHOO_STOCK_MCP_BARS_PROVIDER.*yahoo.*investing/,
+    "invalid BARS_PROVIDER error should name the accepted values"
   );
 
   // version: subcommand and global flags must all print "<name> <version>".
