@@ -230,19 +230,36 @@ export async function applyInstrumentProfile(
 
 // ── instrument resolution ───────────────────────────────────────
 
-export async function ensureInstrument(symbol: string): Promise<InstrumentRow> {
+export interface InstrumentResolvers {
+  yahoo: typeof fetchYahooSummary;
+  investing: typeof fetchInvestingSnapshot;
+}
+
+const DEFAULT_INSTRUMENT_RESOLVERS: InstrumentResolvers = {
+  yahoo: fetchYahooSummary,
+  investing: fetchInvestingSnapshot,
+};
+
+export async function ensureInstrument(
+  symbol: string,
+  resolvers: InstrumentResolvers = DEFAULT_INSTRUMENT_RESOLVERS
+): Promise<InstrumentRow> {
   const existing = await query<InstrumentRow[]>(
     "SELECT id, symbol, yahoo_symbol, investing_id FROM instruments WHERE symbol = ?",
     [symbol]
   );
   if (existing.length > 0) return existing[0];
 
-  const yahoo = await fetchYahooSummary(symbol).catch(() => null);
+  const yahoo = await resolvers.yahoo(symbol).catch(() => null);
   const primary = config.primaryProvider;
   // Skip investing once Yahoo gave the identity; asking again only slows instrument/sector creation down
   const investing = needsInvestingIdentity(primary, yahoo?.modules)
-    ? await fetchInvestingSnapshot(symbol).catch(() => null)
+    ? await resolvers.investing(symbol).catch(() => null)
     : null;
+
+  if (!yahoo && !investing) {
+    throw new Error(`unable to resolve instrument: ${symbol}`);
+  }
 
   const canonical = mergeInstrumentProfile(primary, yahoo?.modules, investing);
 
