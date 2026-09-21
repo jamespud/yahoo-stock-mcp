@@ -22,7 +22,7 @@ Usage:
 
 Commands:
   server                 Start the MCP server over stdio (default with no arguments)
-  db:init                Create the bootstrap schema and apply all migrations
+  db:init                Create the database if missing, then bootstrap schema + migrations
   db:migrate             Apply pending schema migrations to an existing database
   sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
   version                Print the version number
@@ -71,7 +71,12 @@ MCP clients (Claude Desktop, Cursor, Codex, ...) launch this server with:
 Usage:
   ${NAME} server`;
 
-const DBINIT_HELP = `Initialise the MySQL schema in the configured database.
+const DBINIT_HELP = `Initialise the configured MySQL database.
+
+If the target database does not exist, db:init first attempts to create it with
+utf8mb4/utf8mb4_unicode_ci using the configured credentials, then installs the
+bootstrap schema and all pending migrations. Creating a missing database requires
+CREATE DATABASE privileges. Existing databases do not require that privilege.
 
 The connection is read from YAHOO_STOCK_MCP_DATABASE_URL, or from the
 YAHOO_STOCK_MCP_DB_* variables (host/port/user/password/name).
