@@ -38,6 +38,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
 
+      - name: Verify release tag matches package version
+        if: github.event_name == 'push'
+        run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: cmd/gqlproxy/go.mod
