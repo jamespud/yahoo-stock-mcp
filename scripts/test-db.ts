@@ -5,6 +5,7 @@ import { cleanupTestData, seedTestData, TEST_NAME, TEST_SYMBOL } from "./test-ut
 import {
   applyInstrumentProfile,
   ensureBarProviderIdentity,
+  ensureInstrument,
   incrementalBarsStartForProvider,
   mergeInstrumentProfile,
   persistSyncState,
@@ -298,6 +299,96 @@ async function main() {
     const inst = await q.getInstrument(TEST_SYMBOL);
     assert.ok(inst && inst.id === id);
     assert.equal(await q.getInstrument("QQQQNOPE"), null);
+
+    // --- instrument resolution: never persist an unresolved / ghost symbol ---
+    const noProvider = {
+      yahoo: async () => { throw new Error("Yahoo unavailable"); },
+      investing: async () => { throw new Error("Investing unavailable"); },
+    } as any;
+    await assert.rejects(
+      ensureInstrument("ZZGHOSTFAIL", noProvider),
+      /unable to resolve instrument: ZZGHOSTFAIL/
+    );
+    assert.equal(
+      Number((await query<any[]>("SELECT COUNT(*) AS n FROM instruments WHERE symbol = 'ZZGHOSTFAIL'"))[0].n),
+      0,
+      "dual-provider failure must leave no ghost instrument row"
+    );
+
+    let yahooOnlyInvestingCalls = 0;
+    const yahooOnly = await ensureInstrument("ZZYAHOOONLY", {
+      yahoo: async () => ({
+        raw: {},
+        modules: {
+          price: { longName: "Yahoo Only Corp", symbol: "ZZYAHOOONLY", exchangeName: "TEST", currency: "USD" },
+          quoteType: {},
+          assetProfile: {},
+        },
+      }),
+      investing: async () => {
+        yahooOnlyInvestingCalls++;
+        throw new Error("Investing should be skipped when Yahoo resolved identity");
+      },
+    } as any);
+    assert.equal(yahooOnly.symbol, "ZZYAHOOONLY");
+    assert.equal(yahooOnlyInvestingCalls, 0, "Yahoo identity should avoid an unnecessary Investing lookup");
+
+    const investingFallback = await ensureInstrument("ZZINVONLY", {
+      yahoo: async () => { throw new Error("Yahoo unavailable"); },
+      investing: async () => ({
+        identity: { investingId: 777001, name: "Investing Only Corp", ticker: "ZZINVONLY", exchange: "TEST" },
+        profile: {
+          businessSummary: null, employees: null, sector: null, industry: null, equityType: null,
+          city: null, country: null, phone: null, web: null, streetAddress: null, zipCode: null, executives: [],
+        },
+      }),
+    } as any);
+    assert.equal(investingFallback.symbol, "ZZINVONLY");
+    assert.equal(Number(investingFallback.investing_id), 777001, "Investing fallback identity should be persisted");
+
+    let existingProviderCalls = 0;
+    const existingAgain = await ensureInstrument(TEST_SYMBOL, {
+      yahoo: async () => {
+        existingProviderCalls++;
+        throw new Error("existing instrument must not call Yahoo");
+      },
+      investing: async () => {
+        existingProviderCalls++;
+        throw new Error("existing instrument must not call Investing");
+      },
+    } as any);
+    assert.equal(existingAgain.id, id);
+    assert.equal(existingProviderCalls, 0, "existing row should return before provider resolution");
+
+    let retryYahooCalls = 0;
+    await assert.rejects(
+      ensureInstrument("ZZRETRY", noProvider),
+      /unable to resolve instrument/
+    );
+    assert.equal(
+      Number((await query<any[]>("SELECT COUNT(*) AS n FROM instruments WHERE symbol = 'ZZRETRY'"))[0].n),
+      0
+    );
+    const retryResolved = await ensureInstrument("ZZRETRY", {
+      yahoo: async () => {
+        retryYahooCalls++;
+        return {
+          raw: {},
+          modules: {
+            price: { longName: "Retry Corp", symbol: "ZZRETRY", exchangeName: "TEST", currency: "USD" },
+            quoteType: {},
+            assetProfile: {},
+          },
+        };
+      },
+      investing: async () => { throw new Error("not needed"); },
+    } as any);
+    assert.equal(retryResolved.symbol, "ZZRETRY");
+    assert.equal(retryYahooCalls, 1, "a failed first attempt must be able to resolve later");
+
+    await query(
+      "DELETE FROM instruments WHERE symbol IN ('ZZYAHOOONLY','ZZINVONLY','ZZRETRY','ZZGHOSTFAIL')"
+    );
 
     // --- configured bar provider must hydrate its own identity and watermark ---
     const barInstrument = (await query<any[]>(
