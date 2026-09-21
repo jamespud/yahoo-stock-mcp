@@ -11,7 +11,7 @@ import {
   priorityUpdate,
   shouldOverride,
 } from "../src/providers/priority.js";
-import { extractCalendarEvents } from "../src/providers/yahoo.js";
+import { extractCalendarEvents, extractDividendsFromSummary } from "../src/providers/yahoo.js";
 
 // ── canonical ratio vocabulary / units ──
 
@@ -182,6 +182,39 @@ assert.match(fieldMerge.sql, /COALESCE\(VALUES\(amount\), amount\)/, "primary NU
 assert.match(fieldMerge.sql, /COALESCE\(pay_date, VALUES\(pay_date\)\)/, "fallback may fill a primary NULL");
 assert.ok(fieldMerge.sql.endsWith("source = IF(VALUES(source) = ? OR source <> ?, VALUES(source), source)"));
 assert.deepEqual(fieldMerge.params, ["yahoo", "yahoo", "yahoo", "yahoo", "yahoo", "yahoo"]);
+
+// ── dividends: never synthesize a provider date ──
+
+const dividendTs = Date.UTC(2026, 6, 15) / 1000;
+assert.deepEqual(
+  extractDividendsFromSummary({
+    summaryDetail: {
+      lastDividendValue: { raw: 0.42 },
+      lastDividendDate: { raw: dividendTs },
+      dividendRate: { raw: 1.68 },
+      dividendYield: { raw: 0.0125 },
+    },
+  }),
+  [{
+    exDate: "2026-07-15",
+    amount: 0.42,
+    payDate: null,
+    ttmDividend: 1.68,
+    yieldPct: 1.25,
+    source: "yahoo",
+  }],
+  "provider-supplied dividend date should be preserved"
+);
+assert.deepEqual(
+  extractDividendsFromSummary({ summaryDetail: { lastDividendValue: { raw: 0.42 } } }),
+  [],
+  "amount without lastDividendDate must not fabricate today's date"
+);
+assert.deepEqual(
+  extractDividendsFromSummary({ summaryDetail: { lastDividendDate: { raw: dividendTs } } }),
+  [],
+  "date without amount should not create a dividend row"
+);
 
 // ── calendar events: earnings and earnings-call dates are independent ──
 
