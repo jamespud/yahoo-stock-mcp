@@ -1068,15 +1068,16 @@ async function main() {
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "SPY"), "sector catalog has SPY benchmark");
     assert.ok(sectors?.sectors.some((x: any) => x.sector_code === "ZZSEC"), "sector catalog has test sector");
     // getSectorPerformance intentionally scans only the most recent 45 calendar days.
-    // Seed one fresh bar here so this regression test does not expire as wall-clock time advances.
-    const today = new Date().toISOString().slice(0, 10);
+    // Seed yesterday so the result is fresh but its asOf cannot accidentally be the wall-clock date.
+    const sectorAsOf = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     await query(
       `INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source)
        VALUES (?, ?, 12.5, 13.5, 12.0, 13.0, 13.0, 1600, 'yahoo')
        ON DUPLICATE KEY UPDATE close = VALUES(close), adj_close = VALUES(adj_close), volume = VALUES(volume)`,
-      [id, today]
+      [id, sectorAsOf]
     );
     const perf = await q.getSectorPerformance();
+    assert.equal(perf?.asOf, sectorAsOf, "sector performance asOf must come from the newest stored bar");
     assert.ok(perf?.sectors.some((x: any) => x.sector_code === "ZZSEC" && x.price != null), "sector performance has test sector price");
     const mem = await q.getSectorMembers("ZZSEC", 5);
     assert.equal(mem?.members.length, 1);
