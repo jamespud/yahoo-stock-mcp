@@ -1,6 +1,6 @@
 // CLI behaviour test: version / help / unknown-command handling (no DB required).
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -16,6 +16,7 @@ import {
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
 const cliEntry = resolve(root, "src/cli.ts");
+const releaseTagScript = resolve(root, "scripts/verify-release-tag.mjs");
 const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as { version: string };
 const expectedVersion = `yahoo-stock-mcp ${pkg.version}`;
 
@@ -48,6 +49,30 @@ function runCli(args: string[], extraEnv: Record<string, string> = {}): Promise<
 }
 
 async function main() {
+  const validReleaseTag = spawnSync(process.execPath, [releaseTagScript, `v${pkg.version}`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(validReleaseTag.status, 0, "release tag matching package version should pass");
+  assert.match(validReleaseTag.stdout, /release tag verified/, "successful release-tag check should be explicit");
+
+  const mismatchedReleaseTag = spawnSync(process.execPath, [releaseTagScript, "v999.0.0"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(mismatchedReleaseTag.status, 1, "mismatched release tag should fail");
+  assert.match(
+    mismatchedReleaseTag.stderr,
+    new RegExp(`v${pkg.version.replace(/[.*+?^$\\{\\}()|[\\]\\\\]/g, "\\\\  assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");")}`),
+    "mismatched release-tag error should name the expected package tag"
+  );
+
+  const missingPrefixReleaseTag = spawnSync(process.execPath, [releaseTagScript, pkg.version], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(missingPrefixReleaseTag.status, 1, "release tag without v prefix should fail");
+
   assert.equal(shouldSyncSectorMembers(), true, "sector members sync defaults to enabled");
   assert.equal(shouldSyncSectorMembers({ members: true }), true, "members=true stays enabled");
   assert.equal(shouldSyncSectorMembers({ members: false }), false, "members=false disables holdings sync");
