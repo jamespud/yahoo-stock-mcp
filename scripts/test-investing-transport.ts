@@ -11,6 +11,7 @@ import {
   openProxyTunnel,
   openTlsSocket,
   parseConnectResponseHead,
+  resolveProxyEndpoint,
   sendOverSocket,
   INVESTING_TLS_PROFILES,
   type ProxyEndpoint,
@@ -32,6 +33,39 @@ assert.equal(parseConnectResponseHead("HTTP/1.1 200 Connection established\r\n\r
 assert.equal(parseConnectResponseHead("HTTP/1.0 200 OK\r\n\r\n"), 200);
 assert.equal(parseConnectResponseHead("HTTP/1.1 403 Forbidden\r\n\r\n"), 403);
 assert.equal(parseConnectResponseHead("garbage"), 0, "malformed CONNECT heads must not parse as success");
+
+assert.equal(
+  buildConnectRequest("gql.api.investing.com", 443, "Basic dXNlcjpwYXNz"),
+  "CONNECT gql.api.investing.com:443 HTTP/1.1\r\n" +
+    "Host: gql.api.investing.com:443\r\n" +
+    "Proxy-Connection: keep-alive\r\n" +
+    "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n\r\n",
+  "authenticated proxy CONNECT must carry Proxy-Authorization"
+);
+
+assert.deepEqual(resolveProxyEndpoint("http://proxy.example:8080"), {
+  host: "proxy.example",
+  port: 8080,
+  secure: false,
+  authorization: null,
+});
+assert.deepEqual(resolveProxyEndpoint("https://proxy.example"), {
+  host: "proxy.example",
+  port: 443,
+  secure: true,
+  authorization: null,
+});
+assert.deepEqual(resolveProxyEndpoint("http://alice:p%40ss@proxy.example:3128"), {
+  host: "proxy.example",
+  port: 3128,
+  secure: false,
+  authorization: `Basic ${Buffer.from("alice:p@ss").toString("base64")}`,
+});
+assert.throws(
+  () => resolveProxyEndpoint("socks5://proxy.example:1080"),
+  /Unsupported proxy protocol/,
+  "unsupported proxy schemes must fail fast"
+);
 
 // ── pure: Cloudflare block detection ────────────────────────────
 
@@ -248,7 +282,7 @@ await withServer(
     socket.on("data", () => socket.write("HTTP/1.1 200 Connection established\r\n\r\n"));
   },
   async (port) => {
-    const proxy: ProxyEndpoint = { host: "127.0.0.1", port, secure: false };
+    const proxy: ProxyEndpoint = { host: "127.0.0.1", port, secure: false, authorization: null };
     const tunnel = await openProxyTunnel(proxy, "gql.api.investing.com", 443, 5000);
     assert.ok(tunnel, "an accepted CONNECT must yield a usable socket");
     tunnel.destroy();
@@ -261,7 +295,7 @@ await withServer(
     socket.on("data", () => socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"));
   },
   async (port) => {
-    const proxy: ProxyEndpoint = { host: "127.0.0.1", port, secure: false };
+    const proxy: ProxyEndpoint = { host: "127.0.0.1", port, secure: false, authorization: null };
     await assert.rejects(
       () => openProxyTunnel(proxy, "gql.api.investing.com", 443, 5000),
       /proxy CONNECT rejected with HTTP 403/,
@@ -283,7 +317,7 @@ await withServer(
           port,
           INVESTING_TLS_PROFILES[0],
           5000,
-          { host: "127.0.0.1", port, secure: false }
+          { host: "127.0.0.1", port, secure: false, authorization: null }
         ),
       "a failed TLS handshake must reject"
     );
@@ -293,7 +327,7 @@ await withServer(
 // CONNECT to an unreachable proxy
 await assert.rejects(
   () =>
-    openProxyTunnel({ host: "127.0.0.1", port: 1, secure: false }, "gql.api.investing.com", 443, 3000),
+    openProxyTunnel({ host: "127.0.0.1", port: 1, secure: false, authorization: null }, "gql.api.investing.com", 443, 3000),
   "an unreachable proxy must reject"
 );
 
