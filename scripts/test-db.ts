@@ -486,7 +486,7 @@ async function main() {
     assert.equal((await q.getEarnings(TEST_SYMBOL))?.earnings.length, 1);
 
     // --- data-source priority: primary wins, the other source may only fill gaps ---
-    const { saveRatios } = await import("../src/services/sync.service.js");
+    const { saveFinancials, saveRatios } = await import("../src/services/sync.service.js");
     const PROBE_AS_OF = "2026-01-02";
     const readProbe = async (): Promise<{ value: number; source: string } | null> => {
       const rows = await query<any[]>(
@@ -517,6 +517,100 @@ async function main() {
     await saveRatios(id, [probe(6, "yahoo")], "investing");
     assert.equal((await readProbe())?.value, 5, "yahoo must not override when investing is primary");
     await query("DELETE FROM ratios WHERE instrument_id = ? AND metric = ?", [id, "priority_probe"]);
+
+    // NULL means "no provider observation": it must not clobber fallback value or provenance.
+    const FIN_NULL_PERIOD = "2026-01-02";
+    const financialProbe = (
+      fieldName: string,
+      value: number | null,
+      source: "yahoo" | "investing"
+    ) => ({
+      statementType: "INCOME" as const,
+      periodType: "ANNUAL" as const,
+      periodEnd: FIN_NULL_PERIOD,
+      fieldName,
+      value,
+      currency: "USD",
+      source,
+    });
+    const readFinancialProbe = async (fieldName: string) => {
+      const rows = await query<any[]>(
+        `SELECT value, source FROM financial_statements
+         WHERE instrument_id = ? AND statement_type = 'INCOME' AND period_type = 'ANNUAL'
+           AND period_end = ? AND field_name = ?`,
+        [id, FIN_NULL_PERIOD, fieldName]
+      );
+      return rows[0] ? { value: Number(rows[0].value), source: rows[0].source } : null;
+    };
+
+    await saveFinancials(id, [financialProbe("null_priority_financial", 700, "yahoo")], "investing");
+    assert.deepEqual(
+      await readFinancialProbe("null_priority_financial"),
+      { value: 700, source: "yahoo" },
+      "fallback financial observation should fill an empty canonical row"
+    );
+    await saveFinancials(id, [financialProbe("null_priority_financial", null, "investing")], "investing");
+    assert.deepEqual(
+      await readFinancialProbe("null_priority_financial"),
+      { value: 700, source: "yahoo" },
+      "primary financial NULL must preserve fallback value and provenance"
+    );
+    await saveFinancials(id, [financialProbe("null_only_financial", null, "investing")], "investing");
+    assert.equal(
+      await readFinancialProbe("null_only_financial"),
+      null,
+      "null-only financial observation must not create an empty canonical row"
+    );
+    await saveFinancials(id, [financialProbe("null_priority_financial", 0, "investing")], "investing");
+    assert.deepEqual(
+      await readFinancialProbe("null_priority_financial"),
+      { value: 0, source: "investing" },
+      "numeric zero is a real primary observation and must override"
+    );
+
+    const NULL_RATIO_AS_OF = "2026-01-04";
+    const ratioNullProbe = (
+      metric: string,
+      value: number | null,
+      source: "yahoo" | "investing"
+    ) => ({ metric, value, asOf: NULL_RATIO_AS_OF, source });
+    const readNullRatio = async (metric: string) => {
+      const rows = await query<any[]>(
+        "SELECT value, source FROM ratios WHERE instrument_id = ? AND metric = ? AND as_of = ?",
+        [id, metric, NULL_RATIO_AS_OF]
+      );
+      return rows[0] ? { value: Number(rows[0].value), source: rows[0].source } : null;
+    };
+
+    await saveRatios(id, [ratioNullProbe("null_priority_ratio", 2.5, "yahoo")], "investing");
+    assert.deepEqual(await readNullRatio("null_priority_ratio"), { value: 2.5, source: "yahoo" });
+    await saveRatios(id, [ratioNullProbe("null_priority_ratio", null, "investing")], "investing");
+    assert.deepEqual(
+      await readNullRatio("null_priority_ratio"),
+      { value: 2.5, source: "yahoo" },
+      "primary ratio NULL must preserve fallback value and provenance"
+    );
+    await saveRatios(id, [ratioNullProbe("null_only_ratio", null, "investing")], "investing");
+    assert.equal(
+      await readNullRatio("null_only_ratio"),
+      null,
+      "null-only ratio observation must not create an empty canonical row"
+    );
+    await saveRatios(id, [ratioNullProbe("null_priority_ratio", 0, "investing")], "investing");
+    assert.deepEqual(
+      await readNullRatio("null_priority_ratio"),
+      { value: 0, source: "investing" },
+      "numeric zero is a real primary ratio observation and must override"
+    );
+
+    await query(
+      "DELETE FROM financial_statements WHERE instrument_id = ? AND field_name IN ('null_priority_financial','null_only_financial')",
+      [id]
+    );
+    await query(
+      "DELETE FROM ratios WHERE instrument_id = ? AND metric IN ('null_priority_ratio','null_only_ratio')",
+      [id]
+    );
 
     // Provider aliases collapse to one canonical storage key, so real provider priority now applies.
     const CANONICAL_AS_OF = "2026-01-03";

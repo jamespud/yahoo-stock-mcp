@@ -337,13 +337,14 @@ export async function saveFinancials(
   fields: FinancialField[],
   primary: Provider = config.primaryProvider
 ): Promise<void> {
-  if (fields.length === 0) return;
+  const observed = fields.filter((f) => f.value != null);
+  if (observed.length === 0) return;
   const keep = priorityUpdate(primary, ["value"]);
   const sql =
     `INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE ${keep.sql}`;
-  const stmts = fields.map((f): [string, any[]] => [
+  const stmts = observed.map((f): [string, any[]] => [
     sql,
     [instrumentId, f.statementType, f.periodType, f.periodEnd, f.fieldName, f.value, f.currency, f.source, ...keep.params],
   ]);
@@ -355,13 +356,16 @@ export async function saveRatios(
   ratios: RatioValue[],
   primary: Provider = config.primaryProvider
 ): Promise<void> {
-  if (ratios.length === 0) return;
+  const observed = ratios
+    .map(canonicalizeRatioValue)
+    .filter((r) => r.value != null);
+  if (observed.length === 0) return;
   const keep = priorityUpdate(primary, ["value"]);
   const sql =
     `INSERT INTO ratios (instrument_id, metric, as_of, value, source)
      VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE ${keep.sql}`;
-  const stmts = ratios.map(canonicalizeRatioValue).map((r): [string, any[]] => [
+  const stmts = observed.map((r): [string, any[]] => [
     sql,
     [instrumentId, r.metric, r.asOf, r.value, r.source, ...keep.params],
   ]);
