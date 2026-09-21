@@ -8,6 +8,7 @@ import readline from "node:readline";
 import { closeDb, initSchema, query } from "../src/db.js";
 import { cleanupTestData, seedTestData, TEST_SYMBOL } from "./test-util.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../src/package-meta.js";
+import { isValidIsoDate, isoDateToUnixSeconds } from "../src/validation.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
@@ -151,6 +152,18 @@ class McpProbe {
   }
 }
 
+assert.equal(isValidIsoDate("2028-02-29"), true);
+assert.equal(isValidIsoDate("2025-02-29"), false);
+assert.equal(isValidIsoDate("2026-02-30"), false);
+assert.equal(isValidIsoDate("2026-13-01"), false);
+assert.equal(isValidIsoDate("02/28/2026"), false);
+assert.equal(
+  isoDateToUnixSeconds("2028-02-29"),
+  Math.floor(Date.UTC(2028, 1, 29) / 1000),
+  "valid expiration must preserve the exact UTC calendar date"
+);
+assert.throws(() => isoDateToUnixSeconds("2026-02-30"), /invalid ISO date/);
+
 async function main() {
   await initSchema();
   const instrumentId = await seedTestData();
@@ -203,6 +216,31 @@ async function main() {
         `${name} unexpected content`
       );
     }
+
+    for (const badExpiration of ["2026-02-30", "2025-02-29", "2026-13-01", "not-a-date"]) {
+      for (const toolName of ["get_options", "get_option_quote"]) {
+        const invalid = await probe.request("tools/call", {
+          name: toolName,
+          arguments: { symbol: TEST_SYMBOL, expiration: badExpiration },
+        });
+        assert.equal(
+          invalid.result?.isError,
+          true,
+          `${toolName} should reject invalid expiration ${badExpiration}`
+        );
+        assert.match(
+          invalid.result?.content?.[0]?.text ?? "",
+          /valid calendar date|YYYY-MM-DD|Invalid/,
+          `${toolName} should return an input-validation error`
+        );
+      }
+    }
+
+    const leap = await probe.request("tools/call", {
+      name: "get_options",
+      arguments: { symbol: TEST_SYMBOL, expiration: "2028-02-29" },
+    });
+    assert.notEqual(leap.result?.isError, true, "valid leap-day expiration should pass input validation");
 
     const err = await probe.request("tools/call", { name: "get_quote", arguments: { symbol: "QQQQNOPE" } });
     assert.equal(err.result.isError, true, "unknown symbol should return isError");
