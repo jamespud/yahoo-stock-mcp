@@ -172,11 +172,19 @@ assert.equal(needsInvestingIdentity("yahoo", { price: { longName: "Consumer Stap
 // ── parsePrimaryProvider: config parsing ──
 
 assert.equal(parsePrimaryProvider(undefined), "yahoo", "default primary provider is yahoo");
+assert.equal(parsePrimaryProvider(null), "yahoo");
 assert.equal(parsePrimaryProvider(""), "yahoo", "empty value falls back to yahoo");
+assert.equal(parsePrimaryProvider("   "), "yahoo", "blank value falls back to yahoo");
 assert.equal(parsePrimaryProvider("yahoo"), "yahoo");
-assert.equal(parsePrimaryProvider("  Investing "), "investing", "trimmed + case-insensitive");
+assert.equal(parsePrimaryProvider(" YAHOO "), "yahoo", "Yahoo is trimmed + case-insensitive");
+assert.equal(parsePrimaryProvider("  Investing "), "investing", "Investing is trimmed + case-insensitive");
 assert.equal(parsePrimaryProvider("investing"), "investing");
-assert.equal(parsePrimaryProvider("nonsense"), "yahoo", "unknown value falls back to yahoo");
+assert.throws(
+  () => parsePrimaryProvider("investng"),
+  /YAHOO_STOCK_MCP_PRIMARY_PROVIDER=.*investng.*yahoo.*investing/,
+  "misspelled provider must fail fast instead of silently selecting Yahoo"
+);
+assert.throws(() => parsePrimaryProvider("nonsense"), /PRIMARY_PROVIDER/, "unsupported provider must fail fast");
 
 // ── config wiring: the default comes from the env var (yahoo when unset) ──
 const { config } = await import("../src/config.js");
