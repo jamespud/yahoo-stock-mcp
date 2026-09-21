@@ -235,9 +235,9 @@ investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，�
 - 所有写入均为幂等 upsert（`INSERT ... ON DUPLICATE KEY UPDATE`），可重复执行。
 - Node HTTP 请求使用进程级共享限流（默认请求启动间隔 300ms，Yahoo 与 Investing Node transport 共用；并发调用会预留不同发送时隙），Yahoo crumb 缓存 25 分钟，TVC token 缓存 25 分钟。
 
-## 关于 investing.com 的 TLS 拦截
+## Investing.com 传输与 Cloudflare 可用性
 
-investing.com 通过 Cloudflare **TLS 指纹**拦截 Node.js 的请求（HTTP 403），Go 客户端可正常访问。因此项目内置了一个极小的 Go 传输代理 `cmd/gqlproxy`（约 200 行，仅标准库）。
+Investing.com 可能通过 Cloudflare HTTP 403 拒绝自动化请求；Node.js 的 TLS 指纹是常见触发因素之一。因此项目内置了一个极小的 Go 传输代理 `cmd/gqlproxy`（约 200 行，仅标准库），作为传输兼容性的 fallback。Sidecar 可以提高访问成功率，但**不能保证绕过 Cloudflare**：具体网络环境和 Cloudflare 策略下，Go 请求同样可能收到 challenge 或持续返回 403。
 
 npm 发布包包含按 `process.platform/process.arch` 自动选择的平台二进制：
 
@@ -250,7 +250,9 @@ bin/gqlproxy-win32-x64.exe
 bin/gqlproxy-win32-arm64.exe
 ```
 
-TS 数据源层默认先试 Node fetch，遇到 403 自动切换到当前平台对应的代理（含持久化 cookie 会话，自动处理 Cloudflare challenge）。从不受指纹拦截的网络访问时无需代理，可设置 `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` 强制纯 Node；`YAHOO_STOCK_MCP_GQLPROXY_PATH` 仍可显式覆盖包内 sidecar。
+默认 `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=auto` 时，TS 数据源层先尝试 Node `fetch`，Node 收到 HTTP 403 后切换到当前平台对应的 Go sidecar。Sidecar 使用持久化 cookie 会话，并会对识别出的 Cloudflare challenge 页面进行重试，但重试后仍可能以 HTTP 403 结束。可设置 `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` 强制纯 Node，或设为 `go` 强制使用 sidecar；`YAHOO_STOCK_MCP_GQLPROXY_PATH` 仍可显式覆盖包内 sidecar。
+
+因此 Investing 的实际可用性取决于运行网络和 Cloudflare 状态。若 Investing 仍不可用，同步会将其明确暴露为 `investingSnapshot` warning/component failure，而不会静默假定数据存在。因此即使 Yahoo 各组件成功，整体同步也可能因为 Investing 不可用而返回 `partial`。
 
 ```bash
 npm run build:sidecar   # 只构建当前 platform/arch

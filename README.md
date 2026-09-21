@@ -239,9 +239,9 @@ For the "watch the market, position early" use case, the following dimensions ar
 - All writes are idempotent upserts (`INSERT ... ON DUPLICATE KEY UPDATE`) and can be re-run safely.
 - Rate limiting is process-wide for Node HTTP requests (default 300ms between request starts, shared by Yahoo and Investing Node transport); concurrent callers reserve distinct send slots. Yahoo crumb cache 25 min, TVC token cache 25 min.
 
-## About investing.com's TLS interception
+## Investing.com transport and Cloudflare availability
 
-investing.com blocks Node.js requests via Cloudflare **TLS fingerprinting** (HTTP 403), while a Go client can access it normally. That's why the project bundles a tiny Go transport proxy `cmd/gqlproxy` (~200 lines, stdlib only).
+Investing.com may reject automated requests with Cloudflare HTTP 403 responses. Node.js TLS fingerprinting is one common trigger, so the project bundles a small Go transport proxy `cmd/gqlproxy` (~200 lines, stdlib only) as a compatibility fallback. The sidecar improves the chance of reaching Investing.com, but it is **not a guaranteed Cloudflare bypass**: depending on the network and Cloudflare policy, the Go request can also receive a challenge or remain blocked.
 
 Published npm packages include platform-specific binaries selected from `process.platform/process.arch`:
 
@@ -254,7 +254,9 @@ bin/gqlproxy-win32-x64.exe
 bin/gqlproxy-win32-arm64.exe
 ```
 
-The TS data-source layer tries Node `fetch` first, and automatically switches to the matching proxy on a 403 (with a persistent cookie session that handles the Cloudflare challenge). From networks that aren't fingerprint-blocked the proxy is unnecessary; set `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` to force pure Node. `YAHOO_STOCK_MCP_GQLPROXY_PATH` still overrides bundled sidecar discovery.
+With the default `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=auto`, the TS data-source layer tries Node `fetch` first and falls back to the matching Go sidecar when Node receives HTTP 403. The sidecar keeps a persistent cookie session and retries responses that are recognized as Cloudflare challenge pages, but those retries can still end in HTTP 403. Use `YAHOO_STOCK_MCP_INVESTING_TRANSPORT=node` to force pure Node or `go` to force the sidecar; `YAHOO_STOCK_MCP_GQLPROXY_PATH` overrides bundled sidecar discovery.
+
+Investing availability is therefore environment-dependent. If Investing remains unavailable, the sync surfaces the failure as an `investingSnapshot` warning/component failure instead of silently treating the data as present. A sync whose Yahoo components succeed can consequently report `partial` because the Investing component is unavailable.
 
 ```bash
 npm run build:sidecar   # build only the current platform/arch
