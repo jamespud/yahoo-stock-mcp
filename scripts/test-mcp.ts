@@ -242,6 +242,43 @@ async function main() {
     });
     assert.notEqual(leap.result?.isError, true, "valid leap-day expiration should pass input validation");
 
+
+    const dateWindowTools: Array<[string, Record<string, unknown>]> = [
+      ["get_bars", { interval: "1d" }],
+      ["get_intraday_bars", { interval: "15m" }],
+      ["get_indicators", { indicators: ["SMA(2)"] }],
+    ];
+    for (const badDate of ["2026-02-30", "2025-02-29", "2026-13-01", "not-a-date"]) {
+      for (const field of ["from", "to"] as const) {
+        for (const [toolName, baseArgs] of dateWindowTools) {
+          const invalid = await probe.request("tools/call", {
+            name: toolName,
+            arguments: { symbol: TEST_SYMBOL, ...baseArgs, [field]: badDate },
+          });
+          assert.equal(
+            invalid.result?.isError,
+            true,
+            `${toolName} should reject invalid ${field} date ${badDate}`
+          );
+          assert.match(
+            invalid.result?.content?.[0]?.text ?? "",
+            /valid calendar date|YYYY-MM-DD|Invalid/,
+            `${toolName} should return an input-validation error for ${field}`
+          );
+        }
+      }
+    }
+
+    const validWindow = await probe.request("tools/call", {
+      name: "get_bars",
+      arguments: { symbol: TEST_SYMBOL, interval: "1d", from: "2028-02-29" },
+    });
+    assert.notEqual(
+      validWindow.result?.isError,
+      true,
+      "valid leap-day date window should pass MCP input validation"
+    );
+
     const err = await probe.request("tools/call", { name: "get_quote", arguments: { symbol: "QQQQNOPE" } });
     assert.equal(err.result.isError, true, "unknown symbol should return isError");
     assert.match(err.result.content[0].text, /ERROR/);
