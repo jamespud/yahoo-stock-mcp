@@ -226,6 +226,7 @@ investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，�
 - 分钟线：`--intraday <1m|5m|15m|30m|60m>` 拉取最近 7 天分钟 K 到 `intraday_bars`（幂等 upsert）。
 - 板块：`sync --sectors` 一键同步 11 个 GICS 板块 ETF（XLC..XLU）+ SPY 基准的行情与 `topHoldings` 成分股，`get_sector_performance` 输出板块轮动排名。
 - 期权行情：`get_options` 读取同步入库的快照；`get_option_quote` 每次直接从 Yahoo 按需拉取最新报价（含标的现价、可选到期日、行权价、方向过滤），无需先执行同步。
+- 新闻采用规范化存储：共享文章元数据写入 `news_articles`，标的关联写入 `instrument_news`；同一篇 Yahoo 文章可以同时关联多个已同步标的，而不会重复保存文章内容。
 - 所有写入均为幂等 upsert（`INSERT ... ON DUPLICATE KEY UPDATE`），可重复执行。
 - Node HTTP 请求使用进程级共享限流（默认请求启动间隔 300ms，Yahoo 与 Investing Node transport 共用；并发调用会预留不同发送时隙），Yahoo crumb 缓存 25 分钟，TVC token 缓存 25 分钟。
 
