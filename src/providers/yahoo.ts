@@ -16,7 +16,10 @@ interface CrumbCache {
 let crumbCache: CrumbCache | null = null;
 
 async function refreshCrumb(): Promise<CrumbCache> {
-  const cookieRes = await httpFetch(COOKIE_URL, { headers: { "user-agent": config.userAgent } });
+  const cookieRes = await httpFetch(COOKIE_URL, {
+    headers: { "user-agent": config.userAgent },
+    signal: AbortSignal.timeout(30000),
+  });
   await cookieRes.text();
   if (cookieRes.status >= 500) throw new Error(`yahoo cookie HTTP ${cookieRes.status}`);
   const cookie = cookieRes.headers
