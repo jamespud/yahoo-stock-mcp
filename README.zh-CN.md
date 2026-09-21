@@ -4,7 +4,7 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-MCP server（TypeScript / Node.js）通过 **Yahoo Finance** 和 **Investing.com（GraphQL + TVC）** 获取股票全量信息，持久化到 **外部 MySQL**（通过 `YAHOO_STOCK_MCP_DATABASE_URL` 连接串配置，不随 server 内置），按标的代码查询。
+MCP server（TypeScript / Node.js）通过 **Yahoo Finance 与 Investing.com（GraphQL + TVC）的非官方集成** 获取股票市场数据，持久化到 **外部 MySQL**（通过 `YAHOO_STOCK_MCP_DATABASE_URL` 连接串配置，不随 server 内置），按标的代码查询。
 
 架构上 MCP server 保持轻量：它只是一个薄查询层 + 同步触发器，数据库是完全外部的依赖。
 
@@ -172,12 +172,24 @@ ID 中带 `_pct_` 的指标统一按“百分点”存储，例如 `25.3` 表示
 
 ## 数据源
 
-- **Yahoo Finance**：K 线（v8 chart）、quoteSummary（需 cookie+crumb）、期权（v7）、新闻（v1 search）、财务（fundamentals-timeseries，免认证）
-- **Investing.com**：GraphQL `gql.api.investing.com/graphql`（行情/三表/比率/分红/预测/盈利/公司资料/高管/持有人，免认证）、TVC K 线（carrier token）
+- **Yahoo Finance（非官方集成）**：K 线（v8 chart）、quoteSummary（需 cookie+crumb）、期权（v7）、新闻（v1 search）、财务（fundamentals-timeseries，免认证）
+- **Investing.com（非官方集成）**：GraphQL `gql.api.investing.com/graphql`（行情/三表/比率/分红/预测/盈利/公司资料/高管/持有人，免认证）、TVC K 线（carrier token）
+
+### Provider 身份与数据使用责任
+
+本项目中的 Yahoo Finance 与 Investing.com 集成均为**非官方集成**。本项目与 Yahoo、Investing.com / Fusion Media 不存在隶属、赞助、背书或授权关系。
+
+上游数据的访问、存储、复用或再分发可能受到服务条款和数据许可限制。用户需要自行判断其使用方式——包括全量历史同步、`sync --all`、本地数据库留存以及对已存数据的后续使用——是否符合适用的服务条款、数据许可和法律要求。本项目不会授予任何上游数据权利。
+
+本项目不声称、也不以突破 CAPTCHA 或数据提供方访问控制为目的。若数据提供方阻止访问，集成应显式暴露失败，而不是把该 provider 表现为可用。除非已取得必要许可或授权，请勿将本软件用于批量镜像、规避访问控制或重新分发数据提供方的数据。
+
+scheduled live-provider canary 仅用于低频 contract 健康检查；它不会把 canary 响应写入项目数据库，也不会将其发布为数据 feed。
+
+服务条款可能发生变化；请根据实际司法辖区和使用场景查看最新的 [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) 与 [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions)。
 
 ### 数据源优先级
 
-默认以 **Yahoo 为权威源**：同一条 canonical 数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
+默认以 **Yahoo 为优先源**：同一条 canonical 数据两家都返回时（比率、财务字段、分红、前瞻事件），取 Yahoo 的值，
 investing 只补 Yahoo 没给的。分红按 `(instrument, ex_date)` 唯一，前瞻事件按 `(instrument, event_type)` 唯一；
 `source` 只保留来源信息，不再参与这两类业务键。对这些 canonical 行，主数据源的 NULL 不会抹掉副数据源已经补齐的有效字段。
 `get_financials` 通过 `fieldSources` 保留字段级来源；同一报表期间若同时包含两家数据，则顶层返回 `source: "mixed"`。

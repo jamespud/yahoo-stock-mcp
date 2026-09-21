@@ -4,7 +4,7 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-An MCP server (TypeScript / Node.js) that pulls comprehensive market data for stocks via **Yahoo Finance** and **Investing.com (GraphQL + TVC)**, persists it to an **external MySQL** (configured via a `YAHOO_STOCK_MCP_DATABASE_URL` connection string, not bundled with the server), and queries it by ticker.
+An MCP server (TypeScript / Node.js) that pulls stock-market data through **unofficial integrations with Yahoo Finance and Investing.com (GraphQL + TVC)**, persists it to an **external MySQL** (configured via a `YAHOO_STOCK_MCP_DATABASE_URL` connection string, not bundled with the server), and queries it by ticker.
 
 Architecturally the MCP server stays lightweight: it is only a thin query layer plus a sync trigger, while the database is a fully external dependency.
 
@@ -174,12 +174,24 @@ Conventions:
 
 ## Data sources
 
-- **Yahoo Finance**: bars (v8 chart), quoteSummary (needs cookie+crumb), options (v7), news (v1 search), fundamentals (fundamentals-timeseries, no auth)
-- **Investing.com**: GraphQL `gql.api.investing.com/graphql` (quotes/statements/ratios/dividends/estimates/earnings/profile/executives/holders, no auth), TVC bars (carrier token)
+- **Yahoo Finance (unofficial integration)**: bars (v8 chart), quoteSummary (needs cookie+crumb), options (v7), news (v1 search), fundamentals (fundamentals-timeseries, no auth)
+- **Investing.com (unofficial integration)**: GraphQL `gql.api.investing.com/graphql` (quotes/statements/ratios/dividends/estimates/earnings/profile/executives/holders, no auth), TVC bars (carrier token)
+
+### Provider status and data-use responsibility
+
+The Yahoo Finance and Investing.com integrations in this project are **unofficial**. This project is not affiliated with, sponsored by, endorsed by, or authorized by Yahoo or Investing.com / Fusion Media.
+
+Access to, storage of, and reuse or redistribution of upstream data may be restricted by provider terms and data licenses. Users are responsible for determining whether their use of this software — including full-history sync, `sync --all`, local database retention, and any downstream use of stored data — complies with applicable terms, licenses, and law. This project does not grant any rights to upstream data.
+
+The project does not claim or intend to defeat CAPTCHAs or provider access controls. If a provider blocks access, the integration should surface that failure rather than represent the provider as available. Do not use this software for bulk mirroring, access-control circumvention, or redistribution of provider data unless you have the necessary permission or license.
+
+The scheduled live-provider canary is a low-frequency contract health check. It does not write canary responses to the project database or publish them as a data feed.
+
+Provider terms can change; review the current [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) and [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions) for the jurisdiction and use case that apply to you.
 
 ### Source priority
 
-Yahoo is authoritative by default: when both providers return a value for the same canonical row (ratios,
+Yahoo is the primary source by default: when both providers return a value for the same canonical row (ratios,
 financial fields, dividends, forward events), Yahoo's value wins and investing only fills what Yahoo
 did not provide. Dividends are canonical by `(instrument, ex_date)` and forward events by
 `(instrument, event_type)`; provider identity is provenance, not part of those business keys.
@@ -277,7 +289,7 @@ Unsupported platform/architecture pairs fail with an explicit message instead of
 | `YAHOO_STOCK_MCP_PROXY_URL` | none | HTTP(S) proxy for all Node fetch requests, e.g. `http://127.0.0.1:17890`; Yahoo needs it from mainland China |
 | `YAHOO_STOCK_MCP_BARS_START_DATE` | 2000-01-01 | Full-sync start date |
 | `YAHOO_STOCK_MCP_BARS_PROVIDER` | yahoo | Bar source (yahoo/investing) |
-| `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | Which source is authoritative when both return a value (yahoo/investing); the other fills only what the primary lacks |
+| `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | Which source has priority when both return a value (yahoo/investing); the other fills only what the primary lacks |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | News count per fetch |
 | `YAHOO_STOCK_MCP_INVESTING_TRANSPORT` | auto | node / go / auto |
 | `YAHOO_STOCK_MCP_GQLPROXY_COOKIE_FILE` | .cache/gqlproxy_cookies.txt | sidecar cookie session file |
