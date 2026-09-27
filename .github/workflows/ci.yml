@@ -35,6 +35,8 @@ jobs:
           --health-retries=20
     env:
       YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
+      # test:db builds and drops a throwaway database; the application user cannot create one
+      YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +52,6 @@ jobs:
 
       - name: Test missing-database bootstrap
         if: matrix.node == 22
-        env:
-          YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
         run: npm run test:db-bootstrap
 
   package:

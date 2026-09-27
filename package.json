@@ -40,7 +40,7 @@
     "db:init": "tsx src/cli.ts db:init",
     "sync": "tsx src/cli.ts sync",
     "smoke": "tsx scripts/smoke.ts",
-    "test:db": "tsx scripts/test-db.ts",
+    "test:db": "tsx scripts/test-db-isolated.ts",
     "test:mcp": "tsx scripts/test-mcp.ts",
     "test": "npm run test:cli && npm run test:skills && npm run test:providers && npm run test:transport && npm run test:indicators && npm run test:db && npm run test:mcp",
     "test:indicators": "tsx scripts/test-indicators.ts",
