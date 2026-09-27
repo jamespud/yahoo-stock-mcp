@@ -22,12 +22,14 @@ An MCP server for stock-market data with unofficial Yahoo Finance and Investing.
 - stores normalized data in MySQL and exposes it through MCP tools;
 - computes 42 technical indicators locally from stored bars;
 - uses Yahoo for daily/intraday bars and Yahoo + Investing for complementary fundamentals;
-- supports scheduled live-provider contract checks.
+- supports scheduled live-provider contract checks;
+- ships agent [skills](./skills/README.md) that turn those tools into repeatable research workflows.
 
 ## Documentation
 
 - **[Usage](./docs/USAGE.md)** — install, database setup, sync commands, MCP client config, environment variables, and proxy setup.
 - **[Reference](./docs/REFERENCE.md)** — MCP tools, tests, indicators, canonical metrics, and detailed data coverage.
+- **[Skills](./skills/README.md)** — installable Agent Skills for company research, technical analysis, earnings events, and data setup, plus how to verify them.
 - **[中文使用说明](./docs/USAGE.zh-CN.md)** / **[中文参考](./docs/REFERENCE.zh-CN.md)**
 
 ## Data sources

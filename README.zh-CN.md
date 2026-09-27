@@ -22,12 +22,14 @@
 - 将归一化后的数据存入 MySQL，并通过 MCP tools 暴露；
 - 基于本地 bar 计算 42 个技术指标；
 - K 线使用 Yahoo，基本面由 Yahoo + Investing 互补；
-- 支持 scheduled live-provider contract 健康检查。
+- 支持 scheduled live-provider contract 健康检查；
+- 提供面向 Agent 的 [skills](./skills/README.md)，把这些 tools 组织成可复用的研究工作流。
 
 ## 文档
 
 - **[使用说明](./docs/USAGE.zh-CN.md)** — 安装、数据库、同步命令、MCP 客户端配置、环境变量和代理配置。
 - **[参考说明](./docs/REFERENCE.zh-CN.md)** — MCP tools、测试、指标、统一 metric 和完整数据覆盖。
+- **[Skills](./skills/README.md)（英文）** — 可安装的 Agent Skills：公司研究、技术分析、财报事件与数据初始化，含验证方式。
 - **[English usage](./docs/USAGE.md)** / **[English reference](./docs/REFERENCE.md)**
 
 ## 数据源
