@@ -23,7 +23,8 @@ npm test                # 全部测试组
 ## Skills
 
 面向 Agent 的工作流位于 [`skills/`](../skills/README.md)：
-`stock-research`、`technical-analysis`、`earnings-event-research`、`stock-data-setup`，共用同一份
+`stock-research`、`technical-analysis`、`earnings-event-research`、`stock-data-setup`、
+`sector-rotation`、`options-analysis`、`dividend-research`，共用同一份
 [`data-policy`](../skills/references/data-policy.md)。每个 skill 的 `SKILL.md` 会列出所用工具，
 `npm run test:skills` 会把这些工具名与运行中的 server 做核对。
 

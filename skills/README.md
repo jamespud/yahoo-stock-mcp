@@ -19,14 +19,20 @@ The division of responsibility is deliberate:
 | [`technical-analysis`](technical-analysis/SKILL.md) | Trend, momentum, volume, and volatility from stored bars, with window selection and warm-up handling. |
 | [`earnings-event-research`](earnings-event-research/SKILL.md) | Next report, reported results versus estimates, estimate revisions, and analyst actions. |
 | [`stock-data-setup`](stock-data-setup/SKILL.md) | Database init/migration, symbol and sector sync, and diagnosis of provider or database failures. |
+| [`sector-rotation`](sector-rotation/SKILL.md) | Benchmark-relative performance across the 11 GICS sector ETFs, plus constituent weights for a sector. |
+| [`options-analysis`](options-analysis/SKILL.md) | Option chain inspection: expirations and strikes, per-contract quotes, liquidity screening, and term structure. |
+| [`dividend-research`](dividend-research/SKILL.md) | Dividend history, yield and payout ratios, forward ex-dividend/payment dates, and coverage against cash flow. |
+
+The first four are the core set for single-company work; `stock-research` is the entry point and
+routes to the focused skills. `sector-rotation`, `options-analysis`, and `dividend-research` answer
+the narrower market-structure questions and are not meant to re-derive a company overview.
 
 Shared data discipline lives in [`references/data-policy.md`](references/data-policy.md) and is
 referenced by every skill: no fabricated values, explicit as-of dates, disclosure of partial syncs,
 and no circumvention of provider access denial.
 
-Planned but not part of this release: `sector-rotation`, `options-analysis`, and
-`dividend-research`. Screening, backtesting, and trade execution are explicitly out of scope - the
-server exposes no such capability.
+Screening, backtesting, and trade execution are explicitly out of scope - the server exposes no such
+capability.
 
 ## Format
 

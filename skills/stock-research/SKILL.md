@@ -73,10 +73,13 @@ Keep this skill's report shallow on these topics and hand them off:
 | trend, momentum, volume, volatility, indicator levels | `technical-analysis` |
 | next earnings date, estimate revisions, analyst actions, post-earnings read | `earnings-event-research` |
 | missing symbol, failed sync, provider errors, database setup | `stock-data-setup` |
-| valuation depth, ownership, short interest, dividends | extend the report, or note that no focused skill ships yet |
+| dividend history, yield, payout, coverage | `dividend-research` |
+| sector comparison, rotation, sector constituents | `sector-rotation` |
+| option chain, implied volatility, open interest | `options-analysis` |
+| ownership depth, short interest, holder breakdown | extend the report from `get_holders`, `get_short_interest`, and `get_holder_breakdown` |
 
-Do not answer a technical or earnings question from this skill's data alone; those tools are not
-called here and their conclusions need the dedicated workflow.
+Do not answer a technical, earnings, dividend, sector, or options question from this skill's data
+alone; those tools are not called here and their conclusions need the dedicated workflow.
 
 ## Guardrails
 

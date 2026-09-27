@@ -23,8 +23,9 @@ Tests use a dedicated `ZZTEST` symbol and clean up automatically, so they never 
 ## Skills
 
 Agent-facing workflows built on these tools ship in [`skills/`](../skills/README.md):
-`stock-research`, `technical-analysis`, `earnings-event-research`, and `stock-data-setup`, sharing
-one [`data-policy`](../skills/references/data-policy.md). Each skill's `SKILL.md` lists the tools it
+`stock-research`, `technical-analysis`, `earnings-event-research`, `stock-data-setup`,
+`sector-rotation`, `options-analysis`, and `dividend-research`, sharing one
+[`data-policy`](../skills/references/data-policy.md). Each skill's `SKILL.md` lists the tools it
 uses, and `npm run test:skills` verifies those names against the running server.
 
 ## MCP tools

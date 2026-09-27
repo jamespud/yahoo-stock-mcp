@@ -29,7 +29,7 @@ An MCP server for stock-market data with unofficial Yahoo Finance and Investing.
 
 - **[Usage](./docs/USAGE.md)** — install, database setup, sync commands, MCP client config, environment variables, and proxy setup.
 - **[Reference](./docs/REFERENCE.md)** — MCP tools, tests, indicators, canonical metrics, and detailed data coverage.
-- **[Skills](./skills/README.md)** — installable Agent Skills for company research, technical analysis, earnings events, and data setup, plus how to verify them.
+- **[Skills](./skills/README.md)** — installable Agent Skills for company, sector, options, dividend, earnings, and technical research workflows, plus how to verify them.
 - **[中文使用说明](./docs/USAGE.zh-CN.md)** / **[中文参考](./docs/REFERENCE.zh-CN.md)**
 
 ## Data sources
