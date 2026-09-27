@@ -9,15 +9,23 @@
 ```bash
 # 需要本地 MySQL（默认 127.0.0.1:3306，见 deploy/docker-compose.mysql.yml）且已初始化表结构
 npm run test:cli        # CLI 行为：version / help / 未知命令处理（无需数据库）
+npm run test:skills     # 校验 skills/ 结构与工具名引用，对照真实 tools/list（无需数据库）
 npm run test:providers  # 数据源优先级与 provider 提取逻辑（无需数据库）
 npm run test:indicators # 技术指标 fixtures 与边界情况（无需数据库）
 npm run test:db         # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
 npm run test:db-bootstrap # 可选缺失数据库 bootstrap 集成测试（需 YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL）
 npm run test:mcp        # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
-npm test                # 五组测试全部执行
+npm test                # 全部测试组
 ```
 
 测试使用独立的 `ZZTEST` 标的，跑完自动清理，不会动已有数据。
+
+## Skills
+
+面向 Agent 的工作流位于 [`skills/`](../skills/README.md)：
+`stock-research`、`technical-analysis`、`earnings-event-research`、`stock-data-setup`，共用同一份
+[`data-policy`](../skills/references/data-policy.md)。每个 skill 的 `SKILL.md` 会列出所用工具，
+`npm run test:skills` 会把这些工具名与运行中的 server 做核对。
 
 ## MCP 工具
 

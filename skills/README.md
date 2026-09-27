@@ -1,0 +1,88 @@
+# Skills
+
+Agent-facing workflows built on this server's MCP tools. `skills/` is the single source of truth:
+there is no second copy of this content, and each client is pointed at this directory rather than
+given its own fork of the text.
+
+The division of responsibility is deliberate:
+
+- **MCP tools are the capability layer.** They fetch and normalise quotes, statements, analysts,
+  options, news, sectors, and technical indicators.
+- **Skills are the workflow layer.** They decide which data a task needs, in what order to call the
+  tools, how to treat missing or partially synced data, and how to present the result.
+
+## Contents
+
+| Skill | Purpose |
+| --- | --- |
+| [`stock-research`](stock-research/SKILL.md) | Standardized single-company report: profile, snapshot, statements, ratios, news. Entry point for broad company questions. |
+| [`technical-analysis`](technical-analysis/SKILL.md) | Trend, momentum, volume, and volatility from stored bars, with window selection and warm-up handling. |
+| [`earnings-event-research`](earnings-event-research/SKILL.md) | Next report, reported results versus estimates, estimate revisions, and analyst actions. |
+| [`stock-data-setup`](stock-data-setup/SKILL.md) | Database init/migration, symbol and sector sync, and diagnosis of provider or database failures. |
+
+Shared data discipline lives in [`references/data-policy.md`](references/data-policy.md) and is
+referenced by every skill: no fabricated values, explicit as-of dates, disclosure of partial syncs,
+and no circumvention of provider access denial.
+
+Planned but not part of this release: `sector-rotation`, `options-analysis`, and
+`dividend-research`. Screening, backtesting, and trade execution are explicitly out of scope - the
+server exposes no such capability.
+
+## Format
+
+Each skill is a directory containing a `SKILL.md` with `name` and `description` YAML frontmatter,
+following the open [Agent Skills](https://code.claude.com/docs/en/skills) layout. Longer procedures
+live in each skill's `references/` directory and are read only when the task needs them.
+
+Skills are written in English to match the rest of the repository's primary documentation; there is
+intentionally no second translated copy to keep in sync.
+
+## Installing into an agent
+
+`skills/` ships inside the npm package, but no client discovers it automatically from
+`node_modules`. Point the client at the directory, or link it in, so edits in this repository stay
+the single source.
+
+**Codex** - personal skills live in `$CODEX_HOME/skills` (default `~/.codex/skills`):
+
+```bash
+ln -s "$(pwd)/skills/stock-research" ~/.codex/skills/stock-research
+# repeat per skill, or copy the whole tree
+```
+
+**Claude Code** - personal skills live in `~/.claude/skills/`, project skills in
+`.claude/skills/`:
+
+```bash
+mkdir -p ~/.claude/skills
+for d in skills/*/; do ln -s "$(pwd)/$d" ~/.claude/skills/"$(basename "$d")"; done
+```
+
+**Other clients** - any agent that implements the Agent Skills convention can read a directory of
+`<name>/SKILL.md`. Point it at this folder, or at `node_modules/yahoo-stock-mcp/skills` after an npm
+install.
+
+Client discovery rules change over time; check the client's own documentation when a skill does not
+appear. Symlinks keep the repository authoritative - avoid copies, which silently drift.
+
+## Verifying the skills
+
+`npm run test:skills` runs in CI and checks the parts that can be verified without a model:
+
+- each skill has `SKILL.md` with valid frontmatter, and `name` matches its directory;
+- every `references/...` link in a skill resolves to a real file;
+- every skill links the shared data policy;
+- every tool named in a skill's `## MCP tools used` section exists in the server's live
+  `tools/list` response - a skill cannot reference a tool the server does not expose.
+
+Behavioural verification needs a model. Each skill is expected to hold up in at least these three
+situations, with a synced database and an MCP client attached:
+
+| Situation | Expectation |
+| --- | --- |
+| **Normal data** | The skill calls its listed tools and reports values with as-of dates; it does not answer from memory. |
+| **Missing data** | A symbol that was never synced and an empty result set are both disclosed; the skill routes to `stock-data-setup` or states the gap instead of substituting numbers. |
+| **Provider failure** | A `partial` sync or an Investing access denial is reported with the failing component named; the analysis continues only on data that synced, and no workaround is proposed. |
+
+Spot-check the transcript for the failure mode this project cares about most: a skill producing a
+plausible number that no tool returned.
