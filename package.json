@@ -49,6 +49,7 @@
     "prepublishOnly": "npm run build",
     "test:cli": "tsx scripts/test-cli.ts",
     "test:skills": "tsx scripts/test-skills.ts",
+    "verify:pack": "node scripts/verify-pack.mjs",
     "test:providers": "tsx scripts/test-providers.ts",
     "test:transport": "tsx scripts/test-investing-transport.ts",
     "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts",
