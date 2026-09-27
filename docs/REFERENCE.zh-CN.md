@@ -8,22 +8,26 @@
 
 ```bash
 # 需要本地 MySQL（默认 127.0.0.1:3306，见 deploy/docker-compose.mysql.yml）且已初始化表结构
+# test:db 会自建并删除一次性临时库，需要 CREATE DATABASE 权限；配置的用户没有该权限时
+# 设置 YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL
 npm run test:cli        # CLI 行为：version / help / 未知命令处理（无需数据库）
 npm run test:skills     # 校验 skills/ 结构与工具名引用，对照真实 tools/list（无需数据库）
 npm run test:providers  # 数据源优先级与 provider 提取逻辑（无需数据库）
 npm run test:indicators # 技术指标 fixtures 与边界情况（无需数据库）
-npm run test:db         # 查询层：覆盖全部查询函数、LIMIT 绑定回归、边界参数
+npm run test:db         # 查询与迁移层：在一次性临时库中覆盖全部查询函数、LIMIT 绑定回归、legacy schema 重放
 npm run test:db-bootstrap # 可选缺失数据库 bootstrap 集成测试（需 YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL）
 npm run test:mcp        # 协议层：initialize/tools/list/tools/call 全工具端到端 + stdin 关闭退出
 npm test                # 全部测试组
 ```
 
-测试使用独立的 `ZZTEST` 标的，跑完自动清理，不会动已有数据。
+测试使用独立的 `ZZTEST` 标的，跑完自动清理。`test:db` 进一步由 `scripts/test-db-isolated.ts`
+创建并删除一次性临时库，在其中运行 `scripts/test-db.ts`，因此迁移重放不会改写配置的数据库。
 
 ## Skills
 
 面向 Agent 的工作流位于 [`skills/`](../skills/README.md)：
-`stock-research`、`technical-analysis`、`earnings-event-research`、`stock-data-setup`，共用同一份
+`stock-research`、`technical-analysis`、`earnings-event-research`、`stock-data-setup`、
+`sector-rotation`、`options-analysis`、`dividend-research`，共用同一份
 [`data-policy`](../skills/references/data-policy.md)。每个 skill 的 `SKILL.md` 会列出所用工具，
 `npm run test:skills` 会把这些工具名与运行中的 server 做核对。
 

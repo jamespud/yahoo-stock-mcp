@@ -10,7 +10,8 @@ All read tools except `get_option_quote` read from the local MySQL database. "La
 
 - Anchor every report to explicit timestamps: `get_quote` -> `syncedAt` and `latestBar.trade_date`,
   `get_ratios` -> `asOf`, `get_indicators` -> `asOf`, `get_sector_performance` -> `asOf`,
-  `get_company_events` -> `event_date`.
+  `get_company_events` -> `event_date`, `get_dividends` -> each payment row's `ex_date` and the
+  summary's `updated_at`, `get_options` -> each leg's `updated_at`, `get_option_quote` -> `asOf`.
 - State the as-of date next to each number you quote. If the user asks for something the snapshot
   cannot answer ("what is it trading at right now"), say the snapshot cannot answer it and report
   the stored value with its date instead.

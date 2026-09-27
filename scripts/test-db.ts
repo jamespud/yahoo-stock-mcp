@@ -18,6 +18,60 @@ import {
   summarizeSyncStatus,
 } from "../src/services/sync.service.js";
 
+/** Column names of an index, in index order - or null when the index does not exist. */
+async function indexColumns(table: string, key: string): Promise<string[] | null> {
+  const rows = await query<any[]>("SHOW INDEX FROM " + table + " WHERE Key_name = ?", [key]);
+  if (rows.length === 0) return null;
+  return rows
+    .sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index))
+    .map((row) => row.Column_name);
+}
+
+/**
+ * Restores the post-migration schema shape after the legacy-schema simulations.
+ *
+ * Those simulations drop the normalized keys from real tables, and MySQL cannot roll DDL back, so
+ * a failure part-way through used to leave the database claiming to be migrated while carrying
+ * the legacy keys. Recovery therefore checks the shape on disk - not `schema_migrations`, which
+ * the simulations rewrite as well - and replays only the migrations that are missing from it.
+ * Every step below is replay-safe, so calling this more than once is harmless.
+ */
+async function restoreMigratedSchema(): Promise<void> {
+  const stale = new Set<string>();
+
+  if ((await indexColumns("insider_transactions", "uq_insider_norm")) === null) {
+    stale.add("0006_dedupe_insider_transactions");
+    stale.add("0007_normalize_insider_unique_key");
+  }
+  if ((await indexColumns("analyst_actions", "uq_action_norm")) === null) {
+    stale.add("0008_dedupe_analyst_actions");
+    stale.add("0009_normalize_analyst_action_unique_key");
+  }
+  // 0002 narrows these primary keys to be provider-independent; a provider column means the
+  // simulation's downgrade is still in place.
+  for (const table of ["dividends", "company_events"]) {
+    const primaryKey = await indexColumns(table, "PRIMARY");
+    if (primaryKey !== null && primaryKey.includes("source")) stale.add("0002_canonical_provider_rows");
+  }
+  // A surviving legacy news table means 0003-0005 were rolled back too; replaying them backfills
+  // and then drops it again, which is safer than dropping the rows outright.
+  if ((await query<any[]>("SHOW TABLES LIKE 'news'")).length > 0) {
+    stale.add("0003_create_news_relations");
+    stale.add("0004_backfill_news_relations");
+    stale.add("0005_drop_legacy_news");
+  }
+
+  if (stale.size === 0) return;
+
+  const versions = [...stale];
+  await query(
+    `DELETE FROM schema_migrations WHERE version IN (${versions.map(() => "?").join(", ")})`,
+    versions
+  );
+  console.warn(`test-db: restoring schema shape by replaying: ${versions.join(", ")}`);
+  await migrateSchema();
+}
+
 async function main() {
   await initSchema();
   const id = await seedTestData();
@@ -120,6 +174,8 @@ async function main() {
     }
 
     // Simulate an installation that still has the legacy single-instrument news table, then replay 0003-0005.
+    // Dropped first so a run interrupted after this point can be re-entered instead of failing here.
+    await query("DROP TABLE IF EXISTS news");
     await query(
       `CREATE TABLE news (
          id VARCHAR(64) PRIMARY KEY,
@@ -1394,7 +1450,13 @@ async function main() {
 
     console.log("db tests OK");
   } finally {
-    await cleanupTestData();
+    // The simulations above downgrade real tables with DDL that MySQL cannot roll back, so the
+    // shape is restored on every exit path - including a failed assertion - before test cleanup.
+    try {
+      await restoreMigratedSchema();
+    } finally {
+      await cleanupTestData();
+    }
   }
 }
 

@@ -29,7 +29,7 @@
 
 - **[使用说明](./docs/USAGE.zh-CN.md)** — 安装、数据库、同步命令、MCP 客户端配置、环境变量和代理配置。
 - **[参考说明](./docs/REFERENCE.zh-CN.md)** — MCP tools、测试、指标、统一 metric 和完整数据覆盖。
-- **[Skills](./skills/README.md)（英文）** — 可安装的 Agent Skills：公司研究、技术分析、财报事件与数据初始化，含验证方式。
+- **[Skills](./skills/README.md)（英文）** — 可安装的 Agent Skills：公司、板块、期权、分红、财报与技术研究工作流，含验证方式。
 - **[English usage](./docs/USAGE.md)** / **[English reference](./docs/REFERENCE.md)**
 
 ## 数据源

@@ -8,23 +8,28 @@ This document contains the detailed project reference that is intentionally kept
 
 ```bash
 # Requires a local MySQL (default 127.0.0.1:3306, see deploy/docker-compose.mysql.yml) with the schema initialised
+# test:db creates and drops its own throwaway database, so it needs CREATE DATABASE - set
+# YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL when the configured user may not create databases
 npm run test:cli        # CLI behaviour: version / help / unknown-command handling (no DB required)
 npm run test:skills     # skills/ structure and tool-name references checked against the live tools/list (no DB required)
 npm run test:providers  # provider-priority and provider extraction tests (no DB required)
 npm run test:indicators # technical-indicator fixtures and edge cases (no DB required)
-npm run test:db         # query layer: all query functions, LIMIT binding regression, edge params
+npm run test:db         # query + migration layer in a throwaway database: queries, LIMIT binding, legacy-schema replay
 npm run test:db-bootstrap # optional missing-database bootstrap integration (needs YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL)
 npm run test:mcp        # protocol layer: initialize/tools/list/tools/call end-to-end + stdin close exit
 npm test                # every group
 ```
 
-Tests use a dedicated `ZZTEST` symbol and clean up automatically, so they never touch real data.
+Tests use a dedicated `ZZTEST` symbol and clean up automatically. `test:db` goes further and runs
+`scripts/test-db.ts` inside a throwaway database created and dropped by
+`scripts/test-db-isolated.ts`, so the migration replay never rewrites the configured database.
 
 ## Skills
 
 Agent-facing workflows built on these tools ship in [`skills/`](../skills/README.md):
-`stock-research`, `technical-analysis`, `earnings-event-research`, and `stock-data-setup`, sharing
-one [`data-policy`](../skills/references/data-policy.md). Each skill's `SKILL.md` lists the tools it
+`stock-research`, `technical-analysis`, `earnings-event-research`, `stock-data-setup`,
+`sector-rotation`, `options-analysis`, and `dividend-research`, sharing one
+[`data-policy`](../skills/references/data-policy.md). Each skill's `SKILL.md` lists the tools it
 uses, and `npm run test:skills` verifies those names against the running server.
 
 ## MCP tools
