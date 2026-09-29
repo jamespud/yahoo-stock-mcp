@@ -17,6 +17,7 @@ jobs:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: root123
+          MYSQL_ROOT_HOST: "%"
           MYSQL_DATABASE: yahoo_stock_mcp
           MYSQL_USER: stock
           MYSQL_PASSWORD: stock123
@@ -29,6 +30,7 @@ jobs:
           --health-retries=20
     env:
       YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
+      YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
     steps:
       - uses: actions/checkout@v4
 
