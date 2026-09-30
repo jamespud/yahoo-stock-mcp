@@ -1,0 +1,20 @@
+{
+  "name": "yahoo-stock-mcp",
+  "interface": {
+    "displayName": "Yahoo Stock MCP"
+  },
+  "plugins": [
+    {
+      "name": "yahoo-stock-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yahoo-stock-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

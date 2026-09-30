@@ -1,0 +1,37 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "yahoo-stock-mcp",
+  "version": "0.4.0",
+  "description": "Stock-market research skills backed by the yahoo-stock-mcp MCP server.",
+  "author": {
+    "name": "jamespud"
+  },
+  "repository": "https://github.com/jamespud/yahoo-stock-mcp",
+  "license": "MIT",
+  "keywords": [
+    "stocks",
+    "research",
+    "mcp",
+    "yahoo-finance",
+    "mysql"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Yahoo Stock MCP",
+        "shortDescription": "Stock research skills and MCP market-data tools",
+        "longDescription": "Research companies, sectors, options, dividends, earnings, and technicals with repeatable skills and the local yahoo-stock-mcp server.",
+        "developerName": "jamespud",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "websiteURL": "https://github.com/jamespud/yahoo-stock-mcp",
+        "defaultPrompt": [
+          "Research a company using the Yahoo Stock MCP workflows.",
+          "Analyze a stock's technicals, earnings, dividends, options, or sector context."
+        ]
+      }
+    }
+  }
+}

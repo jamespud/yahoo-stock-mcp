@@ -32,6 +32,20 @@
 - **[Skills](./skills/README.md)（英文）** — 可安装的 Agent Skills：公司、板块、期权、分红、财报与技术研究工作流，含验证方式。
 - **[English usage](./docs/USAGE.md)** / **[English reference](./docs/REFERENCE.md)**
 
+## Codex Plugin
+
+仓库同时提供 portable Agent Plugin，把 7 个 Skills 与 MCP server 配置打包在一起。先把仓库添加为
+Codex marketplace source：
+
+```bash
+codex plugin marketplace add jamespud/yahoo-stock-mcp
+```
+
+然后在支持的 Plugins Directory 中安装 **Yahoo Stock MCP**。插件内的 stdio server 会启动与
+plugin manifest 版本一致的 npm 包。仍需 Node.js >= 20、外部 MySQL 以及本地
+`YAHOO_STOCK_MCP_*` 配置；数据库和代理凭据不会写入插件文件。若只安装 Skills，请查看
+[skills/README.md](./skills/README.md)。
+
 ## 数据源
 
 - **Yahoo Finance（非官方）：** K 线、quoteSummary、期权、新闻、fundamentals-timeseries。

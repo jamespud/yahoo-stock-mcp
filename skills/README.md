@@ -45,31 +45,41 @@ intentionally no second translated copy to keep in sync.
 
 ## Installing into an agent
 
-`skills/` ships inside the npm package, but no client discovers it automatically from
-`node_modules`. Point the client at the directory, or link it in, so edits in this repository stay
-the single source.
+Each skill is self-contained: its `SKILL.md` and every referenced file live inside the skill
+directory. The shared policy is authored once at `skills/references/data-policy.md` and synchronized
+into each skill by `npm run sync:skill-references`; CI rejects drift.
 
-**Codex** - personal skills live in `$CODEX_HOME/skills` (default `~/.codex/skills`):
+**Codex** - use the built-in `$skill-installer` with a GitHub skill path. For example, ask Codex:
 
-```bash
-ln -s "$(pwd)/skills/stock-research" ~/.codex/skills/stock-research
-# repeat per skill, or copy the whole tree
+```text
+Use $skill-installer to install
+https://github.com/jamespud/yahoo-stock-mcp/tree/main/skills/stock-research
 ```
+
+To install all skills in one operation, ask `$skill-installer` to install these repository paths:
+
+```text
+skills/stock-research
+skills/technical-analysis
+skills/earnings-event-research
+skills/stock-data-setup
+skills/sector-rotation
+skills/options-analysis
+skills/dividend-research
+```
+
+The installer copies each selected directory into `$CODEX_HOME/skills/<skill-name>` (normally
+`~/.codex/skills`). Restarting or opening a new Codex turn makes newly installed skills available.
 
 **Claude Code** - personal skills live in `~/.claude/skills/`, project skills in
-`.claude/skills/`:
-
-```bash
-mkdir -p ~/.claude/skills
-for d in skills/*/; do ln -s "$(pwd)/$d" ~/.claude/skills/"$(basename "$d")"; done
-```
+`.claude/skills/`. Copy or link the individual self-contained skill directories there.
 
 **Other clients** - any agent that implements the Agent Skills convention can read a directory of
-`<name>/SKILL.md`. Point it at this folder, or at `node_modules/yahoo-stock-mcp/skills` after an npm
-install.
+`<name>/SKILL.md`. Point it at this folder, or at
+`node_modules/yahoo-stock-mcp/skills` after an npm install.
 
 Client discovery rules change over time; check the client's own documentation when a skill does not
-appear. Symlinks keep the repository authoritative - avoid copies, which silently drift.
+appear.
 
 ## Verifying the skills
 

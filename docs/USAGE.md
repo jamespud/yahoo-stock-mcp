@@ -12,6 +12,18 @@ npm install -g yahoo-stock-mcp
 
 Requires Node.js >= 20 and an external MySQL (see the `.env` config below).
 
+### Codex repository plugin
+
+Add this repository as a marketplace source:
+
+```bash
+codex plugin marketplace add jamespud/yahoo-stock-mcp
+```
+
+Then install **Yahoo Stock MCP** from that marketplace in a supported Plugins Directory. The plugin bundles all repository skills and a portable stdio MCP declaration pinned to the same version as `package.json`. Database and proxy secrets remain local configuration; the plugin does not contain credentials.
+
+For skills without the bundled MCP server, use Codex's built-in `$skill-installer` as documented in [`skills/README.md`](../skills/README.md).
+
 ## Quick start (npm global install)
 
 The package already ships compiled `dist/`, so no local build step is needed — just use the `yahoo-stock-mcp` command:
