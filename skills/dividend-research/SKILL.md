@@ -9,7 +9,7 @@ Assemble the dividend picture from payment history, ratios, cash flow, and the f
 calendar - and keep two unit scales apart while doing it, because this data can express the same
 yield two different ways.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [dividend checklist](references/dividend-checklist.md) for the coverage arithmetic and the reporting
 shape.
 

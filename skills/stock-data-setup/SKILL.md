@@ -9,7 +9,7 @@ Get the local snapshot into a usable state, then prove it. Every other skill ass
 already holds the rows it reads, so this is the skill that runs when a tool answers
 `instrument not found in DB`, `no sector data synced yet`, or returns an empty list.
 
-Read [../references/data-policy.md](../references/data-policy.md) first - in particular the sections
+Read [references/data-policy.md](references/data-policy.md) first - in particular the sections
 on partial syncs and on provider access denial, which govern how failures are reported.
 
 ## MCP tools used

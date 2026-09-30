@@ -8,7 +8,7 @@ description: Research an earnings event with yahoo-stock-mcp - locate the next r
 Answer earnings questions from stored data: when the next report is due, how the last one landed,
 which way estimates and analyst actions have moved, and what the market has had time to price in.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [event checklist](references/event-checklist.md) for the pre/post workflow and the reporting shape.
 
 ## MCP tools used

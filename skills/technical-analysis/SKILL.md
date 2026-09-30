@@ -9,7 +9,7 @@ Turn stored OHLCV bars into a defensible read of trend, momentum, volume, and vo
 difficulty is not calling an indicator; it is choosing the window, respecting warm-up, keeping price
 bases consistent, and not smuggling a forecast into a description.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [indicator playbook](references/indicator-playbook.md) for window selection and the reporting shape.
 
 ## MCP tools used

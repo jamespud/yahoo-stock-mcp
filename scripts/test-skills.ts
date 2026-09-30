@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 
@@ -17,7 +17,7 @@ import readline from "node:readline";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skillsDir = resolve(root, "skills");
 const sharedPolicy = "skills/references/data-policy.md";
-const dataPolicyLink = "../references/data-policy.md";
+const dataPolicyLink = "references/data-policy.md";
 
 interface Skill {
   dir: string;
@@ -70,6 +70,17 @@ function checkRelativeLinks(displayPath: string, baseDir: string, body: string):
     );
   }
   return links;
+}
+
+function checkStandaloneLinks(displayPath: string, baseDir: string, body: string): void {
+  for (const link of relativeLinks(body)) {
+    const target = resolve(baseDir, link);
+    const rel = relative(baseDir, target);
+    assert.ok(
+      rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel),
+      `${displayPath} links outside its install directory: ${link}`
+    );
+  }
 }
 
 /** Reads the `## MCP tools used` section and returns the tool names listed there. */
@@ -230,6 +241,7 @@ async function main() {
       `${where}/SKILL.md must link the shared data policy (${dataPolicyLink})`
     );
     checkRelativeLinks(`${where}/SKILL.md`, skill.dir, skill.body);
+    checkStandaloneLinks(`${where}/SKILL.md`, skill.dir, skill.body);
     console.log(`  ${skill.name}: ${skill.tools.length} tools -> ${skill.tools.join(", ")}`);
   }
 

@@ -48,14 +48,16 @@
     "prepack": "npm run build",
     "prepublishOnly": "npm run build",
     "test:cli": "tsx scripts/test-cli.ts",
-    "test:skills": "tsx scripts/test-skills.ts",
+    "test:skills": "npm run check:skill-references && tsx scripts/test-skills.ts",
     "verify:pack": "node scripts/verify-pack.mjs",
     "test:providers": "tsx scripts/test-providers.ts",
     "test:transport": "tsx scripts/test-investing-transport.ts",
     "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts",
     "db:migrate": "tsx src/cli.ts db:migrate",
     "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts",
-    "canary:providers": "tsx scripts/provider-canary.ts"
+    "canary:providers": "tsx scripts/provider-canary.ts",
+    "sync:skill-references": "node scripts/sync-skill-references.mjs",
+    "check:skill-references": "node scripts/sync-skill-references.mjs --check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

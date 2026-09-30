@@ -8,7 +8,7 @@ description: Inspect an option chain with yahoo-stock-mcp - expirations and stri
 Read a chain contract by contract, screen it for liquidity, and - when the question needs more than
 one expiry - assemble the term structure from separate live calls.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [chain playbook](references/chain-playbook.md) for the sequence, the scales, and the reporting shape.
 
 ## MCP tools used

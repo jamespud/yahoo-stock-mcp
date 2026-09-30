@@ -10,7 +10,7 @@ synced into the local MySQL database. This is the entry point for broad company 
 deliberately shallow on price action, earnings timing, options, and dividends so the focused skills
 can go deep without duplicating this report.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [report template](references/report-template.md) for the output shape.
 
 ## MCP tools used

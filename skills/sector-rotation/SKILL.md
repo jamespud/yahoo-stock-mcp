@@ -9,7 +9,7 @@ Read relative sector performance out of the stored sector ETFs (XLC..XLU plus th
 name the constituents that carry each sector. The value here is the benchmark-relative view and the
 constituent weights, which a per-stock read cannot give you.
 
-Read [../references/data-policy.md](../references/data-policy.md) first, then the
+Read [references/data-policy.md](references/data-policy.md) first, then the
 [rotation playbook](references/rotation-playbook.md) for relative-performance maths and the
 reporting shape.
 
