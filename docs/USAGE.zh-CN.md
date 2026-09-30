@@ -12,6 +12,18 @@ npm install -g yahoo-stock-mcp
 
 需要 Node.js >= 20 与一个外部 MySQL（见下方 `.env` 配置）。
 
+### Codex 仓库插件
+
+先把仓库加入 marketplace：
+
+```bash
+codex plugin marketplace add jamespud/yahoo-stock-mcp
+```
+
+然后在支持的 Plugins Directory 中安装 **Yahoo Stock MCP**。Plugin 会包含全部 Skills，并通过 portable stdio MCP 配置启动与 `package.json` 相同版本的 npm 包。数据库与代理凭据仍由本地环境配置，插件文件不会保存 secrets。
+
+如果只需要 Skills、不需要随插件加载 MCP server，请按 [`skills/README.md`](../skills/README.md) 使用 Codex 内置 `$skill-installer`。
+
 ## 快速开始（npm 全局安装）
 
 包内已自带编译好的 `dist/`，无需本地构建，直接用 `yahoo-stock-mcp` 命令：

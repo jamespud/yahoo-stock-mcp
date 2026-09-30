@@ -32,6 +32,20 @@ An MCP server for stock-market data with unofficial Yahoo Finance and Investing.
 - **[Skills](./skills/README.md)** — installable Agent Skills for company, sector, options, dividend, earnings, and technical research workflows, plus how to verify them.
 - **[中文使用说明](./docs/USAGE.zh-CN.md)** / **[中文参考](./docs/REFERENCE.zh-CN.md)**
 
+## Codex plugin
+
+The repository also ships a portable Agent Plugin that bundles all seven skills with the MCP server
+configuration. Add this repository as a Codex marketplace source:
+
+```bash
+codex plugin marketplace add jamespud/yahoo-stock-mcp
+```
+
+Then install **Yahoo Stock MCP** from that marketplace in a supported Plugins Directory. The bundled
+stdio server runs the npm package version matching the plugin manifest. Node.js >= 20, an external
+MySQL database, and local `YAHOO_STOCK_MCP_*` configuration are still required; credentials are
+never stored in the plugin files. For skill-only installation, see [skills/README.md](./skills/README.md).
+
 ## Data sources
 
 - **Yahoo Finance (unofficial):** bars, quoteSummary, options, news, fundamentals-timeseries.
