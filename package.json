@@ -42,6 +42,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "test:db": "tsx scripts/test-db-isolated.ts",
     "test:sqlite-bootstrap": "tsx scripts/test-sqlite-bootstrap.ts",
+    "test:sqlite-values": "tsx scripts/test-sqlite-values.ts",
     "test:mcp": "tsx scripts/test-mcp.ts",
     "test": "npm run test:cli && npm run test:skills && npm run test:plugin && npm run test:providers && npm run test:transport && npm run test:indicators && npm run test:db && npm run test:mcp",
     "test:indicators": "tsx scripts/test-indicators.ts",

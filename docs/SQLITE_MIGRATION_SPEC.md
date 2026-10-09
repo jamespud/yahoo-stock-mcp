@@ -163,6 +163,25 @@ The `WHEN` guard keeps an explicit `updated_at` authoritative (the `instruments`
 `updated_at = NOW()` deliberately). `PRAGMA recursive_triggers` stays at its default `OFF`, so
 the inner `UPDATE` does not re-enter the trigger.
 
+### 3.4.1 Implementation
+
+These three contracts are implemented in `src/storage/values.ts` and exercised by
+`scripts/test-sqlite-values.ts` (`npm run test:sqlite-values`):
+
+| Contract | API |
+| --- | --- |
+| Decimal | `toDecimalString`, `decimalFromNumber` (the explicit lossy bridge), `decimalFromStorage`, `quantizeDecimal`, `decimalToNumber` |
+| Datetime | `toUtcTimestamp`, `toDateOnly`, `parseUtcTimestamp`, `upstreamToUtc` / `utcToUpstream`, `isUtcTimestamp`, `isDateOnly` |
+| Binding / BigInt | `toSqliteParam`, `toSqliteParams`, `statementWithBigInts`, `integerOut` |
+
+`toDecimalString` **rejects** a JavaScript `number`, because a value that is already a float may
+have lost precision; call sites that genuinely start from a float must say so by calling
+`decimalFromNumber`. `quantizeDecimal` reproduces MySQL's half-away-from-zero rounding using
+BigInt only, and its fixtures were captured from MySQL 8.4.
+
+`upstreamToUtc` requires an explicit UTC offset rather than inferring one from the host, because
+guessing the zone is exactly the implicit change this contract forbids.
+
 ### 3.5 Connection policy
 
 Applied by `src/storage/database.ts` on every connection, never inside a transaction
@@ -271,8 +290,8 @@ which rows would now be distinct that MySQL treated as one.
 
 | Stage | Scope | Acceptance |
 | --- | --- | --- |
-| C1 | `src/storage/{database,migrations}.ts`, `db/sqlite/migrations/0001_initial.sql`, `db:init --sqlite`, `scripts/test-sqlite-bootstrap.ts` | see §7 |
-| C2 | Decimal / datetime / BigInt serialization contracts + test matrix | exact round-trips; time semantics preserved |
+| C1 (landed) | `src/storage/{database,migrations}.ts`, `db/sqlite/migrations/0001_initial.sql`, `db:init --sqlite`, `scripts/test-sqlite-bootstrap.ts` | see §7 |
+| C2 (landed) | `src/storage/values.ts` + `scripts/test-sqlite-values.ts`: decimal / datetime / BigInt / binding contracts | exact round-trips; no accidental float; host-time-zone independent |
 | C3 | `priority.ts` split into pure rules + SQLite UPSERT generation | §4 truth table green |
 | C4 | Read path migration (`query.service.ts`) | results match the MySQL export fixture |
 | C5 | Write path migration (`sync.service.ts`) | sync → idempotent re-sync → restart → re-sync |
