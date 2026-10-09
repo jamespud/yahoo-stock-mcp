@@ -361,7 +361,8 @@ which rows would now be distinct that MySQL treated as one.
 | C4a (landed) | `query.service.ts` decimal ordering via `src/storage/values.ts`; `scripts/test-sqlite-read.ts` | exact ordering; MySQL differential 10/11 byte-identical, row sets equal |
 | C4b (landed) | `src/storage/read-bridge.ts` (temporary), `db/sqlite/fixtures/read-path.sql`, `scripts/test-read-bridge.ts` | all 26 read functions run on SQLite; MySQL differential 25/26 byte-identical, 1 tie-order-only, 0 row-set differences |
 | C5a (landed) | `src/storage/{backend,quantize,write}.ts` + `scripts/test-sqlite-write.ts` | quantization once at the boundary; batch/replace atomic; one backend for reads and writes |
-| C5b (remaining) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
+| C5b-1a (landed) | market/financial/holdings/analyst writes via `DualStatement` + `scripts/test-sync-writes.ts` | both SQL forms present; binding positions verified by round-trip |
+| C5b-1b (remaining) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
 | C7 | README, `docs/USAGE*`, `docs/REFERENCE*`, `stock-data-setup` skill, Codex plugin, release notes | `verify:pack`, `test:plugin`, `check:skill-references` green |
@@ -501,6 +502,31 @@ Not yet done:
 
 The C5 acceptance bar (a real sync completing on SQLite) is met only when C5b lands. Nothing in
 C6 should start before then.
+
+### 6.5 C5b-1a: market / financial / holdings / analyst writes (landed)
+
+The write migration is split by table family. C5b-1a covers instruments, daily bars, financial
+statements, ratios, analyst forecasts and actions, dividends, earnings, holders, fund holders,
+short interest, holder breakdown, insider transactions and the sector/ETF bars.
+
+Because `ON DUPLICATE KEY UPDATE` and `ON CONFLICT` are each invalid on the other engine, one
+statement cannot serve both. `DualStatement` in `src/storage/write.ts` carries an explicit MySQL
+form and an explicit SQLite form, selected by the single backend switch. This is a **temporary
+scaffold**, not a dialect translator: both forms are written out, and C6 deletes the `mysql` field
+so `executeEither`/`batchEither`/`replaceEither` collapse to `execute`/`executeBatch`/`replaceBatch`.
+
+`assertDualParity` runs before every execution: both forms must expose the same number of `?` and
+the caller must supply exactly that many parameters. That catches a botched conversion, but **equal
+placeholder counts do not prove correct binding**, so `scripts/test-sync-writes.ts` binds sentinel
+values and reads the row back — a misaligned parameter or a wrong DECIMAL binding index changes the
+stored column and fails the test.
+
+Every SQLite `ON CONFLICT` names its **business** unique key explicitly (never `PK(id)`) so that an
+unexpected unique-key conflict can never be mistaken for a business update; the six tables that have
+both a surrogate `id` and a business key are covered.
+
+C5b-1b still owns news, options, sector members, company events, intraday bars and `sync_state`,
+after which the guard comes down. The guard stays in force until then.
 
 ## 7. C1 acceptance criteria
 
