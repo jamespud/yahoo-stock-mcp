@@ -13,7 +13,7 @@
     "research",
     "mcp",
     "yahoo-finance",
-    "mysql"
+    "sqlite"
   ],
   "extensions": {
     "com.openai": {

@@ -1,7 +1,7 @@
 {
   "name": "yahoo-stock-mcp",
   "version": "0.4.0",
-  "description": "MCP server for stock information with unofficial Yahoo Finance + Investing.com integrations, backed by MySQL",
+  "description": "MCP server for stock information with unofficial Yahoo Finance + Investing.com integrations, backed by SQLite",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
@@ -27,7 +27,7 @@
     "stock",
     "yahoo-finance",
     "investing",
-    "mysql"
+    "sqlite"
   ],
   "license": "MIT",
   "publishConfig": {

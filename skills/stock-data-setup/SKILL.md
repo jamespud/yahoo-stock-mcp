@@ -1,6 +1,6 @@
 ---
 name: stock-data-setup
-description: Set up yahoo-stock-mcp data end to end - initialise or migrate the MySQL schema, sync a symbol or the sector set, verify freshness, and diagnose provider or database failures from the sync status report. Use when a tool reports an empty database or a missing symbol, when data looks stale, when a sync returns partial or failed, or when the user asks how to get a symbol or the sector data loaded.
+description: Set up yahoo-stock-mcp data end to end - initialise the local SQLite database, sync a symbol or the sector set, verify freshness, and diagnose provider or database failures from the sync status report. Use when a tool reports an empty database or a missing symbol, when data looks stale, when a sync returns partial or failed, or when the user asks how to get a symbol or the sector data loaded.
 ---
 
 # Data setup and diagnosis

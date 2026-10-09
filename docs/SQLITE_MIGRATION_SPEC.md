@@ -1,6 +1,11 @@
 # SQLite-only storage migration — v0.5.0 specification
 
-Status: **approved, in implementation** (C1 landed separately from C2–C8).
+Status: **implemented**. C1–C6 are landed and verified on CI (Node 22/24 + package job).
+
+- **C8 (the one-off MySQL → SQLite migration tool) is deferred / out of scope for v0.5.0.** It is a
+  convenience for existing MySQL users, not a requirement of the SQLite-only architecture. v0.5.0
+  ships no automatic data migration; see the upgrade notes in `README.md`.
+- C7 (documentation, skills, plugin, release preparation) is in progress.
 
 This document is the contract for replacing the MySQL backend with SQLite. It records the
 decisions, the data contracts, and the acceptance gates. When code and this document
@@ -388,7 +393,7 @@ which rows would now be distinct that MySQL treated as one.
 | C5b-1b (landed) | remaining tables + `sync_state`; guard removed; `scripts/test-sync-state.ts` | all writes dual-form; SQLite entries run with MySQL blocked |
 | C5b-1b (superseded) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
 | C6 (landed) | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
-| C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
+| C8 (**deferred**) | `scripts/mysql-to-sqlite/` one-off migrator | not part of v0.5.0; schema evidence preserved under `scripts/mysql-to-sqlite/fixtures/` |
 | C7 | README, `docs/USAGE*`, `docs/REFERENCE*`, `stock-data-setup` skill, Codex plugin, release notes | `verify:pack`, `test:plugin`, `check:skill-references` green |
 
 Order: **C1 → C2 → C3 → C4 → C5 → C6 → C8 → C7.** C8 precedes C7 so the documentation can

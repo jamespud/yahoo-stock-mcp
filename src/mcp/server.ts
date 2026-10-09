@@ -444,7 +444,7 @@ server.tool(
 
 server.tool(
   "sync_stock",
-  "Sync a stock from providers into the local MySQL database. full = complete history from 2000; incremental = only new data.",
+  "Sync a stock from providers into the local SQLite database. full = complete history from 2000; incremental = only new data.",
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
     mode: z.enum(["incremental", "full"]).default("incremental"),
@@ -460,7 +460,7 @@ server.tool(
 export async function startMcpServer(): Promise<void> {
   const transport = new StdioServerTransport();
   // Exit when the client closes stdin. The SDK's stdio transport does not 
-  // wire stdin 'end'/'close' to onclose, so the open MySQL pool would
+  // wire stdin 'end'/'close' to onclose, so the open database handle would
   // otherwise keep the process alive and Close() would hang.
   const shutdown = async () => {
     closeStorageBackend();

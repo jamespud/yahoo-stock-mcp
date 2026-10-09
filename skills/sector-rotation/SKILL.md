@@ -49,7 +49,7 @@ reporting shape.
 - **There is no flow or positioning data.** The view carries price and returns; it does not carry
   fund flows, ETF creations, or institutional positioning. Describe rotation as relative price
   behaviour, never as money moving between sectors.
-- **`price` arrives as a string** (a MySQL `DECIMAL`), while `change1d`/`change5d`/`change20d` are
+- **`price` arrives as an exact-decimal string**, while `change1d`/`change5d`/`change20d` are
   numbers in percentage points. Convert deliberately and do not concatenate the raw string as if it
   were a number.
 - **`get_sector_members` weights are fractions of the ETF**, delivered as strings:

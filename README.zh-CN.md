@@ -14,12 +14,12 @@
 >
 > 服务条款可能变化；请根据实际司法辖区和使用场景查看最新的 [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) 与 [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions)。
 
-这是一个股票市场数据 MCP server，通过 Yahoo Finance 与 Investing.com 的非官方集成获取数据，写入外部 MySQL，并通过 MCP tools 查询。
+这是一个股票市场数据 MCP server，通过 Yahoo Finance 与 Investing.com 的非官方集成获取数据，写入本地 SQLite，并通过 MCP tools 查询。
 
 ## 核心能力
 
 - 同步行情、基本面、比率、分红、盈利、持有人、新闻、期权、事件和板块数据；
-- 将归一化后的数据存入 MySQL，并通过 MCP tools 暴露；
+- 将归一化后的数据存入本地 SQLite，并通过 MCP tools 暴露；
 - 基于本地 bar 计算 42 个技术指标；
 - K 线使用 Yahoo，基本面由 Yahoo + Investing 互补；
 - 支持 scheduled live-provider contract 健康检查；
@@ -42,8 +42,9 @@ codex plugin marketplace add jamespud/yahoo-stock-mcp
 ```
 
 然后在支持的 Plugins Directory 中安装 **Yahoo Stock MCP**。插件内的 stdio server 会启动与
-plugin manifest 版本一致的 npm 包。仍需 Node.js >= 20、外部 MySQL 以及本地
-`YAHOO_STOCK_MCP_*` 配置；数据库和代理凭据不会写入插件文件。若只安装 Skills，请查看
+plugin manifest 版本一致的 npm 包。需要 Node.js >= 22.13 以及本地 `YAHOO_STOCK_MCP_*` 配置；
+SQLite 数据库会在用户数据目录中自动创建，无需任何外部数据库服务。数据库和代理凭据不会写入
+插件文件。若只安装 Skills，请查看
 [skills/README.md](./skills/README.md)。
 
 ## 数据源
@@ -60,10 +61,27 @@ Investing 集成使用原生 Node transport，带有限的 TLS compatibility pro
 
 scheduled live-provider canary 会 hard-gate Yahoo 以及 Investing 的数据契约/单位回归；但 Investing 的网络或访问可用性可能报告为 `DEGRADED`，因为 hosted runner 的出口可能独立被拦截。canary 仍是低频健康检查，不会把响应写入项目数据库，也不会发布数据 feed。
 
+## 从 v0.4.0 升级
+
+> **v0.5.0 是破坏性版本：已移除 MySQL 支持。** SQLite 成为唯一后端，本版本**不提供**自动数据迁移。
+
+如果 v0.4.x 创建过 MySQL 数据库：
+
+1. **先备份。** 升级不会动这个数据库，但 v0.5.0 也不会再读取它。
+2. **想继续用本项目，就重新同步到 SQLite。** 请注意重新同步**不能保证**恢复全部历史数据——
+   部分历史 K 线、新闻和财务观察值可能已无法从上游重新取得。
+3. **想继续读取旧数据，就留在 v0.4.x。** 新旧安装可以并存。
+
+一次性 MySQL → SQLite 迁移工具**已推迟**，不属于 v0.5.0。v0.4.0 的历史 schema 保留在仓库
+`scripts/mysql-to-sqlite/fixtures/` 下供将来使用，不会进入 npm 发布包。
+
+如果仍设置着 `YAHOO_STOCK_MCP_DATABASE_URL` 或 `YAHOO_STOCK_MCP_DB_*`，服务会**拒绝启动**并给出
+提示，而不是静默创建一个空数据库。
+
 ## 运行要求
 
-- Node.js >= 20
-- 外部 MySQL
+- Node.js >= 22.13
+- 无需数据库服务：首次使用时自动创建本地 SQLite 文件
 - provider 访问受上方提示及上游条款约束
 
 安装和命令请继续阅读 **[docs/USAGE.zh-CN.md](./docs/USAGE.zh-CN.md)**。

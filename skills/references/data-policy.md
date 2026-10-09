@@ -5,7 +5,7 @@ shared contract that keeps results reproducible and traceable.
 
 ## 1. Data is a synced snapshot, not a live feed
 
-All read tools except `get_option_quote` read from the local MySQL database. "Latest" means
+All read tools except `get_option_quote` read from the local SQLite database. "Latest" means
 "latest synced row", not "current market price".
 
 - Anchor every report to explicit timestamps: `get_quote` -> `syncedAt` and `latestBar.trade_date`,
@@ -16,7 +16,7 @@ All read tools except `get_option_quote` read from the local MySQL database. "La
   cannot answer ("what is it trading at right now"), say the snapshot cannot answer it and report
   the stored value with its date instead.
 - `get_option_quote` is the one tool that fetches from Yahoo on demand and needs no local sync.
-  Distinguish it from `get_options`, which reads the chain snapshot stored in MySQL.
+  Distinguish it from `get_options`, which reads the chain snapshot stored in SQLite.
 
 ## 2. Never fabricate, never backfill from memory
 
@@ -68,7 +68,7 @@ project's stance is documented in the repository README provider-access policy.
   `0.253`). Metrics the alias table does not cover pass through under the provider's own name
   (`MARKET_CAP`, `BETA`, `ANALYST_OPINIONS`, ...), so read the ID literally and never assume a unit
   or a scale the tool did not state.
-- MySQL `DECIMAL` columns can arrive as strings (for example `"10.5000"`); treat them as numbers
+- `DECIMAL` columns are stored as exact TEXT and arrive as strings (for example `"10.5000"`); treat them as numbers
   only after confirming they parse, and do not add precision the source does not provide.
 - `financial_statements` rows carry a `currency`. Do not compare or aggregate figures across
   different currencies without saying so.

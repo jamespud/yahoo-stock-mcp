@@ -7,7 +7,7 @@ This document contains the detailed project reference that is intentionally kept
 ## Tests
 
 ```bash
-# Requires a local MySQL (default 127.0.0.1:3306, see deploy/docker-compose.mysql.yml) with the schema initialised
+# Requires no database service: a local SQLite file, initialised with `yahoo-stock-mcp db:init`
 # test:db creates and drops its own throwaway database, so it needs CREATE DATABASE - set
 # YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL when the configured user may not create databases
 npm run test:cli        # CLI behaviour: version / help / unknown-command handling (no DB required)
@@ -36,7 +36,7 @@ uses, and `npm run test:skills` verifies those names against the running server.
 
 | Tool | Description |
 |---|---|
-| `sync_stock` | Full/incremental sync of one stock to MySQL |
+| `sync_stock` | Full/incremental sync of one stock into SQLite |
 | `search_symbol` | Search stored instruments by symbol/name |
 | `get_quote` | Latest quote + key metrics |
 | `get_bars` | Historical candles (1d/1wk/1mo) |

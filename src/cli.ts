@@ -22,7 +22,7 @@ Commands:
   server                 Start the MCP server over stdio (default with no arguments)
   db:init                Create the database if missing, then bootstrap schema + migrations
   db:migrate             Apply pending schema migrations to an existing database
-  sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
+  sync                   Pull stock data from Yahoo Finance / Investing.com into SQLite
   version                Print the version number
   help [command]         Show general help, or help for a specific command
 
@@ -39,7 +39,7 @@ Examples:
   ${NAME} sync --sectors
   ${NAME} server`;
 
-const SYNC_HELP = `Sync stock data from Yahoo Finance / Investing.com into MySQL.
+const SYNC_HELP = `Sync stock data from Yahoo Finance / Investing.com into the local SQLite database.
 
 Usage:
   ${NAME} sync --symbol <SYMBOL> [--full|--incremental] [--intraday <interval>]
@@ -69,26 +69,18 @@ MCP clients (Claude Desktop, Cursor, Codex, ...) launch this server with:
 Usage:
   ${NAME} server`;
 
-const DBINIT_HELP = `Initialise the configured database.
+const DBINIT_HELP = `Initialise the local SQLite database.
 
-By default this initialises the configured MySQL database (v0.4.x behaviour). Pass --sqlite
-(or set YAHOO_STOCK_MCP_SQLITE_PATH) to bootstrap the v0.5.0 SQLite schema instead:
+SQLite is the only backend in v0.5.0. The database file defaults to a per-user data directory
+($XDG_DATA_HOME/yahoo-stock-mcp/stocks.db on Linux, ~/Library/Application Support on macOS,
+%APPDATA% on Windows); override it with YAHOO_STOCK_MCP_SQLITE_PATH or --sqlite.
 
-  ${NAME} db:init --sqlite /path/to/stocks.db
-  ${NAME} db:init --sqlite            # uses $YAHOO_STOCK_MCP_SQLITE_PATH, or a per-user default
-
-MySQL mode:
-
-If the target database does not exist, db:init first attempts to create it with
-utf8mb4/utf8mb4_unicode_ci using the configured credentials, then installs the
-bootstrap schema and all pending migrations. Creating a missing database requires
-CREATE DATABASE privileges. Existing databases do not require that privilege.
-
-The connection is read from YAHOO_STOCK_MCP_DATABASE_URL, or from the
-YAHOO_STOCK_MCP_DB_* variables (host/port/user/password/name).
+Existing data is never overwritten: db:init applies pending migrations and reports "already up to
+date" when there is nothing to do.
 
 Usage:
-  ${NAME} db:init`;
+  ${NAME} db:init
+  ${NAME} db:init --sqlite /path/to/stocks.db`;
 
 const DBMIGRATE_HELP = `Apply pending versioned migrations to an existing database.
 
@@ -154,11 +146,8 @@ function parseArgs(args: string[]): SyncArgs {
 }
 
 /**
- * Resolve the SQLite database path for `db:init`.
- *
- * Returns null when SQLite is not requested, which keeps the MySQL path the default during
- * the v0.5.0 migration. `--sqlite` with no value falls back to the env var, then to a
- * conventional per-user data location.
+ * Resolve the database path for `db:init`: an explicit `--sqlite <path>`, else
+ * YAHOO_STOCK_MCP_SQLITE_PATH, else a conventional per-user data location.
  */
 function resolveSqlitePath(flag: string | undefined): string {
   const envPath = process.env.YAHOO_STOCK_MCP_SQLITE_PATH;
@@ -221,14 +210,9 @@ async function main() {
         printHelp("db:init");
         return;
       }
-      // SQLite bootstrap is opt-in during the migration (C1): without --sqlite (or the
-      // YAHOO_STOCK_MCP_SQLITE_PATH env var) this command keeps its existing MySQL behaviour.
+      // SQLite is the only backend; --sqlite just overrides the default file location.
       const sqlitePath = resolveSqlitePath(sqlite);
       {
-        // Imported lazily: src/storage/database.ts loads `node:sqlite`, which does not exist
-        // before Node 22.5. A static import here would break every command — including the
-        // still-supported MySQL path — for Node 20 users and CI. The dependency is only
-        // pulled in when SQLite is actually requested.
         const { openDatabase } = await import("./storage/database.js");
         const { initSqliteSchema } = await import("./storage/migrations.js");
         const conn = openDatabase(sqlitePath);

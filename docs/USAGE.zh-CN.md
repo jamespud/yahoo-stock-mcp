@@ -10,7 +10,7 @@
 npm install -g yahoo-stock-mcp
 ```
 
-需要 Node.js >= 20 与一个外部 MySQL（见下方 `.env` 配置）。
+需要 Node.js >= 22.13。无需任何数据库服务：首次使用时自动创建本地 SQLite 文件。
 
 ### Codex 仓库插件
 
@@ -34,13 +34,14 @@ codex plugin marketplace add jamespud/yahoo-stock-mcp
 yahoo-stock-mcp --version        # 打印版本号
 yahoo-stock-mcp --help           # 打印使用说明（也可用：yahoo-stock-mcp help sync）
 
-# 1. 配置外部 MySQL 连接（.env）
-#    YAHOO_STOCK_MCP_DATABASE_URL=mysql://user:pass@host:3306/yahoo_stock_mcp
-#    本地临时开发库可用 deploy/docker-compose.mysql.yml 起一个：
-#    docker compose -f deploy/docker-compose.mysql.yml up -d
+# 1.（可选）指定 SQLite 文件位置。
+#    不设置时 db:init 使用用户数据目录：
+#      Linux   ${XDG_DATA_HOME:-~/.local/share}/yahoo-stock-mcp/stocks.db
+#      macOS   ~/Library/Application Support/yahoo-stock-mcp/stocks.db
+#      Windows %APPDATA%\yahoo-stock-mcp\stocks.db
+#    YAHOO_STOCK_MCP_SQLITE_PATH=/path/to/stocks.db
 
-# 2. 初始化配置的数据库。
-#    如果目标库不存在且当前账号拥有 CREATE DATABASE 权限，db:init 会先创建数据库。
+# 2. 初始化数据库（创建文件并应用全部迁移）。
 yahoo-stock-mcp db:init
 
 # 已有数据库升级：只执行尚未应用的迁移
@@ -72,9 +73,9 @@ Usage: yahoo-stock-mcp <command> [options]
 
 Commands:
   server                启动 MCP server（stdio，无参数时默认执行）
-  db:init               缺库时先创建，再安装 bootstrap schema 与全部迁移
+  db:init               创建本地 SQLite 数据库并应用全部迁移
   db:migrate            对已有数据库执行尚未应用的迁移
-  sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 MySQL
+  sync                  从 Yahoo Finance / Investing.com 拉取股票数据到 SQLite
   version               打印版本号
   help [command]        查看总帮助或某个命令的帮助
 
@@ -97,11 +98,12 @@ npm run db:migrate  # 执行尚未应用的数据库迁移
 
 ## 数据库迁移
 
-`db/schema.sql` 是 bootstrap baseline。之后发布的结构变更放在 `db/migrations/` 下，按编号顺序执行且发布后不可修改；
-已应用版本和 SHA-256 checksum 记录在 `schema_migrations`。新数据库使用 `db:init`，已有安装升级使用
-`db:migrate`。如果配置的数据库不存在，`db:init` 会先尝试创建；只有首次创建缺失数据库时需要
-`CREATE DATABASE` 权限，目标库已经存在时不需要。bootstrap 接受的数据库名限制为 1–64 位 ASCII 字母、数字或下划线。迁移通过 MySQL advisory lock 串行化。由于 MySQL 的很多 DDL 会隐式提交，迁移文件应尽量保持
-单一、前向且小粒度的结构变更。
+`db/sqlite/migrations/0001_initial.sql` 是唯一 canonical baseline。之后发布的结构变更放在
+`db/sqlite/migrations/` 下，按编号顺序执行且发布后不可修改；已应用版本和 SHA-256 checksum 记录在
+`schema_migrations`。新数据库使用 `db:init`，已有安装升级使用 `db:migrate`。
+
+SQLite 的 DDL 是事务性的：迁移要么整体生效，要么完全不生效。修改已发布的迁移文件会在下次运行时
+因 checksum 不匹配而被拒绝。
 
 ## 客户端接入示例（Claude Desktop / Cursor / Codex）
 
@@ -112,7 +114,7 @@ npm run db:migrate  # 执行尚未应用的数据库迁移
       "command": "yahoo-stock-mcp",
       "args": ["server"],
       "env": {
-        "YAHOO_STOCK_MCP_DATABASE_URL": "mysql://user:pass@host:3306/yahoo_stock_mcp",
+        "YAHOO_STOCK_MCP_SQLITE_PATH": "/path/to/stocks.db",
         "YAHOO_STOCK_MCP_PROXY_URL": "http://127.0.0.1:17890"
       }
     }
@@ -155,8 +157,7 @@ Investing GraphQL transport 对 HTTP / HTTPS 正向代理都使用 CONNECT 隧�
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `YAHOO_STOCK_MCP_DATABASE_URL` | 由 `DB_*` 推导 | 完整 MySQL 连接串，例如 `mysql://user:pass@host:3306/yahoo_stock_mcp`；优先于 `DB_*` |
-| `YAHOO_STOCK_MCP_DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | 127.0.0.1/3306/stock/stock123/yahoo_stock_mcp | MySQL 连接（未设置 `DATABASE_URL` 时使用） |
+| `YAHOO_STOCK_MCP_SQLITE_PATH` | 用户数据目录 | SQLite 数据库文件路径；目录不存在时自动创建 |
 | `YAHOO_STOCK_MCP_USER_AGENT` | Chrome 148 UA | 请求指纹 |
 | `YAHOO_STOCK_MCP_REQUEST_DELAY_MS` | 300 | 请求间隔限流 |
 | `YAHOO_STOCK_MCP_PROXY_URL` | 无 | 所有 Node fetch 请求使用的 HTTP(S) 代理，例如 `http://127.0.0.1:17890`；Yahoo 在大陆需配置 |
@@ -164,3 +165,10 @@ Investing GraphQL transport 对 HTTP / HTTPS 正向代理都使用 CONNECT 隧�
 | `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | 两家都有值时以谁为准（yahoo/investing），另一家只补主源缺失的数据 |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | 每次抓取的新闻条数 |
 
+
+## 从 v0.4.0 升级
+
+v0.5.0 已移除 MySQL 支持，且**不提供**自动数据迁移。升级前请先备份 MySQL 数据库；想继续使用本项目，
+就重新同步到 SQLite（重新同步不保证恢复全部历史数据），或留在 v0.4.x 继续读取旧数据。设置任何
+`YAHOO_STOCK_MCP_DATABASE_URL` / `YAHOO_STOCK_MCP_DB_*` 变量都会让服务**拒绝启动**，而不是静默创建
+一个空数据库。

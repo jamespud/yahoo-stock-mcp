@@ -10,7 +10,7 @@ This guide covers installation, database setup, sync commands, MCP client config
 npm install -g yahoo-stock-mcp
 ```
 
-Requires Node.js >= 20 and an external MySQL (see the `.env` config below).
+Requires Node.js >= 22.13. No database service is needed: a local SQLite file is created on first use.
 
 ### Codex repository plugin
 
@@ -34,13 +34,14 @@ The package already ships compiled `dist/`, so no local build step is needed —
 yahoo-stock-mcp --version        # print version
 yahoo-stock-mcp --help           # print usage (also: yahoo-stock-mcp help sync)
 
-# 1. Configure the external MySQL connection (.env)
-#    YAHOO_STOCK_MCP_DATABASE_URL=mysql://user:pass@host:3306/yahoo_stock_mcp
-#    For a local dev database you can spin one up with deploy/docker-compose.mysql.yml:
-#    docker compose -f deploy/docker-compose.mysql.yml up -d
+# 1. (Optional) choose where the SQLite file lives.
+#    Without this, db:init uses a per-user data directory:
+#      Linux   ${XDG_DATA_HOME:-~/.local/share}/yahoo-stock-mcp/stocks.db
+#      macOS   ~/Library/Application Support/yahoo-stock-mcp/stocks.db
+#      Windows %APPDATA%\yahoo-stock-mcp\stocks.db
+#    YAHOO_STOCK_MCP_SQLITE_PATH=/path/to/stocks.db
 
-# 2. Initialise the configured database.
-#    If it does not exist, db:init creates it first when the configured user has CREATE DATABASE privilege.
+# 2. Initialise the database (creates the file and applies every migration).
 yahoo-stock-mcp db:init
 
 # Existing installation: apply only pending migrations
@@ -74,7 +75,7 @@ Commands:
   server                 Start the MCP server over stdio (default with no arguments)
   db:init                Create the database if missing, then bootstrap schema + migrations
   db:migrate             Apply pending migrations to an existing database
-  sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
+  sync                   Pull stock data from Yahoo Finance / Investing.com into SQLite
   version                Print the version number
   help [command]         Show general help, or help for a specific command
 
@@ -97,11 +98,13 @@ npm run db:migrate  # apply pending database migrations
 
 ## Database migrations
 
-`db/schema.sql` is the bootstrap baseline. Released schema changes are immutable, ordered files under
-`db/migrations/`; applied versions and SHA-256 checksums are stored in `schema_migrations`.
-Use `db:init` for a new database and `db:migrate` when upgrading an existing installation. If the configured database is missing, `db:init` attempts to create it first; that initial creation requires `CREATE DATABASE` privilege, while initializing an already-existing database does not. Database names accepted by the bootstrap path are limited to 1–64 ASCII letters, digits, or underscores.
-Migration execution is serialized with a MySQL advisory lock. Because MySQL implicitly commits many
-DDL statements, migrations should keep structural changes small and forward-only.
+`db/sqlite/migrations/0001_initial.sql` is the canonical baseline. Released schema changes are
+immutable, ordered files under `db/sqlite/migrations/`; applied versions and SHA-256 checksums are
+stored in `schema_migrations`. Use `db:init` for a new database and `db:migrate` when upgrading an
+existing installation.
+
+SQLite DDL is transactional, so a migration either applies completely or not at all. Editing a
+released migration is rejected on the next run because its checksum no longer matches.
 
 ## Client integration (Claude Desktop / Cursor / Codex)
 
@@ -112,7 +115,7 @@ DDL statements, migrations should keep structural changes small and forward-only
       "command": "yahoo-stock-mcp",
       "args": ["server"],
       "env": {
-        "YAHOO_STOCK_MCP_DATABASE_URL": "mysql://user:pass@host:3306/yahoo_stock_mcp",
+        "YAHOO_STOCK_MCP_SQLITE_PATH": "/path/to/stocks.db",
         "YAHOO_STOCK_MCP_PROXY_URL": "http://127.0.0.1:17890"
       }
     }
@@ -155,8 +158,7 @@ The proxy is a connectivity option, not a challenge solver. If the upstream prov
 
 | Var | Default | Description |
 |---|---|---|
-| `YAHOO_STOCK_MCP_DATABASE_URL` | derived from `DB_*` | Full MySQL connection string, e.g. `mysql://user:pass@host:3306/yahoo_stock_mcp`; takes precedence over `DB_*` |
-| `YAHOO_STOCK_MCP_DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | 127.0.0.1/3306/stock/stock123/yahoo_stock_mcp | MySQL connection (used when `DATABASE_URL` is not set) |
+| `YAHOO_STOCK_MCP_SQLITE_PATH` | per-user data directory | Path to the SQLite database file; the directory is created if needed |
 | `YAHOO_STOCK_MCP_USER_AGENT` | Chrome 148 UA | Request fingerprint |
 | `YAHOO_STOCK_MCP_REQUEST_DELAY_MS` | 300 | Per-request rate limit |
 | `YAHOO_STOCK_MCP_PROXY_URL` | none | HTTP(S) proxy for all Node fetch requests, e.g. `http://127.0.0.1:17890`; Yahoo needs it from mainland China |
@@ -164,3 +166,11 @@ The proxy is a connectivity option, not a challenge solver. If the upstream prov
 | `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` | yahoo | Which source has priority when both return a value (yahoo/investing); the other fills only what the primary lacks |
 | `YAHOO_STOCK_MCP_NEWS_COUNT` | 20 | News count per fetch |
 
+
+## Upgrading from v0.4.0
+
+v0.5.0 removed MySQL support and does not provide an automatic data migration. Back up your MySQL
+database before upgrading; to keep using this project, re-sync into SQLite (a re-sync does not
+guarantee recovery of all history), or stay on v0.4.x to keep reading the old data. Setting any
+`YAHOO_STOCK_MCP_DATABASE_URL` / `YAHOO_STOCK_MCP_DB_*` variable now makes the server refuse to
+start rather than silently create an empty database.
