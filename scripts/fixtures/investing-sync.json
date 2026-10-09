@@ -1,0 +1,99 @@
+{
+  "identity": { "data": { "investingAsset": { "name": "Fixture Corp", "ticker": "FIX", "exchange": "NASDAQ" } } },
+  "id": { "data": { "investingAsset": { "investingID": 12345 } } },
+  "snapshot": {
+    "data": {
+      "investingAsset": {
+        "marketData": { "latestPrice": { "value": 104.5, "date": "2026-01-05" } },
+        "financials": {
+          "incomeStatement": {
+            "company_name": "Fixture Corp",
+            "reports": [
+              {
+                "period_end_date": "2025-12-31",
+                "indicators": {
+                  "total_revenues_standard": { "value": 1500000, "name": "Total Revenue" },
+                  "net_income": { "value": 300000, "name": "Net Income" }
+                }
+              }
+            ]
+          },
+          "incomeStatementQ": { "reports": [] },
+          "balanceSheet": {
+            "reports": [
+              { "period_end_date": "2025-12-31", "indicators": { "total_assets": { "value": 5000000, "name": "Total Assets" } } }
+            ]
+          },
+          "cashFlow": { "reports": [] },
+          "ratios": { "indicators": { "pe_ratio": { "value": 22.5 }, "roa": { "value": 0.08 } } }
+        },
+        "dividends": {
+          "summary": {
+            "dividend_yield": 0.0125,
+            "payout_ratio": 0.25,
+            "annualized_payout": 1.5,
+            "five_year_dividend_growth": 0.05,
+            "next_dividend_date": "2026-03-01"
+          },
+          "dividends": {
+            "data": [
+              { "div_date": "2025-12-15", "div_amount": 0.375, "pay_date": "2026-01-05", "ttm_dividend": 1.5, "yield": 0.0125 }
+            ]
+          }
+        },
+        "forecasts": {
+          "forecast": {
+            "consensus_recommendation": "Buy",
+            "number_of_analysts_buy": 8,
+            "number_of_analysts_hold": 3,
+            "number_of_analysts_sell": 1,
+            "number_of_estimates": 12,
+            "target_price_consensus_high": 160,
+            "target_price_consensus_low": 95,
+            "target_price_consensus_mean": 125
+          }
+        },
+        "analystTarget": { "price": { "mean": { "value": 125.5, "date": "2026-01-05" }, "low": { "value": 95 }, "high": { "value": 160 } } },
+        "companies": {
+          "companyProfile": {
+            "business_summary": "Investing fixture summary.",
+            "employees_number": 1200,
+            "sector": "Technology",
+            "industry": "Software",
+            "equity_type": "Common Stock",
+            "contact_information": {
+              "city": "Testville",
+              "country": "United States",
+              "phone": "+1-555-0100",
+              "web": "https://fixture.example",
+              "street_address": "1 Fixture Way",
+              "zip_code": "00000"
+            },
+            "top_executives": { "professionals": [{ "name": "Jane Doe", "title": "CEO", "age": 50 }] }
+          },
+          "owners": [
+            {
+              "owner_name": "Investing Fund LP",
+              "shares_held": 5000000,
+              "percent_of_shares_outstanding": 3.5,
+              "percent_of_portfolio": 1.2,
+              "shares_changed": 10000,
+              "total_value": 520000000,
+              "holding_date": "2026-01-02"
+            }
+          ],
+          "percentOfSharesOutstanding": {
+            "total_institutional_holdings": { "percent": 65.5, "number_of_shares": 100000000, "market_value": 10000000000 }
+          }
+        },
+        "earnings2": {
+          "annualForecast": {
+            "periods": [{ "report_year": 2025, "eps_actual": 5.5, "eps_forecast": 5.4, "revenue_actual": 1500000, "revenue_forecast": 1450000 }]
+          },
+          "futureQuarterlyForecast": { "periods": [{ "report_month": 3, "report_year": 2026, "eps_forecast": 1.5, "revenue_forecast": 400000 }] },
+          "epsForecastHistory": { "next_release_date": "2026-02-20", "data": [{ "date": "2026-01-10", "eps_forecast": 5.5 }] }
+        }
+      }
+    }
+  }
+}

@@ -5,18 +5,50 @@
       "error": null,
       "result": [
         {
-          "timestamp": [1767225600, 1767312000, 1767571200],
+          "timestamp": [
+            1767225600,
+            1767312000,
+            1767571200
+          ],
           "indicators": {
             "quote": [
               {
-                "open": [100.0, 101.5, 102.25],
-                "high": [102.0, 103.0, 104.0],
-                "low": [99.5, 100.75, 101.0],
-                "close": [101.5, 102.25, 103.125],
-                "volume": [1000000, 1100000, 1200000]
+                "open": [
+                  100.0,
+                  101.5,
+                  102.25
+                ],
+                "high": [
+                  102.0,
+                  103.0,
+                  104.0
+                ],
+                "low": [
+                  99.5,
+                  100.75,
+                  101.0
+                ],
+                "close": [
+                  101.5,
+                  102.25,
+                  103.125
+                ],
+                "volume": [
+                  1000000,
+                  1100000,
+                  1200000
+                ]
               }
             ],
-            "adjclose": [{ "adjclose": [101.0, 101.75, 102.625] }]
+            "adjclose": [
+              {
+                "adjclose": [
+                  101.0,
+                  101.75,
+                  102.625
+                ]
+              }
+            ]
           }
         }
       ]
@@ -33,10 +65,18 @@
             "symbol": "FIX",
             "currency": "USD",
             "exchangeName": "NMS",
-            "regularMarketPrice": { "raw": 103.125 },
-            "regularMarketPreviousClose": { "raw": 102.25 }
+            "regularMarketPrice": {
+              "raw": 103.125
+            },
+            "regularMarketPreviousClose": {
+              "raw": 102.25
+            }
           },
-          "quoteType": { "symbol": "FIX", "quoteType": "EQUITY", "exchange": "NMS" },
+          "quoteType": {
+            "symbol": "FIX",
+            "quoteType": "EQUITY",
+            "exchange": "NMS"
+          },
           "assetProfile": {
             "sector": "Technology",
             "industry": "Software",
@@ -49,26 +89,83 @@
             "phone": "+1-555-0100"
           },
           "summaryDetail": {
-            "dividendYield": { "raw": 0.0125 },
-            "payoutRatio": { "raw": 0.25 },
-            "fiveYearAvgDividendYield": { "raw": 1.1 },
-            "trailingAnnualDividendRate": { "raw": 1.5 },
-            "exDividendDate": { "raw": 1767225600 }
+            "dividendYield": {
+              "raw": 0.0125
+            },
+            "payoutRatio": {
+              "raw": 0.25
+            },
+            "fiveYearAvgDividendYield": {
+              "raw": 1.1
+            },
+            "trailingAnnualDividendRate": {
+              "raw": 1.5
+            },
+            "exDividendDate": {
+              "raw": 1767225600
+            }
           },
           "defaultKeyStatistics": {
-            "priceToBook": { "raw": 4.589 },
-            "beta": { "raw": 2.217 },
-            "currentRatio": { "raw": 1.55 },
-            "debtToEquity": { "raw": 16.971 },
-            "numberOfAnalystOpinions": { "raw": 12 }
+            "priceToBook": {
+              "raw": 4.589
+            },
+            "beta": {
+              "raw": 2.217
+            },
+            "currentRatio": {
+              "raw": 1.55
+            },
+            "debtToEquity": {
+              "raw": 16.971
+            },
+            "numberOfAnalystOpinions": {
+              "raw": 12
+            }
           },
           "financialData": {
-            "currentRatio": { "raw": 1.55 },
-            "debtToEquity": { "raw": 16.971 },
-            "returnOnEquity": { "raw": 0.42 },
-            "targetHighPrice": { "raw": 150.0 },
-            "targetLowPrice": { "raw": 90.0 },
-            "targetMeanPrice": { "raw": 120.5 }
+            "currentRatio": {
+              "raw": 1.55
+            },
+            "debtToEquity": {
+              "raw": 16.971
+            },
+            "returnOnEquity": {
+              "raw": 0.42
+            },
+            "targetHighPrice": {
+              "raw": 150.0
+            },
+            "targetLowPrice": {
+              "raw": 90.0
+            },
+            "targetMeanPrice": {
+              "raw": 120.5
+            }
+          },
+          "topHoldings": {
+            "holdings": [
+              {
+                "symbol": "AAA",
+                "holdingName": "Alpha Corp",
+                "holdingPercent": {
+                  "raw": 0.198597
+                }
+              },
+              {
+                "symbol": "BBB",
+                "holdingName": "Beta Corp",
+                "holdingPercent": {
+                  "raw": 0.148895
+                }
+              },
+              {
+                "symbol": "CCC",
+                "holdingName": "Gamma Corp",
+                "holdingPercent": {
+                  "raw": 0.062277
+                }
+              }
+            ]
           }
         }
       ]
@@ -79,7 +176,9 @@
       "error": null,
       "result": [
         {
-          "expirationDates": [1768435200],
+          "expirationDates": [
+            1768435200
+          ],
           "options": [
             {
               "expirationDate": 1768435200,
@@ -126,7 +225,9 @@
         "link": "https://news.example/1",
         "providerPublishTime": 1767225600,
         "type": "STORY",
-        "relatedTickers": ["FIX"]
+        "relatedTickers": [
+          "FIX"
+        ]
       }
     ]
   },
@@ -134,8 +235,26 @@
     "timeseries": {
       "result": [
         {
-          "annualTotalRevenue": [{ "asOfDate": "2025-12-31", "periodType": "12M", "currencyCode": "USD", "reportedValue": { "raw": 1000000 } }],
-          "annualNetIncome": [{ "asOfDate": "2025-12-31", "periodType": "12M", "currencyCode": "USD", "reportedValue": { "raw": 250000 } }]
+          "annualTotalRevenue": [
+            {
+              "asOfDate": "2025-12-31",
+              "periodType": "12M",
+              "currencyCode": "USD",
+              "reportedValue": {
+                "raw": 1000000
+              }
+            }
+          ],
+          "annualNetIncome": [
+            {
+              "asOfDate": "2025-12-31",
+              "periodType": "12M",
+              "currencyCode": "USD",
+              "reportedValue": {
+                "raw": 250000
+              }
+            }
+          ]
         }
       ],
       "error": null

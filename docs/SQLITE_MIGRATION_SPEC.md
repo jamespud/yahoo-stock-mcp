@@ -129,6 +129,29 @@ boundary is the persistence and ordinary financial-query layer; a value must not
 a JavaScript `number` there. Conversion to `number` happens only at the indicator-calculation
 boundary (today `toNumOrNull` in `query.service.ts`), which accepts floating-point semantics.
 
+#### Precision boundary (decided)
+
+> The Storage DECIMAL binding entry is the **only** permitted, controlled JavaScript
+> `number` → decimal-string conversion boundary.
+
+```
+Provider JSON  ->  finite JS number  ->  Storage DECIMAL binding
+               ->  decimalFromNumber()  ->  quantizeDecimal(p, s)  ->  SQLite TEXT
+```
+
+Constraints that stay in force:
+
+1. only parameters declared as DECIMAL columns may be converted;
+2. `toDecimalString(number)` still **rejects** implicit conversion everywhere else;
+3. `NaN`, `Infinity` and values needing exponential notation throw;
+4. an already-exact string is never routed through `Number()`;
+5. quantization happens once, and repeated syncs must not drift.
+
+**This conversion cannot recover precision already lost when the provider parsed JSON into an
+IEEE-754 double.** That is an accepted upstream data boundary and must not be described as
+lossless end to end. The implementation is the single `toExactDecimal` helper in
+`src/storage/quantize.ts`; there is no second float-to-decimal path anywhere in the repository.
+
 **BigInt.** `node:sqlite` raises `RangeError: Value is too large to be represented as a
 JavaScript number` instead of silently truncating, which is the required failure mode. Use
 `StatementSync.setReadBigInts(true)` **per statement** — not the global `readBigInts` option —
