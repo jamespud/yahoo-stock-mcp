@@ -5,7 +5,7 @@ This directory is generated from the repository's canonical `skills/` tree by
 
 The plugin bundles all repository skills and launches the matching published npm package over stdio:
 
-`npx -y yahoo-stock-mcp@0.4.0 server`
+`npx -y yahoo-stock-mcp@0.5.0 server`
 
 Runtime requirements are Node.js >= 22.13 and a local SQLite database, which is created
 automatically in a per-user data directory. Keep proxy credentials in the local environment or host
