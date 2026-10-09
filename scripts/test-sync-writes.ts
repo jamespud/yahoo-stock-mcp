@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { openDatabase } from "../src/storage/database.js";
 import { applySqliteMigrations } from "../src/storage/migrations.js";
 import { closeStorageBackend, sqliteDatabase } from "../src/storage/backend.js";
-import { quantizeBindings } from "../src/storage/quantize.js";
+import { quantizeBindings, quantizeForColumn } from "../src/storage/quantize.js";
 import { assertDualParity, plainUpsertUpdates, type DualStatement } from "../src/storage/write.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,6 +47,20 @@ function runSqlite(statement: DualStatement): void {
     : statement.params;
   db.prepare(statement.sqlite).run(...(params as any[]));
 }
+
+await check("provider-outlet adapter: exact strings pass through, finite numbers convert, junk throws", () => {
+  // Providers parse upstream JSON into numbers, so this named conversion is the one acknowledged
+  // lossy step. It must not become a general licence to pass numbers around.
+  assert.equal(quantizeForColumn("ratios", "value", "1.2345678"), "1.234568");
+  assert.equal(quantizeForColumn("ratios", "value", 1.2345678), "1.234568");
+  assert.equal(quantizeForColumn("ratios", "value", 12n), "12.000000");
+  assert.equal(quantizeForColumn("ratios", "value", null), null);
+  assert.throws(() => quantizeForColumn("ratios", "value", Number.NaN), /finite number/);
+  assert.throws(() => quantizeForColumn("ratios", "value", Number.POSITIVE_INFINITY), /finite number/);
+  assert.throws(() => quantizeForColumn("ratios", "value", 1e21), /exponential notation/);
+  // non-DECIMAL columns are untouched, number or not
+  assert.equal(quantizeForColumn("news_articles", "title", 42), 42);
+});
 
 await check("dual parity rejects a placeholder count mismatch", () => {
   assert.throws(

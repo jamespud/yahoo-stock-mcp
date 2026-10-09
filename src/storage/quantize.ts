@@ -7,7 +7,7 @@
  * The registry below was read from the MySQL terminal schema; it is the authoritative
  * `(precision, scale)` for every DECIMAL column.
  */
-import { quantizeDecimal, toDecimalString } from "./values.js";
+import { decimalFromNumber, quantizeDecimal, toDecimalString } from "./values.js";
 
 export interface DecimalColumn {
   precision: number;
@@ -90,10 +90,26 @@ export function decimalColumn(table: string, column: string): DecimalColumn | un
  * registered DECIMAL. Returns null for null/undefined. Throws when the value cannot be
  * represented in the declared `DECIMAL(precision, scale)` — never truncates, never saturates.
  */
+
+/**
+ * The provider-outlet adapter: exact decimals pass straight through, and a JavaScript `number` is
+ * converted by the explicitly named `decimalFromNumber`.
+ *
+ * Providers parse upstream JSON into `number`, so the original decimal precision may already be
+ * gone by the time a value reaches here. That loss is **accepted and named**, not hidden: this is
+ * the only place a float becomes a decimal, it applies only to parameters declared as DECIMAL, and
+ * `toDecimalString` still rejects numbers everywhere else.
+ */
+function toExactDecimal(value: unknown, context: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return decimalFromNumber(value, context);
+  return toDecimalString(value as string | bigint, context);
+}
+
 export function quantizeForColumn(table: string, column: string, value: unknown): unknown {
   const spec = decimalColumn(table, column);
   if (!spec) return value;
-  const asString = toDecimalString(value as string | bigint | null | undefined, `${table}.${column}`);
+  const asString = toExactDecimal(value, `${table}.${column}`);
   if (asString === null) return null;
   const quantized = quantizeDecimal(asString, spec.scale, `${table}.${column}`);
   assertFits(quantized, spec, `${table}.${column}`);

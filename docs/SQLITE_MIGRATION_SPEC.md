@@ -548,6 +548,28 @@ tests with positive ones: `syncAll` and `syncSectors` complete on an empty SQLit
 `YAHOO_STOCK_MCP_DATABASE_URL` points at a dead endpoint, so any stray MySQL I/O fails loudly
 instead of passing unnoticed.
 
+### 6.7 C5b-2: deterministic SQLite sync E2E (landed)
+
+`scripts/test-sqlite-sync-e2e.ts` (`npm run test:sqlite-sync-e2e`) drives the **real**
+`syncOne` / `syncAll` / `syncSectors` against a real SQLite database with fixed provider responses
+injected at the HTTP request boundary by an `undici` `MockAgent` with `disableNetConnect()`. No
+persistence function is mocked, and MySQL is actively blocked (`YAHOO_STOCK_MCP_DATABASE_URL`
+points at a dead endpoint) so any stray MySQL I/O fails immediately.
+
+Covered: full sync into every populated target table; idempotent repeat sync; incremental sync with
+`sync_state` continuity; options snapshot atomicity (a duplicate contract symbol rolls the DELETE
+back); a failing provider endpoint producing `partial` while keeping the successful components'
+data; `syncAll` over a non-empty instrument list; `syncSectors` for a seeded sector; and a
+**separate Node process** reopening the database file and continuing incrementally.
+
+**Boundary fix found by this test.** The first run failed every DECIMAL write with
+`daily_bars.open must be an exact decimal string`. Providers parse upstream JSON into `number`, and
+`toDecimalString` rejects numbers by design — the provider-outlet adapter the C4 decision called
+for had never been written. `quantize.ts` now converts a finite number with the explicitly named
+`decimalFromNumber` for parameters declared as DECIMAL columns, and only there. Exact strings and
+bigints still pass through unchanged; `NaN`, `Infinity` and values needing exponential notation are
+still rejected.
+
 ## 7. C1 acceptance criteria
 
 1. The baseline schema matches a fully-migrated MySQL database: 24 data tables, all columns,
