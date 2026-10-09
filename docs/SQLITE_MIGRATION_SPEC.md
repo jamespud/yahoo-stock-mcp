@@ -182,6 +182,39 @@ BigInt only, and its fixtures were captured from MySQL 8.4.
 `upstreamToUtc` requires an explicit UTC offset rather than inferring one from the host, because
 guessing the zone is exactly the implicit change this contract forbids.
 
+### 3.4.2 Open decision for C4: ordering and aggregation on TEXT decimals
+
+Storing DECIMAL as TEXT preserves precision but **changes SQL ordering and range semantics**:
+TEXT comparison is lexicographic, so `'9.0000' > '10.0000'`. This is not hypothetical — four
+existing queries sort by a decimal column and would silently reorder:
+
+| Query | Column |
+| --- | --- |
+| `query.service.ts` holdings query | `holders.percent_of_shares` |
+| `query.service.ts` options query | `options.strike` |
+| `query.service.ts` fund-holders query | `fund_holders.pct_held` |
+| `query.service.ts` sector-holdings query | `sector_members.weight` (also indexed by `idx_member_sector_weight`) |
+
+`DATE` columns are unaffected: fixed-width `YYYY-MM-DD` text sorts chronologically, so
+`ORDER BY trade_date` and `MAX(trade_date)` keep working. Only numeric columns are at risk.
+
+This is left **open** deliberately; it must be settled before C4 touches those queries. The
+candidate approaches, none of which is free:
+
+1. **Order/aggregate in JavaScript** via `decimalToNumber` after the read, using the existing
+   `LIMIT`s on small tables (`holders`, `fund_holders`, `sector_members`, `options`). Simple and
+   exact, but the ordering moves out of the database and the `LIMIT` must be applied after sorting.
+2. **A generated, order-preserving sort key** alongside the exact TEXT value. Needs an explicit
+   encoding (sign + fixed-width zero padding) and its own tests; SQLite has no decimal arithmetic
+   to derive one from the text.
+3. **Scaled INTEGER storage** for the columns small enough to fit in a 64-bit integer. Exact and
+   natively sortable, but the schema reaches `DECIMAL(24,4)` — 28 digits — so it cannot cover
+   every column uniformly.
+
+`ORDER BY CAST(col AS REAL)` is **not** an acceptable default: REAL carries ~15–17 significant
+digits, so values that differ beyond that would compare equal and order arbitrarily, which is the
+kind of silent change §1 forbids.
+
 ### 3.5 Connection policy
 
 Applied by `src/storage/database.ts` on every connection, never inside a transaction
@@ -226,6 +259,27 @@ expressed once and must produce identical results in the sync layer and in SQL:
 
 Null-aware merging (`priorityMergeUpdate`) additionally keeps a populated primary value and
 lets a fallback provider fill only nulls.
+
+### 4.1 Implementation and equivalence evidence
+
+The SQLite generator lives in `src/storage/upsert.ts`
+(`priorityReplaceClause`, `priorityMergeClause`, `buildPriorityUpsert`) and is covered by
+`scripts/test-sqlite-upsert.ts` (`npm run test:sqlite-upsert`). Every SQLite result there is
+compared against a JavaScript oracle built from the surviving pure rule (`shouldOverride`),
+exhaustively over source/value combinations — including NULL, equal priorities, the
+`ON CONFLICT` update path, and repeated execution.
+
+Because "the pure rule" is the thing that must survive, the equivalence was additionally
+checked **differentially against the old MySQL implementation** during C3: 1032 write
+sequences (alphabet of 6 source/value actions including NULL, lengths 1–3, both modes, both
+primaries) were applied through `providers/priority.ts` on MySQL 8.4 and through
+`storage/upsert.ts` on SQLite 3.50, and every resulting business state matched. That check
+needs a live MySQL server, so it is not part of the committed suite; the durable guarantee is
+the committed oracle comparison above.
+
+The generated SQL makes the three-way relationship explicit: `excluded.<col>` is the incoming
+row, `<table>.<col>` is the stored row, and the update condition is
+`excluded.source = ? OR <table>.source <> ?`.
 
 SQLite expresses this with `ON CONFLICT (...) DO UPDATE SET`, `excluded.<col>` in place of
 MySQL's `VALUES(<col>)`, and `iif()`/`CASE` in place of `IF()`. Two behavioural details:
@@ -292,7 +346,7 @@ which rows would now be distinct that MySQL treated as one.
 | --- | --- | --- |
 | C1 (landed) | `src/storage/{database,migrations}.ts`, `db/sqlite/migrations/0001_initial.sql`, `db:init --sqlite`, `scripts/test-sqlite-bootstrap.ts` | see §7 |
 | C2 (landed) | `src/storage/values.ts` + `scripts/test-sqlite-values.ts`: decimal / datetime / BigInt / binding contracts | exact round-trips; no accidental float; host-time-zone independent |
-| C3 | `priority.ts` split into pure rules + SQLite UPSERT generation | §4 truth table green |
+| C3 (landed) | `src/storage/upsert.ts` + `scripts/test-sqlite-upsert.ts`: SQLite UPSERT generation sharing the pure priority rule | §4 truth table green; oracle equivalence exhaustive |
 | C4 | Read path migration (`query.service.ts`) | results match the MySQL export fixture |
 | C5 | Write path migration (`sync.service.ts`) | sync → idempotent re-sync → restart → re-sync |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
