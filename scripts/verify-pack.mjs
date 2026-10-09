@@ -3,7 +3,8 @@
 //
 // `files` in package.json is a whitelist, and a typo there silently ships an incomplete package.
 // This checks the concrete things a consumer needs: the CLI entrypoint, the schema/migrations,
-// the docs, and every skill - and that dev-only trees stay out.
+// the SQLite schema/migrations, the docs, and every skill - and that dev-only trees and any
+// MySQL runtime stay out.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,14 +47,14 @@ if (shipped.size === 0) throw new Error("npm pack reported no files");
 const required = new Set([
   "package.json",
   "dist/cli.js",
-  "db/schema.sql",
+  "db/sqlite/migrations/0001_initial.sql",
   "README.md",
   "README.zh-CN.md",
   "LICENSE",
   ".env.example",
   ...walk(resolve(root, "docs")),
   ...walk(resolve(root, "skills")),
-  ...walk(resolve(root, "db/migrations")),
+  ...walk(resolve(root, "db/sqlite/migrations")),
 ]);
 
 const missing = [...required].filter((p) => !shipped.has(p)).sort();
@@ -64,7 +65,15 @@ if (missing.length) {
 }
 
 const forbidden = [...shipped]
-  .filter((p) => /^(src|scripts|deploy|node_modules)\//.test(p) || p === ".env" || p.startsWith(".git/"))
+  .filter(
+    (p) =>
+      /^(src|scripts|deploy|node_modules)\//.test(p) ||
+      p === ".env" ||
+      p.startsWith(".git/") ||
+      // no MySQL runtime or legacy schema may ship again
+      /mysql/i.test(p) ||
+      p.endsWith("db/schema.sql")
+  )
   .sort();
 if (forbidden.length) {
   throw new Error(`tarball contains dev-only files:\n  ${forbidden.join("\n  ")}`);
