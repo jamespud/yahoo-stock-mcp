@@ -38,8 +38,12 @@ jobs:
           node -e '
             const { execSync } = require("node:child_process");
             const v = execSync("npm --version").toString().trim();
-            const [major, minor] = v.split(".").map(Number);
-            if (major < 11 || (major === 11 && minor < 5)) {
+            const [major, minor, patch] = v.split(".").map(Number);
+            if (
+              ![major, minor, patch].every(Number.isInteger) ||
+              major < 11 ||
+              (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))
+            ) {
               console.error(`npm ${v} is too old for OIDC trusted publishing; need >= 11.5.1`);
               process.exit(1);
             }
