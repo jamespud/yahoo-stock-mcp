@@ -6,7 +6,7 @@ import { fetchYahooOptionChain } from "../providers/yahoo.js";
 import * as q from "../services/query.service.js";
 import { listIndicatorMeta } from "../indicators/registry.js";
 import { getIndicators } from "../services/indicator.service.js";
-import { closeDb } from "../db.js";
+import { closeStorageBackend } from "../storage/sqlite.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../package-meta.js";
 import { isValidIsoDate, isoDateToUnixSeconds } from "../validation.js";
 
@@ -444,7 +444,7 @@ server.tool(
 
 server.tool(
   "sync_stock",
-  "Sync a stock from providers into the local MySQL database. full = complete history from 2000; incremental = only new data.",
+  "Sync a stock from providers into the local SQLite database. full = complete history from 2000; incremental = only new data.",
   {
     symbol: z.string().describe("Ticker, e.g. NVDA"),
     mode: z.enum(["incremental", "full"]).default("incremental"),
@@ -460,21 +460,21 @@ server.tool(
 export async function startMcpServer(): Promise<void> {
   const transport = new StdioServerTransport();
   // Exit when the client closes stdin. The SDK's stdio transport does not 
-  // wire stdin 'end'/'close' to onclose, so the open MySQL pool would
+  // wire stdin 'end'/'close' to onclose, so the open database handle would
   // otherwise keep the process alive and Close() would hang.
   const shutdown = async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   };
   process.stdin.on("end", shutdown);
   process.stdin.on("close", shutdown);
   await server.connect(transport);
   process.on("SIGINT", async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   });
   process.on("SIGTERM", async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   });
 }

@@ -1,7 +1,7 @@
 {
   "name": "yahoo-stock-mcp",
-  "version": "0.4.0",
-  "description": "MCP server for stock information with unofficial Yahoo Finance + Investing.com integrations, backed by MySQL",
+  "version": "0.5.0",
+  "description": "MCP server for stock information with unofficial Yahoo Finance + Investing.com integrations, backed by SQLite",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
@@ -27,7 +27,7 @@
     "stock",
     "yahoo-finance",
     "investing",
-    "mysql"
+    "sqlite"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -35,36 +35,42 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "server": "node dist/cli.js server",
-    "dev": "tsx src/cli.ts server",
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "canary:providers": "tsx scripts/provider-canary.ts",
+    "check:skill-references": "node scripts/sync-skill-references.mjs --check",
     "db:init": "tsx src/cli.ts db:init",
-    "sync": "tsx src/cli.ts sync",
-    "smoke": "tsx scripts/smoke.ts",
-    "test:db": "tsx scripts/test-db-isolated.ts",
-    "test:mcp": "tsx scripts/test-mcp.ts",
-    "test": "npm run test:cli && npm run test:skills && npm run test:plugin && npm run test:providers && npm run test:transport && npm run test:indicators && npm run test:db && npm run test:mcp",
-    "test:indicators": "tsx scripts/test-indicators.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:migrate": "tsx src/cli.ts db:migrate",
+    "dev": "tsx src/cli.ts server",
+    "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build",
-    "test:cli": "tsx scripts/test-cli.ts",
-    "test:skills": "npm run check:skill-references && tsx scripts/test-skills.ts",
-    "verify:pack": "node scripts/verify-pack.mjs",
-    "test:providers": "tsx scripts/test-providers.ts",
-    "test:transport": "tsx scripts/test-investing-transport.ts",
-    "gen:fixtures": "tsx scripts/gen-indicator-fixtures.ts",
-    "db:migrate": "tsx src/cli.ts db:migrate",
-    "test:db-bootstrap": "tsx scripts/test-db-bootstrap.ts",
-    "canary:providers": "tsx scripts/provider-canary.ts",
+    "server": "node dist/cli.js server",
+    "smoke": "tsx scripts/smoke.ts",
+    "sync": "tsx src/cli.ts sync",
     "sync:skill-references": "node scripts/sync-skill-references.mjs",
-    "check:skill-references": "node scripts/sync-skill-references.mjs --check",
-    "build:plugin": "node scripts/build-plugin.mjs",
-    "test:plugin": "node scripts/test-plugin.mjs"
+    "test": "npm run test:cli && npm run test:skills && npm run test:plugin && npm run test:providers && npm run test:transport && npm run test:indicators && npm run test:sqlite-bootstrap && npm run test:sqlite-values && npm run test:sqlite-upsert && npm run test:sqlite-read && npm run test:sqlite-db && npm run test:sqlite-write && npm run test:sync-writes && npm run test:sync-state && npm run test:sqlite-sync-e2e && npm run test:mcp",
+    "test:cli": "tsx scripts/test-cli.ts",
+    "test:indicators": "tsx scripts/test-indicators.ts",
+    "test:mcp": "tsx scripts/test-mcp.ts",
+    "test:plugin": "node scripts/test-plugin.mjs",
+    "test:providers": "tsx scripts/test-providers.ts",
+    "test:skills": "npm run check:skill-references && tsx scripts/test-skills.ts",
+    "test:sqlite-bootstrap": "tsx scripts/test-sqlite-bootstrap.ts",
+    "test:sqlite-db": "tsx scripts/test-sqlite-db.ts",
+    "test:sqlite-read": "tsx scripts/test-sqlite-read.ts",
+    "test:sqlite-sync-e2e": "tsx scripts/test-sqlite-sync-e2e.ts",
+    "test:sqlite-upsert": "tsx scripts/test-sqlite-upsert.ts",
+    "test:sqlite-values": "tsx scripts/test-sqlite-values.ts",
+    "test:sqlite-write": "tsx scripts/test-sqlite-write.ts",
+    "test:sync-state": "tsx scripts/test-sync-state.ts",
+    "test:sync-writes": "tsx scripts/test-sync-writes.ts",
+    "test:transport": "tsx scripts/test-investing-transport.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify:pack": "node scripts/verify-pack.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "dotenv": "^16.4.5",
-    "mysql2": "^3.11.0",
     "undici": "^6.28.0",
     "zod": "^3.23.8"
   },
@@ -75,6 +81,6 @@
     "typescript": "^5.6.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13.0"
   }
 }

@@ -1,0 +1,101 @@
+{
+  "source": {
+    "gitTag": "v0.4.0",
+    "commit": "7054127",
+    "database": "yahoo_stock_mcp"
+  },
+  "mysqlVersion": "8.4.11",
+  "appliedMigrations": [
+    "0001_baseline",
+    "0002_canonical_provider_rows",
+    "0003_create_news_relations",
+    "0004_backfill_news_relations",
+    "0005_drop_legacy_news",
+    "0006_dedupe_insider_transactions",
+    "0007_normalize_insider_unique_key",
+    "0008_dedupe_analyst_actions",
+    "0009_normalize_analyst_action_unique_key"
+  ],
+  "structure": {
+    "tables": 25,
+    "columns": 232,
+    "indexes": 46,
+    "generatedColumns": 6,
+    "triggers": 0,
+    "tableNames": [
+      "analyst_actions",
+      "analyst_forecasts",
+      "company_events",
+      "daily_bars",
+      "dividends",
+      "dividends_summary",
+      "earnings",
+      "earnings_trend",
+      "financial_statements",
+      "fund_holders",
+      "holder_breakdown",
+      "holders",
+      "insider_transactions",
+      "instrument_news",
+      "instruments",
+      "intraday_bars",
+      "news_articles",
+      "options",
+      "ratios",
+      "recommendation_trend",
+      "schema_migrations",
+      "sector_members",
+      "sectors",
+      "short_interest",
+      "sync_state"
+    ],
+    "allTables": 25,
+    "businessTables": 24,
+    "metadataTables": [
+      "schema_migrations"
+    ]
+  },
+  "fixture": {
+    "path": "scripts/mysql-to-sqlite/fixtures/mysql-v0.4.0-final.sql",
+    "sha256": "788fb59489d1319496adb5239cd19cb6641a6c152f62bfab281889cadb176863",
+    "normalizations": [
+      "AUTO_INCREMENT=<n> removed",
+      "mysqldump conditional comments removed"
+    ]
+  },
+  "c8Policy": {
+    "accepts": "source databases already migrated to the full v0.4.0 terminal state",
+    "rejects": "older migration versions or user-modified schemas; the operator must first upgrade with v0.4.0",
+    "versionValidation": "Read schema_migrations to confirm the source is at the full v0.4.0 terminal state; do NOT copy it as business data.",
+    "businessTables": [
+      "analyst_actions",
+      "analyst_forecasts",
+      "company_events",
+      "daily_bars",
+      "dividends",
+      "dividends_summary",
+      "earnings",
+      "earnings_trend",
+      "financial_statements",
+      "fund_holders",
+      "holder_breakdown",
+      "holders",
+      "insider_transactions",
+      "instrument_news",
+      "instruments",
+      "intraday_bars",
+      "news_articles",
+      "options",
+      "ratios",
+      "recommendation_trend",
+      "sector_members",
+      "sectors",
+      "short_interest",
+      "sync_state"
+    ]
+  },
+  "notes": {
+    "tableCountDifference": "MySQL reports 25 tables and the SQLite canonical schema 24. The extra table is schema_migrations: 4 columns, 1 index. It is MySQL migration bookkeeping, not business data.",
+    "generatedColumnsVsTriggers": "These are different concepts and must not be conflated. MySQL has 6 STORED GENERATED columns (the normalized *_key columns for analyst_actions and insider_transactions). The SQLite schema instead has 6 AFTER UPDATE triggers, which reproduce MySQL's ON UPDATE CURRENT_TIMESTAMP on 6 timestamp columns. Neither maps onto the other."
+  }
+}

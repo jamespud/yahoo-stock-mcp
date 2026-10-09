@@ -14,12 +14,12 @@
 >
 > Provider terms can change. Review the current [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/) and [Investing.com Terms and Conditions](https://www.investing.com/about-us/terms-and-conditions) for the jurisdiction and use case that apply to you.
 
-An MCP server for stock-market data with unofficial Yahoo Finance and Investing.com integrations, backed by an external MySQL database.
+An MCP server for stock-market data with unofficial Yahoo Finance and Investing.com integrations, backed by a local SQLite database.
 
 ## What it does
 
 - syncs quotes, fundamentals, ratios, dividends, earnings, holders, news, options, events, and sector data;
-- stores normalized data in MySQL and exposes it through MCP tools;
+- stores normalized data in a local SQLite database and exposes it through MCP tools;
 - computes 42 technical indicators locally from stored bars;
 - uses Yahoo for daily/intraday bars and Yahoo + Investing for complementary fundamentals;
 - supports scheduled live-provider contract checks;
@@ -42,9 +42,10 @@ codex plugin marketplace add jamespud/yahoo-stock-mcp
 ```
 
 Then install **Yahoo Stock MCP** from that marketplace in a supported Plugins Directory. The bundled
-stdio server runs the npm package version matching the plugin manifest. Node.js >= 20, an external
-MySQL database, and local `YAHOO_STOCK_MCP_*` configuration are still required; credentials are
-never stored in the plugin files. For skill-only installation, see [skills/README.md](./skills/README.md).
+stdio server runs the npm package version matching the plugin manifest. Node.js >= 22.13 and local
+`YAHOO_STOCK_MCP_*` configuration are required; the SQLite database is created automatically in a
+per-user data directory, and no external database service is needed. Credentials are never stored
+in the plugin files. For skill-only installation, see [skills/README.md](./skills/README.md).
 
 ## Data sources
 
@@ -60,10 +61,30 @@ The Investing integration uses a native Node transport with a bounded TLS compat
 
 The scheduled live-provider canary hard-gates Yahoo and Investing data-contract/unit regressions. Investing network or access availability may report `DEGRADED` instead of failing the job because hosted-runner egress can be blocked independently of the provider contract. The canary is low-frequency and does not populate the project database or publish a data feed.
 
+## Upgrading from v0.4.0
+
+> **v0.5.0 is a breaking release: MySQL support has been removed.** SQLite is now the only backend,
+> and there is no automatic data migration in this release.
+
+If you have data in a MySQL database created by v0.4.x:
+
+1. **Back it up first.** The database is untouched by the upgrade, but nothing in v0.5.0 will read it.
+2. **Re-sync into SQLite** if you want to keep using this project. Be aware that a re-sync does
+   **not** guarantee recovery of all history — some historical bars, news items and financial
+   observations may no longer be available from the upstream providers.
+3. **To keep reading the old data, stay on v0.4.x.** Old and new installs can coexist.
+
+A one-off MySQL → SQLite migration tool is **deferred** and not part of v0.5.0. The historical
+v0.4.0 schema is preserved in the repository under `scripts/mysql-to-sqlite/fixtures/` for that
+future work; it is not shipped in the npm package.
+
+If any of `YAHOO_STOCK_MCP_DATABASE_URL` or `YAHOO_STOCK_MCP_DB_*` is still set, the server refuses
+to start and tells you so rather than silently creating an empty database.
+
 ## Requirements
 
-- Node.js >= 20
-- External MySQL
+- Node.js >= 22.13
+- No database service: a local SQLite file is created automatically on first use
 - Provider access subject to the notices and upstream terms above
 
 For setup and commands, continue with **[docs/USAGE.md](./docs/USAGE.md)**.

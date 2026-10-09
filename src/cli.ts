@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { closeDb, initSchema, migrateSchema } from "./db.js";
 import { syncAll, syncOne, syncSectors, type IntradayInterval } from "./services/sync.service.js";
 import { startMcpServer } from "./mcp/server.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
+import { openDatabase } from "./storage/database.js";
+import { initSqliteSchema } from "./storage/migrations.js";
 
 const INTRADAY_INTERVALS = ["1m", "5m", "15m", "30m", "60m"] as const;
 
@@ -21,7 +22,7 @@ Commands:
   server                 Start the MCP server over stdio (default with no arguments)
   db:init                Create the database if missing, then bootstrap schema + migrations
   db:migrate             Apply pending schema migrations to an existing database
-  sync                   Pull stock data from Yahoo Finance / Investing.com into MySQL
+  sync                   Pull stock data from Yahoo Finance / Investing.com into SQLite
   version                Print the version number
   help [command]         Show general help, or help for a specific command
 
@@ -38,7 +39,7 @@ Examples:
   ${NAME} sync --sectors
   ${NAME} server`;
 
-const SYNC_HELP = `Sync stock data from Yahoo Finance / Investing.com into MySQL.
+const SYNC_HELP = `Sync stock data from Yahoo Finance / Investing.com into the local SQLite database.
 
 Usage:
   ${NAME} sync --symbol <SYMBOL> [--full|--incremental] [--intraday <interval>]
@@ -68,18 +69,18 @@ MCP clients (Claude Desktop, Cursor, Codex, ...) launch this server with:
 Usage:
   ${NAME} server`;
 
-const DBINIT_HELP = `Initialise the configured MySQL database.
+const DBINIT_HELP = `Initialise the local SQLite database.
 
-If the target database does not exist, db:init first attempts to create it with
-utf8mb4/utf8mb4_unicode_ci using the configured credentials, then installs the
-bootstrap schema and all pending migrations. Creating a missing database requires
-CREATE DATABASE privileges. Existing databases do not require that privilege.
+SQLite is the only backend in v0.5.0. The database file defaults to a per-user data directory
+($XDG_DATA_HOME/yahoo-stock-mcp/stocks.db on Linux, ~/Library/Application Support on macOS,
+%APPDATA% on Windows); override it with YAHOO_STOCK_MCP_SQLITE_PATH or --sqlite.
 
-The connection is read from YAHOO_STOCK_MCP_DATABASE_URL, or from the
-YAHOO_STOCK_MCP_DB_* variables (host/port/user/password/name).
+Existing data is never overwritten: db:init applies pending migrations and reports "already up to
+date" when there is nothing to do.
 
 Usage:
-  ${NAME} db:init`;
+  ${NAME} db:init
+  ${NAME} db:init --sqlite /path/to/stocks.db`;
 
 const DBMIGRATE_HELP = `Apply pending versioned migrations to an existing database.
 
@@ -114,6 +115,7 @@ interface SyncArgs {
   sectors: boolean;
   sectorMembers: boolean;
   intraday?: IntradayInterval;
+  sqlite?: string;
   help: boolean;
 }
 
@@ -128,6 +130,8 @@ function parseArgs(args: string[]): SyncArgs {
     else if (a === "--incremental") opts.full = false;
     else if (a === "--sectors") opts.sectors = true;
     else if (a === "--no-members") opts.sectorMembers = false;
+    else if (a === "--sqlite") opts.sqlite = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : ":default:";
+    else if (a.startsWith("--sqlite=")) opts.sqlite = a.slice("--sqlite=".length) || ":default:";
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "--intraday") {
       const iv = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "15m";
@@ -139,6 +143,30 @@ function parseArgs(args: string[]): SyncArgs {
     }
   }
   return opts;
+}
+
+/**
+ * Resolve the database path for `db:init`: an explicit `--sqlite <path>`, else
+ * YAHOO_STOCK_MCP_SQLITE_PATH, else a conventional per-user data location.
+ */
+function resolveSqlitePath(flag: string | undefined): string {
+  const envPath = process.env.YAHOO_STOCK_MCP_SQLITE_PATH;
+  if (flag && flag !== ":default:") return flag;
+  if (envPath) return envPath;
+  return defaultSqlitePath();
+}
+
+function defaultSqlitePath(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ".";
+  if (process.platform === "win32") {
+    const base = process.env.APPDATA ?? home;
+    return `${base}/yahoo-stock-mcp/stocks.db`;
+  }
+  if (process.platform === "darwin") {
+    return `${home}/Library/Application Support/yahoo-stock-mcp/stocks.db`;
+  }
+  const base = process.env.XDG_DATA_HOME ?? `${home}/.local/share`;
+  return `${base}/yahoo-stock-mcp/stocks.db`;
 }
 
 async function main() {
@@ -154,7 +182,7 @@ async function main() {
     return;
   }
 
-  const { cmd, symbol, all, full, sectors, sectorMembers, intraday, help } = parseArgs(args);
+  const { cmd, symbol, all, full, sectors, sectorMembers, intraday, sqlite, help } = parseArgs(args);
 
   switch (cmd) {
     case "version":
@@ -177,20 +205,45 @@ async function main() {
       return;
     }
 
-    case "db:init":
+    case "db:init": {
       if (help) {
         printHelp("db:init");
         return;
       }
-      await initSchema();
-      break;
+      // SQLite is the only backend; --sqlite just overrides the default file location.
+      const sqlitePath = resolveSqlitePath(sqlite);
+      {
+        const { openDatabase } = await import("./storage/database.js");
+        const { initSqliteSchema } = await import("./storage/migrations.js");
+        const conn = openDatabase(sqlitePath);
+        try {
+          const applied = initSqliteSchema(conn);
+          console.log(
+            applied.length
+              ? `sqlite schema ready at ${conn.path}; migrations applied: ${applied.join(", ")}`
+              : `sqlite schema already up to date at ${conn.path}`
+          );
+        } finally {
+          conn.close();
+        }
+        break;
+      }
+    }
 
     case "db:migrate":
       if (help) {
         printHelp("db:migrate");
         return;
       }
-      await migrateSchema();
+      {
+        const conn = openDatabase(resolveSqlitePath(sqlite));
+        try {
+          const applied = initSqliteSchema(conn);
+          console.log(applied.length ? `migrations applied: ${applied.join(", ")}` : "migrations up to date");
+        } finally {
+          conn.close();
+        }
+      }
       break;
 
     case "sync":
@@ -231,7 +284,6 @@ async function main() {
       console.error(`run "${NAME} --help" to see available commands`);
       process.exitCode = 1;
   }
-  await closeDb();
 }
 
 main().catch((e) => {

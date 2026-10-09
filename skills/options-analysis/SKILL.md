@@ -14,7 +14,7 @@ Read [references/data-policy.md](references/data-policy.md) first, then the
 ## MCP tools used
 
 - `get_option_quote` - live Yahoo chain for one expiry: underlying quote, available expirations and strikes, per-contract quotes
-- `get_options` - the stored chain snapshot in MySQL, optionally filtered to one expiration
+- `get_options` - the stored chain snapshot in SQLite, optionally filtered to one expiration
 - `get_quote` - the stored underlying price and its date, for a same-source comparison with the snapshot
 - `sync_stock` - refreshes the stored chain snapshot (`options` component)
 - `get_bars` - underlying price history, when a strike or IV reading needs a recent range

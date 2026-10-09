@@ -7,7 +7,7 @@
 ## 测试
 
 ```bash
-# 需要本地 MySQL（默认 127.0.0.1:3306，见 deploy/docker-compose.mysql.yml）且已初始化表结构
+# 无需数据库服务：使用本地 SQLite 文件，先执行 `yahoo-stock-mcp db:init` 初始化
 # test:db 会自建并删除一次性临时库，需要 CREATE DATABASE 权限；配置的用户没有该权限时
 # 设置 YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL
 npm run test:cli        # CLI 行为：version / help / 未知命令处理（无需数据库）
@@ -35,7 +35,7 @@ npm test                # 全部测试组
 
 | 工具 | 说明 |
 |---|---|
-| `sync_stock` | 全量/增量同步一只股票到 MySQL |
+| `sync_stock` | 全量/增量同步一只股票到 SQLite |
 | `search_symbol` | 搜索已入库标的 |
 | `get_quote` | 最新行情 + 关键指标 |
 | `get_bars` | 历史 K 线（1d/1wk/1mo） |

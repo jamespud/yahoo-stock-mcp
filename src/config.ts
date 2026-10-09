@@ -60,57 +60,34 @@ export function parseBarsStartDate(
 
 const DEFAULT_DB = "yahoo_stock_mcp";
 
-export interface DbTarget {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-  url?: string;
+/**
+ * v0.5.0 removed the MySQL backend. Silently ignoring a leftover MySQL connection string would
+ * look exactly like "my data disappeared", so any legacy MySQL configuration is a hard error.
+ *
+ * v0.5.0 does **not** ship a migration tool (deferred); the message points at the upgrade notes
+ * rather than at a program that does not exist.
+ */
+const LEGACY_MYSQL_ENV = [
+  "YAHOO_STOCK_MCP_DATABASE_URL",
+  "YAHOO_STOCK_MCP_DB_HOST",
+  "YAHOO_STOCK_MCP_DB_PORT",
+  "YAHOO_STOCK_MCP_DB_USER",
+  "YAHOO_STOCK_MCP_DB_PASSWORD",
+  "YAHOO_STOCK_MCP_DB_NAME",
+];
+const legacyMysqlVar = LEGACY_MYSQL_ENV.find((name) => (process.env[name] ?? "").trim() !== "");
+if (legacyMysqlVar) {
+  throw new Error(
+    `${legacyMysqlVar} is set, but yahoo-stock-mcp v0.5.0 no longer uses MySQL: SQLite is the only ` +
+      `backend. Unset the YAHOO_STOCK_MCP_DATABASE_URL / YAHOO_STOCK_MCP_DB_* variables to start with ` +
+      `a local SQLite database. v0.5.0 cannot migrate existing MySQL data automatically — see the ` +
+      `upgrade notes in README.md. You can keep running v0.4.x to read the old database.`
+  );
 }
 
-export function parseDatabaseUrl(raw: string): DbTarget {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    throw new Error(
-      `Invalid YAHOO_STOCK_MCP_DATABASE_URL=${JSON.stringify(raw)}; expected a mysql:// connection URL`
-    );
-  }
-  if (u.protocol !== "mysql:") {
-    throw new Error(
-      `Invalid YAHOO_STOCK_MCP_DATABASE_URL=${JSON.stringify(raw)}; expected scheme "mysql://"`
-    );
-  }
-  return {
-    host: u.hostname,
-    port: u.port ? Number(u.port) : 3306,
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: decodeURIComponent(u.pathname.replace(/^\/+/, "")) || DEFAULT_DB,
-    url: raw,
-  };
-}
 
-function buildDatabaseConfig(): DbTarget {
-  const url = env("DATABASE_URL");
-  if (url) return parseDatabaseUrl(url);
-  return {
-    host: env("DB_HOST") ?? "127.0.0.1",
-    port: parseBoundedNumericEnv("DB_PORT", env("DB_PORT"), 3306, { min: 1, max: 65535, integer: true }),
-    user: env("DB_USER") ?? "stock",
-    password: env("DB_PASSWORD") ?? "stock123",
-    database: env("DB_NAME") ?? DEFAULT_DB,
-  };
-}
-
-const db = buildDatabaseConfig();
 
 export const config = {
-  /** External MySQL connection string, e.g. mysql://user:pass@host:3306/yahoo_stock_mcp */
-  databaseUrl: db.url ?? `mysql://${encodeURIComponent(db.user)}:${encodeURIComponent(db.password)}@${db.host}:${db.port}/${db.database}`,
-  db,
   userAgent:
     env("USER_AGENT") ??
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",

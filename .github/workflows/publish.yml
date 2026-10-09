@@ -4,45 +4,51 @@ on:
   push:
     tags:
       - "v*"
+  # Manual runs are allowed, but the job below refuses to publish unless the selected ref is a
+  # v* tag whose name matches package.json, so dispatching from a branch cannot release.
   workflow_dispatch:
 
 permissions:
   contents: read
+  # Required for npm Trusted Publishing (OIDC). No long-lived NPM_TOKEN is used.
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: root123
-          MYSQL_ROOT_HOST: "%"
-          MYSQL_DATABASE: yahoo_stock_mcp
-          MYSQL_USER: stock
-          MYSQL_PASSWORD: stock123
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot123"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=20
-    env:
-      YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
-      YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
     steps:
       - uses: actions/checkout@v4
 
+      # No `registry-url` on purpose: setup-node writes a placeholder auth token into .npmrc,
+      # which interferes with OIDC authentication for public packages.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          cache: npm
+          node-version: 24
 
-      - name: Verify release tag matches package version
-        if: github.event_name == 'push'
-        run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
+      - name: Require a v* tag that matches package.json
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::error::publishing requires a tag ref; got ref_type=${GITHUB_REF_TYPE} ref=${GITHUB_REF}"
+            exit 1
+          fi
+          node scripts/verify-release-tag.mjs "${GITHUB_REF_NAME}"
+
+      - name: Verify the npm CLI supports Trusted Publishing
+        run: |
+          node -e '
+            const { execSync } = require("node:child_process");
+            const v = execSync("npm --version").toString().trim();
+            const [major, minor, patch] = v.split(".").map(Number);
+            if (
+              ![major, minor, patch].every(Number.isInteger) ||
+              major < 11 ||
+              (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))
+            ) {
+              console.error(`npm ${v} is too old for OIDC trusted publishing; need >= 11.5.1`);
+              process.exit(1);
+            }
+            console.log(`npm ${v} supports trusted publishing`);
+          '
 
       - run: npm ci
 
@@ -57,7 +63,6 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run --ignore-scripts
 
+      # No NODE_AUTH_TOKEN: authentication comes from the OIDC exchange with npm.
       - name: Publish
         run: npm publish --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -20,7 +20,8 @@ sync produced them. Do not retry a failure before identifying its layer.
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| `ECONNREFUSED` on the MySQL port | server not running or wrong host/port | verify `YAHOO_STOCK_MCP_DATABASE_URL` or the `YAHOO_STOCK_MCP_DB_*` variables |
+| Server refuses to start, mentioning MySQL | a leftover v0.4.x MySQL configuration | unset `YAHOO_STOCK_MCP_DATABASE_URL` and `YAHOO_STOCK_MCP_DB_*`; v0.5.0 is SQLite-only |
+| Database file is missing | never initialised | run `yahoo-stock-mcp db:init` |
 | `ER_ACCESS_DENIED_ERROR` | wrong credentials or missing grants | fix credentials; `db:init` additionally needs `CREATE DATABASE` when the database is absent |
 | `ER_BAD_DB_ERROR` / `Unknown database` | database never created | `db:init` |
 | `Table '...' doesn't exist` | schema never bootstrapped, or migrations pending | `db:init` for a new database, `db:migrate` for an existing one |

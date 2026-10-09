@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { canonicalizeRatio } from "./ratios.js";
 import { normalizeInvestingStatementValue } from "./financial-units.js";
 import { investingFetch, isCloudflareBlock } from "./investing-transport.js";
@@ -44,13 +45,43 @@ export function isInvestingAvailabilityError(err: unknown): boolean {
   return false;
 }
 
+export interface InvestingHttpResponse {
+  status: number;
+  text: string;
+}
+
+/**
+ * Test-only seam: replaces the HTTP response for the Investing GraphQL endpoint.
+ *
+ * Only the response is substituted. Everything downstream — `parseGqlResponse`, the field
+ * parsers, the unit conversions and every `save*` call — runs unchanged, so a test exercises the
+ * real GraphQL parsing and persistence chain instead of a stubbed service.
+ */
+export type InvestingRequestHandler = (
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body?: string
+) => Promise<InvestingHttpResponse>;
+
+// Request-scoped rather than a mutable global: concurrent syncs cannot see each other's handler,
+// and the handler disappears when the run() callback settles.
+const requestHandler = new AsyncLocalStorage<InvestingRequestHandler>();
+
+/** Run `fn` with a test request handler active. Production code never calls this. */
+export function runWithInvestingRequestHandler<T>(handler: InvestingRequestHandler, fn: () => T): T {
+  return requestHandler.run(handler, fn);
+}
+
 /** POST/GET the Investing GraphQL endpoint through the native TLS transport. */
 async function investingRequest(
   method: string,
   url: string,
   headers: Record<string, string>,
   body?: string
-): Promise<{ status: number; text: string }> {
+): Promise<InvestingHttpResponse> {
+  const injected = requestHandler.getStore();
+  if (injected) return injected(method, url, headers, body);
   const res = await investingFetch(url, { method: method === "POST" ? "POST" : "GET", headers, body });
   return { status: res.status, text: res.text };
 }

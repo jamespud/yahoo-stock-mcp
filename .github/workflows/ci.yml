@@ -16,27 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: root123
-          MYSQL_ROOT_HOST: "%"
-          MYSQL_DATABASE: yahoo_stock_mcp
-          MYSQL_USER: stock
-          MYSQL_PASSWORD: stock123
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot123"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=20
-    env:
-      YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
-      # test:db builds and drops a throwaway database; the application user cannot create one
-      YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -45,14 +25,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # No database service: SQLite is the only backend and it is created on demand.
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-
-      - name: Test missing-database bootstrap
-        if: matrix.node == 22
-        run: npm run test:db-bootstrap
 
   package:
     name: Package contents
@@ -63,7 +40,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci

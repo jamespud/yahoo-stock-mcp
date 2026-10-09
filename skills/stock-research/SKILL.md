@@ -6,7 +6,7 @@ description: Produce a standardized single-company research report from yahoo-st
 # Stock research
 
 Build one reproducible, source-traceable research note on a listed company using the data already
-synced into the local MySQL database. This is the entry point for broad company questions. It stays
+synced into the local SQLite database. This is the entry point for broad company questions. It stays
 deliberately shallow on price action, earnings timing, options, and dividends so the focused skills
 can go deep without duplicating this report.
 
