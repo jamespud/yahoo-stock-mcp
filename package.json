@@ -46,6 +46,7 @@
     "test:sqlite-upsert": "tsx scripts/test-sqlite-upsert.ts",
     "test:sqlite-read": "tsx scripts/test-sqlite-read.ts",
     "test:read-bridge": "tsx scripts/test-read-bridge.ts",
+    "test:sqlite-write": "tsx scripts/test-sqlite-write.ts",
     "test:mcp": "tsx scripts/test-mcp.ts",
     "test": "npm run test:cli && npm run test:skills && npm run test:plugin && npm run test:providers && npm run test:transport && npm run test:indicators && npm run test:db && npm run test:mcp",
     "test:indicators": "tsx scripts/test-indicators.ts",

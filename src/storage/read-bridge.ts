@@ -16,13 +16,15 @@
  * MySQL-backed database tests that go with it. Nothing here may survive the cutover.
  */
 import { query as mysqlQuery } from "../db.js";
+import { storageBackend, sqliteDatabase } from "./backend.js";
 import { integerOut, toSqliteParams } from "./values.js";
 
-export type ReadBackend = "mysql" | "sqlite";
-
-/** Backend selected for this process. Any value other than "sqlite" keeps MySQL. */
-export function readBackend(): ReadBackend {
-  return process.env.YAHOO_STOCK_MCP_READ_BACKEND === "sqlite" ? "sqlite" : "mysql";
+/**
+ * The read path shares the process-wide backend selector with the write path, so a run can never
+ * read MySQL while writing SQLite (`src/storage/backend.ts`).
+ */
+export function readBackend(): "mysql" | "sqlite" {
+  return storageBackend();
 }
 
 /**
@@ -93,28 +95,6 @@ function normalizeValue(column: string, value: unknown): unknown {
   return value;
 }
 
-interface SqliteHandle {
-  db: any;
-  close(): void;
-}
-
-let handle: SqliteHandle | null = null;
-
-/** Lazily load `node:sqlite` so Node 20 never touches it unless SQLite mode is requested. */
-async function sqliteDatabase(): Promise<any> {
-  if (handle) return handle.db;
-  const path = process.env.YAHOO_STOCK_MCP_SQLITE_PATH;
-  if (!path) {
-    throw new Error(
-      "YAHOO_STOCK_MCP_READ_BACKEND=sqlite requires YAHOO_STOCK_MCP_SQLITE_PATH to point at a database"
-    );
-  }
-  const { openDatabase } = await import("./database.js");
-  const conn = openDatabase(path);
-  handle = { db: conn.db, close: conn.close };
-  return conn.db;
-}
-
 /**
  * Run a read-only statement. Returns the same value shape the MySQL path returns.
  *
@@ -138,11 +118,7 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<T
   }) as T;
 }
 
-/** Close the SQLite handle if one was opened. No-op on the MySQL path. */
-export function closeReadBridge(): void {
-  if (!handle) return;
-  handle.close();
-  handle = null;
-}
+/** Close the shared SQLite handle if one was opened. No-op on the MySQL path. */
+export { closeStorageBackend as closeReadBridge } from "./backend.js";
 
 export { DATE_COLUMNS as READ_BRIDGE_DATE_COLUMNS };

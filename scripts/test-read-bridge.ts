@@ -30,7 +30,7 @@ applySqliteMigrations(setup);
 setup.db.exec(readFileSync(fixturePath, "utf8"));
 setup.close();
 
-process.env.YAHOO_STOCK_MCP_READ_BACKEND = "sqlite";
+process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND = "sqlite";
 process.env.YAHOO_STOCK_MCP_SQLITE_PATH = dbPath;
 
 const SYMBOL = "NVDA";
@@ -184,12 +184,12 @@ await check("rewritten date SQL (CURDATE / DATE_SUB) runs on both backends", () 
 });
 
 await check("default backend stays MySQL when the switch is absent", () => {
-  const saved = process.env.YAHOO_STOCK_MCP_READ_BACKEND;
-  delete process.env.YAHOO_STOCK_MCP_READ_BACKEND;
+  const saved = process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND;
+  delete process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND;
   try {
     assert.equal(readBackend(), "mysql");
   } finally {
-    process.env.YAHOO_STOCK_MCP_READ_BACKEND = saved;
+    process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND = saved;
   }
 });
 

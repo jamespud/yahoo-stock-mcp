@@ -360,7 +360,8 @@ which rows would now be distinct that MySQL treated as one.
 | C3 (landed) | `src/storage/upsert.ts` + `scripts/test-sqlite-upsert.ts`: SQLite UPSERT generation sharing the pure priority rule | §4 truth table green; oracle equivalence exhaustive |
 | C4a (landed) | `query.service.ts` decimal ordering via `src/storage/values.ts`; `scripts/test-sqlite-read.ts` | exact ordering; MySQL differential 10/11 byte-identical, row sets equal |
 | C4b (landed) | `src/storage/read-bridge.ts` (temporary), `db/sqlite/fixtures/read-path.sql`, `scripts/test-read-bridge.ts` | all 26 read functions run on SQLite; MySQL differential 25/26 byte-identical, 1 tie-order-only, 0 row-set differences |
-| C5 | Write path migration (`sync.service.ts`) | sync → idempotent re-sync → restart → re-sync |
+| C5a (landed) | `src/storage/{backend,quantize,write}.ts` + `scripts/test-sqlite-write.ts` | quantization once at the boundary; batch/replace atomic; one backend for reads and writes |
+| C5b (remaining) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
 | C7 | README, `docs/USAGE*`, `docs/REFERENCE*`, `stock-data-setup` skill, Codex plugin, release notes | `verify:pack`, `test:plugin`, `check:skill-references` green |
@@ -462,6 +463,44 @@ temporary. C6 must:
 3. migrate the database tests (`scripts/test-db.ts`, `scripts/test-db-isolated.ts`) off MySQL —
    `db/sqlite/fixtures/read-path.sql` already supplies the data they need;
 4. confirm no MySQL dependency remains in the read path.
+
+### 6.4 C5 write path (in progress)
+
+C5 is split in two, because migrating `sync.service.ts` and building the storage write layer are
+independent bodies of work.
+
+**C5a (landed) — storage write layer and the quantization boundary.**
+
+- `src/storage/backend.ts` — one selector for both paths. `YAHOO_STOCK_MCP_STORAGE_BACKEND=sqlite`
+  switches reads and writes together, so a run can never write SQLite while reading MySQL. This
+  replaces the C4b read-only `YAHOO_STOCK_MCP_READ_BACKEND`.
+- `src/storage/quantize.ts` — the DECIMAL registry (63 columns, `(precision, scale)` read from the
+  MySQL terminal schema) and `quantizeForColumn` / `quantizeBindings`. Values that do not fit the
+  declared `DECIMAL(p,s)` raise `RangeError`; nothing is truncated or saturated.
+- `src/storage/write.ts` — `execute` / `executeBatch` / `replaceBatch`, mirroring the shapes
+  `sync.service.ts` already uses. SQLite transactions are synchronous critical sections
+  (`BEGIN IMMEDIATE` … `COMMIT`, rollback on throw); MySQL keeps using the existing pool helpers.
+- `scripts/test-sqlite-write.ts` — quantization (round-once, half away from zero, NULL, overflow),
+  `executeBatch` atomicity, `replaceBatch` snapshot rollback, no precision drift across repeat
+  writes, BIGINT not truncated, composition with the C3 priority UPSERT, and a synchronous
+  transaction contract.
+
+Quantization happens **once**, in the storage layer, immediately before binding. Providers convert
+their floats explicitly with `decimalFromNumber`; services pass exact strings through untouched.
+
+**C5b (remaining) — migrate `sync.service.ts` and prove end-to-end sync.**
+
+Not yet done:
+
+- port the ~25 write statements in `sync.service.ts` (`ON DUPLICATE KEY UPDATE` → `ON CONFLICT`,
+  `VALUES(col)` → `excluded.col`, `NOW()` → `CURRENT_TIMESTAMP`) onto `write.ts`;
+- attach `decimals` bindings to every statement that writes a DECIMAL column;
+- retarget `sync.service.ts` off `../db.js` so a SQLite run does not touch MySQL at all;
+- accept end-to-end: first full sync, incremental sync, repeat sync, failure rollback, and
+  `sync_state` correctness after closing and reopening the database — all without a MySQL server.
+
+The C5 acceptance bar (a real sync completing on SQLite) is met only when C5b lands. Nothing in
+C6 should start before then.
 
 ## 7. C1 acceptance criteria
 
