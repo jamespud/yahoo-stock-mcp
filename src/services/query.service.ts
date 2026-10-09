@@ -1,6 +1,7 @@
 import { query } from "../db.js";
 import { config } from "../config.js";
 import { canonicalizeStoredRatioRows } from "../providers/ratios.js";
+import { sortByDecimalKeys, sortRows } from "../storage/values.js";
 
 function rows<T = any>(r: T): T {
   return r;
@@ -335,10 +336,18 @@ export async function getHolders(symbol: string, limit = 20) {
   const rows = await query<any[]>(
     `SELECT h.* FROM holders h
      WHERE h.instrument_id = ?
-     ORDER BY h.holding_date DESC, h.percent_of_shares DESC LIMIT ${Math.max(1, Math.min(limit, 100))}`,
+     ORDER BY h.holding_date DESC, h.owner_name ASC, h.source ASC`,
     [inst.id]
   );
-  return { symbol: inst.symbol, holders: rows };
+  // percent_of_shares is DECIMAL(10,4) stored as TEXT, so SQL comparison would be lexicographic.
+  // The original MySQL ordering was `holding_date DESC, percent_of_shares DESC`: both keys must
+  // be applied here, in that order (the date is the more significant key). The SQL above only
+  // fixes a deterministic row order so equal-key ties are reproducible.
+  const holders = sortRows(rows, [
+    { column: "holding_date", direction: "desc", kind: "text" },
+    { column: "percent_of_shares", direction: "desc", kind: "decimal" },
+  ]).slice(0, Math.max(1, Math.min(limit, 100)));
+  return { symbol: inst.symbol, holders };
 }
 
 export async function getNews(symbol: string, limit = 20) {
@@ -364,17 +373,19 @@ export async function getOptions(symbol: string, expiration?: string) {
   if (expiration) { extra = "AND expiration = ?"; params.push(expiration); }
   const rows = await query<any[]>(
     `SELECT contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, updated_at
-     FROM options WHERE instrument_id = ? ${extra} ORDER BY expiration, strike LIMIT 5000`,
+     FROM options WHERE instrument_id = ? ${extra} ORDER BY expiration ASC, contract_symbol ASC`,
     params
   );
   const expirations = await query<any[]>(
     "SELECT DISTINCT expiration FROM options WHERE instrument_id = ? ORDER BY expiration",
     [inst.id]
   );
+  // strike is DECIMAL(14,4) stored as TEXT: order exactly in JS, then apply the 5000-row cap.
+  const legs = sortByDecimalKeys(rows, [{ column: "strike", direction: "asc" }]).slice(0, 5000);
   return {
     symbol: inst.symbol,
     expirations: expirations.map((r) => r.expiration),
-    legs: rows,
+    legs,
   };
 }
 
@@ -463,10 +474,14 @@ export async function getFundHolders(symbol: string, limit = 20) {
   const rows = await query<any[]>(
     `SELECT holding_date, owner_name, pct_held, position, value, pct_change, source
      FROM fund_holders WHERE instrument_id = ?
-     ORDER BY pct_held DESC LIMIT ${Math.max(1, Math.min(limit, 100))}`,
+     ORDER BY owner_name ASC, holding_date ASC, source ASC`,
     [inst.id]
   );
-  return { symbol: inst.symbol, holders: rows };
+  const holders = sortByDecimalKeys(rows, [{ column: "pct_held", direction: "desc" }]).slice(
+    0,
+    Math.max(1, Math.min(limit, 100))
+  );
+  return { symbol: inst.symbol, holders };
 }
 
 export async function getShortInterest(symbol: string) {
@@ -586,9 +601,13 @@ export async function getSectorMembers(sector: string, limit = 20) {
   const rows = await query<any[]>(
     `SELECT symbol, name, weight, source, updated_at FROM sector_members
      WHERE sector_code = ?
-     ORDER BY weight DESC LIMIT ${Math.max(1, Math.min(limit, 200))}`,
+     ORDER BY symbol ASC`,
     [sector]
   );
   if (rows.length === 0) return null;
-  return { sector_code: sector, members: rows };
+  const members = sortByDecimalKeys(rows, [{ column: "weight", direction: "desc" }]).slice(
+    0,
+    Math.max(1, Math.min(limit, 200))
+  );
+  return { sector_code: sector, members };
 }

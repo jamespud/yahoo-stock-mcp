@@ -182,38 +182,49 @@ BigInt only, and its fixtures were captured from MySQL 8.4.
 `upstreamToUtc` requires an explicit UTC offset rather than inferring one from the host, because
 guessing the zone is exactly the implicit change this contract forbids.
 
-### 3.4.2 Open decision for C4: ordering and aggregation on TEXT decimals
+### 3.4.2 Ordering on TEXT decimals (decided in C4)
 
-Storing DECIMAL as TEXT preserves precision but **changes SQL ordering and range semantics**:
-TEXT comparison is lexicographic, so `'9.0000' > '10.0000'`. This is not hypothetical — four
-existing queries sort by a decimal column and would silently reorder:
+Storing DECIMAL as TEXT preserves precision but **changes SQL ordering**: TEXT comparison is
+lexicographic, so `'9.0000' > '10.0000'`. Four queries sorted by a decimal column:
 
 | Query | Column |
 | --- | --- |
-| `query.service.ts` holdings query | `holders.percent_of_shares` |
-| `query.service.ts` options query | `options.strike` |
+| `query.service.ts` holdings query | `holders.percent_of_shares` (with `holding_date` as the primary key) |
+| `query.service.ts` options query | `options.strike` (with `expiration` as the primary key) |
 | `query.service.ts` fund-holders query | `fund_holders.pct_held` |
-| `query.service.ts` sector-holdings query | `sector_members.weight` (also indexed by `idx_member_sector_weight`) |
+| `query.service.ts` sector-holdings query | `sector_members.weight` |
 
-`DATE` columns are unaffected: fixed-width `YYYY-MM-DD` text sorts chronologically, so
-`ORDER BY trade_date` and `MAX(trade_date)` keep working. Only numeric columns are at risk.
+`DATE` columns are unaffected: fixed-width `YYYY-MM-DD` text sorts chronologically.
 
-This is left **open** deliberately; it must be settled before C4 touches those queries. The
-candidate approaches, none of which is free:
+**Decision: SQL filters, JavaScript orders exactly.** `compareDecimalStrings` (and
+`compareNullableDecimalStrings` / `sortRows` in `src/storage/values.ts`) order values as scaled
+BigInts — never through `Number()`. `decimalToNumber` must not be used as a comparison basis,
+because it would reintroduce the float loss the whole contract exists to prevent.
 
-1. **Order/aggregate in JavaScript** via `decimalToNumber` after the read, using the existing
-   `LIMIT`s on small tables (`holders`, `fund_holders`, `sector_members`, `options`). Simple and
-   exact, but the ordering moves out of the database and the `LIMIT` must be applied after sorting.
-2. **A generated, order-preserving sort key** alongside the exact TEXT value. Needs an explicit
-   encoding (sign + fixed-width zero padding) and its own tests; SQLite has no decimal arithmetic
-   to derive one from the text.
-3. **Scaled INTEGER storage** for the columns small enough to fit in a 64-bit integer. Exact and
-   natively sortable, but the schema reaches `DECIMAL(24,4)` — 28 digits — so it cannot cover
-   every column uniformly.
+Rules the implementation follows:
 
-`ORDER BY CAST(col AS REAL)` is **not** an acceptable default: REAL carries ~15–17 significant
-digits, so values that differ beyond that would compare equal and order arbitrarily, which is the
-kind of silent change §1 forbids.
+1. SQL does the filtering; JavaScript does the exact numeric ordering.
+2. Sort first, then apply the limit — never take N rows from the database and sort those.
+3. Multiple keys keep their original order, direction, and NULL placement (NULL is the smallest
+   value: first in `ASC`, last in `DESC`, matching both MySQL and SQLite).
+4. Ties stay deterministic. Because a decimal-only sort is stable, the SQL adds an `ORDER BY`
+   on **non-decimal** columns (owner name, contract symbol, symbol, …) purely to fix a
+   reproducible row order. No new ordering *semantics* are introduced on the decimal dimension.
+
+`ORDER BY CAST(col AS REAL)` is not acceptable: REAL carries ~15–17 significant digits, so
+values differing beyond that would compare equal and order arbitrarily.
+
+**Known, deliberate deviation.** Differentially comparing the new ordering against the old
+MySQL `ORDER BY` over the live database gave 10 byte-identical orderings out of 11 and one
+difference: `getOptions` at equal `(expiration, strike)`. MySQL's original statement had no
+tie-break, so its order between a CALL and a PUT on the same strike was unspecified and came
+from storage order (`P` before `C`); the new ordering is deterministic by contract symbol
+(`C` before `P`). The row **set** is identical in every case — only an order MySQL never
+guaranteed changed. This is the direct consequence of rule 4.
+
+Scales this far are small (`holders` 20 rows, `options` 243, `fund_holders` 20,
+`sector_members` 120), so in-memory ordering is the right trade-off. If option counts grow
+substantially, revisit with an order-preserving sort key and an index rather than building it now.
 
 ### 3.5 Connection policy
 
@@ -347,7 +358,7 @@ which rows would now be distinct that MySQL treated as one.
 | C1 (landed) | `src/storage/{database,migrations}.ts`, `db/sqlite/migrations/0001_initial.sql`, `db:init --sqlite`, `scripts/test-sqlite-bootstrap.ts` | see §7 |
 | C2 (landed) | `src/storage/values.ts` + `scripts/test-sqlite-values.ts`: decimal / datetime / BigInt / binding contracts | exact round-trips; no accidental float; host-time-zone independent |
 | C3 (landed) | `src/storage/upsert.ts` + `scripts/test-sqlite-upsert.ts`: SQLite UPSERT generation sharing the pure priority rule | §4 truth table green; oracle equivalence exhaustive |
-| C4 | Read path migration (`query.service.ts`) | results match the MySQL export fixture |
+| C4 (landed) | `query.service.ts` decimal ordering via `src/storage/values.ts`; `scripts/test-sqlite-read.ts` | exact ordering; MySQL differential 10/11 byte-identical, row sets equal |
 | C5 | Write path migration (`sync.service.ts`) | sync → idempotent re-sync → restart → re-sync |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
@@ -368,6 +379,26 @@ C1 delivers a testable SQLite bootstrap and nothing more:
   supplied.
 
 The runtime cutover happens in C6, after C5 has proven end-to-end sync against SQLite.
+
+### 6.2 C4 boundary (read path)
+
+C4 makes the read path **SQLite-correct**: the dialect-sensitive part (ordering a TEXT decimal
+column) now happens in backend-neutral JavaScript, and its equivalence with the old MySQL
+`ORDER BY` is demonstrated (§3.4.2).
+
+C4 deliberately does **not** repoint `query.service.ts`'s fetch calls from MySQL to SQLite yet.
+The existing MySQL suite exercises that read path directly (`scripts/test-db.ts` is ~1468 lines
+and drives `query.service.ts` against a live database) and must stay green until the cutover, so
+the two requirements — "migrate `query.service.ts`" and "the MySQL suite stays green" — cannot
+both be satisfied in a single step. Repointing the fetches belongs with the cutover in C6, or
+needs a temporary read port that C6 deletes; that choice is still open.
+
+Still outstanding before the read path can be declared SQLite-complete:
+
+- repoint the fetches and run the read assertions against a SQLite database;
+- capture a MySQL row-level baseline and assert the SQLite read layer returns the same shapes
+  (DECIMAL as string, DATE as `YYYY-MM-DD`, integers as numbers unless they exceed 2^53);
+- confirm `ROW_NUMBER() OVER (...)` and the remaining read SQL parse on SQLite.
 
 ## 7. C1 acceptance criteria
 

@@ -144,6 +144,124 @@ export function decimalToNumber(value: string | null | undefined): number | null
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Exact ordering for decimal strings — **never** via `Number()`.
+ *
+ * TEXT columns sort lexicographically in SQL, so `'9.0000' > '10.0000'`. Any query that needs
+ * numeric order must sort with this comparator instead. Both operands are scaled to a common
+ * fraction length and compared as BigInt, so precision is never lost and differing scales
+ * (`"1.5"` vs `"1.5000"`) compare equal.
+ */
+export function compareDecimalStrings(a: string, b: string): -1 | 0 | 1 {
+  assertDecimalString(a, "a");
+  assertDecimalString(b, "b");
+
+  const split = (value: string) => {
+    const negative = value.startsWith("-");
+    const body = negative ? value.slice(1) : value;
+    const dot = body.indexOf(".");
+    const intPart = dot === -1 ? body : body.slice(0, dot);
+    const fracPart = dot === -1 ? "" : body.slice(dot + 1);
+    return { negative, intPart, fracPart, unscaled: BigInt(intPart + fracPart) };
+  };
+
+  const left = split(a);
+  const right = split(b);
+  const scale = Math.max(left.fracPart.length, right.fracPart.length);
+  const leftValue = left.unscaled * 10n ** BigInt(scale - left.fracPart.length);
+  const rightValue = right.unscaled * 10n ** BigInt(scale - right.fracPart.length);
+  const signedLeft = left.negative ? -leftValue : leftValue;
+  const signedRight = right.negative ? -rightValue : rightValue;
+
+  if (signedLeft < signedRight) return -1;
+  if (signedLeft > signedRight) return 1;
+  return 0;
+}
+
+/**
+ * `compareDecimalStrings` with NULL handling that matches both MySQL and SQLite: NULL sorts
+ * before every value, so it comes first in `ASC` and last in `DESC`.
+ */
+export function compareNullableDecimalStrings(
+  a: string | null | undefined,
+  b: string | null | undefined
+): -1 | 0 | 1 {
+  const leftNull = a === null || a === undefined;
+  const rightNull = b === null || b === undefined;
+  if (leftNull && rightNull) return 0;
+  if (leftNull) return -1;
+  if (rightNull) return 1;
+  return compareDecimalStrings(a as string, b as string);
+}
+
+export type SortDirection = "asc" | "desc";
+
+export interface SortKey {
+  /** Column to read from each row. */
+  column: string;
+  direction?: SortDirection;
+  /**
+   * `"decimal"` compares exactly via `compareDecimalStrings`; `"text"` uses `<`/`>`.
+   * Default `"text"`.
+   */
+  kind?: "text" | "decimal";
+}
+
+export interface DecimalSortKey {
+  column: string;
+  direction?: SortDirection;
+}
+
+function compareText(a: unknown, b: unknown): -1 | 0 | 1 {
+  const left = a === null || a === undefined ? null : String(a);
+  const right = b === null || b === undefined ? null : String(b);
+  // NULL is the smallest value, matching MySQL and SQLite ORDER BY.
+  if (left === null && right === null) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+/**
+ * Sort rows in memory by an ordered list of keys, applying the first key as the most
+ * significant. Decimal keys compare exactly (never through `Number()`); text keys compare as
+ * strings. This is what replaces SQL `ORDER BY` on a DECIMAL column.
+ *
+ * Rows are copied, not mutated. `Array.prototype.sort` is stable, so rows equal on every key
+ * keep the caller's order — give the caller a deterministic row order (an `ORDER BY` on
+ * non-decimal columns) so ties stay reproducible. No implicit tie-break key is invented.
+ */
+export function sortRows<T extends Record<string, any>>(rows: readonly T[], keys: readonly SortKey[]): T[] {
+  if (keys.length === 0) throw new TypeError("sortRows requires at least one key");
+  const sorted = [...rows];
+  sorted.sort((left, right) => {
+    for (const key of keys) {
+      const direction = key.direction ?? "asc";
+      const cmp =
+        key.kind === "decimal"
+          ? compareNullableDecimalStrings(left[key.column], right[key.column])
+          : compareText(left[key.column], right[key.column]);
+      if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
+    }
+    return 0;
+  });
+  return sorted;
+}
+
+/** Convenience wrapper for the common case where every sort key is a decimal column. */
+export function sortByDecimalKeys<T extends Record<string, any>>(
+  rows: readonly T[],
+  keys: readonly DecimalSortKey[]
+): T[] {
+  if (keys.length === 0) throw new TypeError("sortByDecimalKeys requires at least one key");
+  return sortRows(
+    rows,
+    keys.map((key) => ({ column: key.column, direction: key.direction, kind: "decimal" as const }))
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // 2. DATETIME — UTC timestamps and date-only values
 // ---------------------------------------------------------------------------------------------
