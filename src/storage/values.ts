@@ -212,13 +212,41 @@ export interface DecimalSortKey {
   direction?: SortDirection;
 }
 
+const DATE_ONLY_PREFIX_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Render a value as a chronological `YYYY-MM-DD HH:MM:SS` string. */
+function toComparableTimestamp(value: Date | string): string {
+  if (value instanceof Date) {
+    return (
+      `${pad(value.getUTCFullYear(), 4)}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())} ` +
+      `${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}:${pad(value.getUTCSeconds())}`
+    );
+  }
+  const text = String(value);
+  return DATE_ONLY_PREFIX_RE.test(text) ? `${text} 00:00:00` : text;
+}
+
 function compareText(a: unknown, b: unknown): -1 | 0 | 1 {
-  const left = a === null || a === undefined ? null : String(a);
-  const right = b === null || b === undefined ? null : String(b);
+  const leftNull = a === null || a === undefined;
+  const rightNull = b === null || b === undefined;
   // NULL is the smallest value, matching MySQL and SQLite ORDER BY.
-  if (left === null && right === null) return 0;
-  if (left === null) return -1;
-  if (right === null) return 1;
+  if (leftNull && rightNull) return 0;
+  if (leftNull) return -1;
+  if (rightNull) return 1;
+
+  // mysql2 hands DATE/DATETIME back as Date objects while SQLite hands back stored text. When
+  // either side is a Date, compare canonical timestamps so both representations agree and
+  // `String(date)` ("Tue Jun 30 2026 ...") never leaks into the comparison.
+  if (a instanceof Date || b instanceof Date) {
+    const left = toComparableTimestamp(a instanceof Date ? a : String(a));
+    const right = toComparableTimestamp(b instanceof Date ? b : String(b));
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  }
+
+  const left = String(a);
+  const right = String(b);
   if (left < right) return -1;
   if (left > right) return 1;
   return 0;
@@ -399,6 +427,20 @@ export function utcToUpstream(utcTimestamp: string, offsetMinutes: number, conte
     throw new TypeError(`${context}: offsetMinutes must be a finite number; received ${describeValue(offsetMinutes)}`);
   }
   return formatUtc(new Date(ms + offsetMinutes * 60_000));
+}
+
+/**
+ * UTC calendar date `days` before `from` (default: now), as `YYYY-MM-DD`.
+ *
+ * Replaces SQL `CURDATE()` / `DATE_SUB(CURDATE(), INTERVAL n DAY)` with a bound parameter so the
+ * same statement runs on both backends. The old functions used the MySQL session time zone; this
+ * is explicitly UTC, which matches the storage contract in §3.4.
+ */
+export function utcDateOnlyDaysAgo(days: number, from: Date = new Date()): string {
+  if (!Number.isInteger(days)) throw new TypeError(`days must be an integer; received ${describeValue(days)}`);
+  const base = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  base.setUTCDate(base.getUTCDate() - days);
+  return formatUtcDate(base);
 }
 
 // ---------------------------------------------------------------------------------------------

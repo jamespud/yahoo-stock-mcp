@@ -358,7 +358,8 @@ which rows would now be distinct that MySQL treated as one.
 | C1 (landed) | `src/storage/{database,migrations}.ts`, `db/sqlite/migrations/0001_initial.sql`, `db:init --sqlite`, `scripts/test-sqlite-bootstrap.ts` | see §7 |
 | C2 (landed) | `src/storage/values.ts` + `scripts/test-sqlite-values.ts`: decimal / datetime / BigInt / binding contracts | exact round-trips; no accidental float; host-time-zone independent |
 | C3 (landed) | `src/storage/upsert.ts` + `scripts/test-sqlite-upsert.ts`: SQLite UPSERT generation sharing the pure priority rule | §4 truth table green; oracle equivalence exhaustive |
-| C4 (landed) | `query.service.ts` decimal ordering via `src/storage/values.ts`; `scripts/test-sqlite-read.ts` | exact ordering; MySQL differential 10/11 byte-identical, row sets equal |
+| C4a (landed) | `query.service.ts` decimal ordering via `src/storage/values.ts`; `scripts/test-sqlite-read.ts` | exact ordering; MySQL differential 10/11 byte-identical, row sets equal |
+| C4b (landed) | `src/storage/read-bridge.ts` (temporary), `db/sqlite/fixtures/read-path.sql`, `scripts/test-read-bridge.ts` | all 26 read functions run on SQLite; MySQL differential 25/26 byte-identical, 1 tie-order-only, 0 row-set differences |
 | C5 | Write path migration (`sync.service.ts`) | sync → idempotent re-sync → restart → re-sync |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
@@ -399,6 +400,68 @@ Still outstanding before the read path can be declared SQLite-complete:
 - capture a MySQL row-level baseline and assert the SQLite read layer returns the same shapes
   (DECIMAL as string, DATE as `YYYY-MM-DD`, integers as numbers unless they exceed 2^53);
 - confirm `ROW_NUMBER() OVER (...)` and the remaining read SQL parse on SQLite.
+
+### 6.3 C4b: temporary read bridge
+
+`query.service.ts` now reads through `src/storage/read-bridge.ts`. The bridge is deliberately
+minimal — a single `query(sql, params)` that dispatches to the existing MySQL pool (default) or,
+when `YAHOO_STOCK_MCP_READ_BACKEND=sqlite` is set for a test, to `node:sqlite`. It translates no
+SQL: statements that were not valid on both backends were rewritten at the call site
+(`CURDATE()` → `utcDateOnlyDaysAgo(0)`, `DATE_SUB(CURDATE(), INTERVAL 45 DAY)` →
+`utcDateOnlyDaysAgo(45)`).
+
+The SQLite branch reproduces what mysql2 hands the MCP layer: DATE/DATETIME columns become
+`Date` (interpreted as UTC, matching `timezone: "Z"`), INTEGER columns are read with
+`setReadBigInts` and narrowed by `integerOut` (safe values stay numbers, oversized ones become
+exact decimal strings), and DECIMAL stays TEXT. `node:sqlite` is imported lazily, so Node 20 and
+the default MySQL path never load it.
+
+#### Validation (C4b)
+
+`scripts/test-read-bridge.ts` runs standalone — no MySQL server. It builds a SQLite database from
+the canonical schema plus `db/sqlite/fixtures/read-path.sql` (668 rows captured from the live
+MySQL terminal state), switches the bridge to SQLite, and executes all 26 read functions covering
+all 29 `await query` call sites. It asserts row shapes, DECIMAL-as-string, DATE-as-`Date` (and the
+read path's own `YYYY-MM-DD` normalization), integers, NULLs, JSON serializability, and that the
+C4a exact ordering still holds.
+
+A development-time differential then loaded the *same fixture* into a throwaway MySQL database
+and compared all 26 functions against the SQLite run:
+
+| Result | Count |
+| --- | --- |
+| byte-identical output | 25 / 26 |
+| same rows, tie order only | 1 (`getInsiderTransactions`) |
+| row set differs | 0 |
+
+**Known tie-order differences (accepted).** `getOptions` (from C4a) at equal
+`(expiration, strike)`, and `getInsiderTransactions` at equal `transaction_date` (20 rows, 9
+sharing `2026-06-25`). Both original statements ordered by a non-unique key with no tie-break, so
+MySQL's order — and, with a `LIMIT`, which of the tied rows survive — was never guaranteed. The
+row *sets* are equal in both cases; only an order MySQL did not define changed. A follow-up
+should give any `ORDER BY … LIMIT` on a non-unique key an explicit tie-break.
+
+#### Two typing differences worth carrying into C6
+
+- **Malformed date parameters fail loudly on MySQL but silently on SQLite.** Passing a bad `from`
+  value produced `Incorrect DATETIME value: '60 00:00:00'` on MySQL, while SQLite compared the
+  string, matched nothing and returned an empty list. SQLite's dynamic typing will not catch type
+  errors the old backend caught; the C2 binding contract has to do that job at the boundary.
+- **`DEFAULT_GENERATED` is not a generated column.** While building the fixture, filtering
+  MySQL's `EXTRA LIKE '%GENERATED%'` also dropped every `DEFAULT CURRENT_TIMESTAMP` /
+  `ON UPDATE CURRENT_TIMESTAMP` column. Only `STORED GENERATED` / `VIRTUAL GENERATED` may be
+  excluded from an insert.
+
+#### C6 must delete this
+
+`src/storage/read-bridge.ts`, the `YAHOO_STOCK_MCP_READ_BACKEND` switch, and its MySQL branch are
+temporary. C6 must:
+
+1. delete `read-bridge.ts` and point `query.service.ts` at the SQLite storage layer directly;
+2. remove the `YAHOO_STOCK_MCP_READ_BACKEND` switch entirely;
+3. migrate the database tests (`scripts/test-db.ts`, `scripts/test-db-isolated.ts`) off MySQL —
+   `db/sqlite/fixtures/read-path.sql` already supplies the data they need;
+4. confirm no MySQL dependency remains in the read path.
 
 ## 7. C1 acceptance criteria
 

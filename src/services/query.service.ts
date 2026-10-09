@@ -1,7 +1,9 @@
-import { query } from "../db.js";
+// Reads go through the temporary read bridge so this module can run against SQLite in tests.
+// The bridge defaults to MySQL; see src/storage/read-bridge.ts (deleted in C6).
+import { query } from "../storage/read-bridge.js";
 import { config } from "../config.js";
 import { canonicalizeStoredRatioRows } from "../providers/ratios.js";
-import { sortByDecimalKeys, sortRows } from "../storage/values.js";
+import { sortByDecimalKeys, sortRows, utcDateOnlyDaysAgo } from "../storage/values.js";
 
 function rows<T = any>(r: T): T {
   return r;
@@ -411,9 +413,9 @@ export async function getCompanyEvents(symbol: string, limit = 20) {
   if (!inst) return null;
   const rows = await query<any[]>(
     `SELECT event_type, event_date, details, source FROM company_events
-     WHERE instrument_id = ? AND event_date >= CURDATE()
+     WHERE instrument_id = ? AND event_date >= ?
      ORDER BY event_date ASC LIMIT ${Math.max(1, Math.min(limit, 100))}`,
-    [inst.id]
+    [inst.id, utcDateOnlyDaysAgo(0)]
   );
   return { symbol: inst.symbol, events: rows };
 }
@@ -554,8 +556,9 @@ export async function getSectorPerformance() {
        d.trade_date, d.close, d.volume
      FROM sectors s
      JOIN daily_bars d ON d.instrument_id = s.instrument_id AND d.source = 'yahoo'
-     WHERE d.trade_date >= DATE_SUB(CURDATE(), INTERVAL 45 DAY)
-     ORDER BY s.sector_code, d.trade_date`
+     WHERE d.trade_date >= ?
+     ORDER BY s.sector_code, d.trade_date`,
+    [utcDateOnlyDaysAgo(45)]
   );
   const bySector = new Map<string, any[]>();
   for (const r of rows) {
