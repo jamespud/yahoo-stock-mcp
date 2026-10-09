@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { query, replaceBatch, runBatch } from "../db.js";
 import { fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
 import { needsInvestingIdentity, priorityMergeUpdate, priorityUpdate, type Provider } from "../providers/priority.js";
+import { storageBackend } from "../storage/backend.js";
 import { canonicalizeRatioValue } from "../providers/ratios.js";
 import {
   extractCalendarEvents,
@@ -745,6 +746,7 @@ export async function syncOne(
   components: Record<string, SyncComponentResult>;
   warnings: string[];
 }> {
+  assertSyncBackendSupported("sync --symbol");
   const instrument = await ensureInstrument(symbol);
   const today = new Date().toISOString().slice(0, 10);
   const warnings: string[] = [];
@@ -1012,9 +1014,27 @@ export interface BatchSyncResult {
   results: BatchSyncItemResult[];
 }
 
+
+/**
+ * Guard: the sync write path is still being migrated to SQLite (C5b-1).
+ *
+ * Until every write statement below runs on SQLite, a SQLite run would complete some operations
+ * and fail on MySQL-only SQL for others. Refuse the whole operation rather than leave a
+ * partially-synced database.
+ */
+function assertSyncBackendSupported(operation: string): void {
+  if (storageBackend() === "sqlite") {
+    throw new Error(
+      `${operation} is not available on the SQLite backend yet: the sync write path is still ` +
+        `being migrated (C5b-1). Use the default MySQL backend until that lands.`
+    );
+  }
+}
+
 export async function syncAll(
   opts: { full: boolean; intraday?: IntradayInterval | null }
 ): Promise<BatchSyncResult> {
+  assertSyncBackendSupported("sync --all");
   const rows = await query<Array<{ symbol: string }>>("SELECT symbol FROM instruments ORDER BY symbol");
   const results: BatchSyncItemResult[] = [];
 
@@ -1146,6 +1166,7 @@ async function syncSectorEtf(
 }
 
 export async function syncSectors(opts: { members?: boolean } = {}): Promise<SectorBatchSyncResult> {
+  assertSyncBackendSupported("sync --sectors");
   const rows = await query<SectorRow[]>(
     "SELECT sector_code, name, etf_symbol, is_benchmark, instrument_id FROM sectors ORDER BY is_benchmark, sector_code"
   );

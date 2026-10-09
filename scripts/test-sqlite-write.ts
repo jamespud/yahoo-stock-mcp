@@ -180,6 +180,17 @@ await check("write path composes with the C3 priority UPSERT generator", async (
   assert.deepEqual({ value: row.value, source: row.source }, { value: "10.000000", source: "yahoo" });
 });
 
+await check("sync refuses to run on SQLite until C5b-1 lands (no partial migration)", async () => {
+  const { syncOne, syncAll, syncSectors } = await import("../src/services/sync.service.js");
+  for (const [label, run] of [
+    ["syncOne", () => syncOne("NVDA")],
+    ["syncAll", () => syncAll({})],
+    ["syncSectors", () => syncSectors()],
+  ] as Array<[string, () => Promise<unknown>]>) {
+    await assert.rejects(run(), /not available on the SQLite backend yet/, `${label} must refuse on SQLite`);
+  }
+});
+
 await check("the SQLite transaction helper is synchronous by contract", async () => {
   const db = await sqliteDatabase();
   const result = withSqliteTransaction(db, () => 42);
