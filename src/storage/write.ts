@@ -9,89 +9,20 @@
  * open write transaction holds the database write lock. Network fetches and data shaping stay
  * outside these functions.
  */
-import { runBatch as mysqlRunBatch, replaceBatch as mysqlReplaceBatch, query as mysqlQuery } from "../db.js";
-import { closeStorageBackend, sqliteDatabase, storageBackend, withSqliteTransaction } from "./backend.js";
+import { sqliteDatabase, withSqliteTransaction } from "./sqlite.js";
 import { quantizeBindings, type DecimalBinding } from "./quantize.js";
 import { toSqliteParams } from "./values.js";
 
-export interface WriteStatement {
+/**
+ * One SQLite statement plus the parameters it binds.
+ *
+ * `decimals` names the parameters that must be quantized before binding; everything else is bound
+ * as-is.
+ */
+export interface Statement {
   sql: string;
   params: unknown[];
   /** Decimal parameters to quantize before binding. */
-  decimals?: readonly DecimalBinding[];
-}
-
-function bind(statement: WriteStatement): unknown[] {
-  const params = statement.decimals?.length
-    ? quantizeBindings(statement.params, statement.decimals)
-    : statement.params;
-  return toSqliteParams(params, "write");
-}
-
-/** Execute one statement. Resolves when the write is committed. */
-export async function execute(statement: WriteStatement): Promise<void> {
-  if (storageBackend() === "mysql") {
-    await mysqlQuery(statement.sql, statement.params as any[]);
-    return;
-  }
-  const db = await sqliteDatabase();
-  db.prepare(statement.sql).run(...bind(statement));
-}
-
-/** Execute several statements in one transaction; all of them land, or none do. */
-export async function executeBatch(statements: readonly WriteStatement[]): Promise<void> {
-  if (statements.length === 0) return;
-  if (storageBackend() === "mysql") {
-    await mysqlRunBatch(statements.map((s) => [s.sql, s.params as any[]]));
-    return;
-  }
-  const db = await sqliteDatabase();
-  withSqliteTransaction(db, () => {
-    for (const statement of statements) {
-      db.prepare(statement.sql).run(...bind(statement));
-    }
-  });
-}
-
-/** Replace a snapshot: delete, then insert the replacement, atomically. */
-export async function replaceBatch(
-  deleteStatement: WriteStatement,
-  insertStatements: readonly WriteStatement[]
-): Promise<void> {
-  if (storageBackend() === "mysql") {
-    await mysqlReplaceBatch(
-      [deleteStatement.sql, deleteStatement.params as any[]],
-      insertStatements.map((s) => [s.sql, s.params as any[]])
-    );
-    return;
-  }
-  const db = await sqliteDatabase();
-  withSqliteTransaction(db, () => {
-    db.prepare(deleteStatement.sql).run(...bind(deleteStatement));
-    for (const statement of insertStatements) {
-      db.prepare(statement.sql).run(...bind(statement));
-    }
-  });
-}
-
-/**
- * TEMPORARY migration scaffold (deleted in C6): one logical statement carrying both backends' SQL.
- *
- * This is **not** a dialect translator — there is no rewriting, no shared grammar, and no attempt
- * to make one SQL string serve both engines. Each form is written out explicitly and is only
- * selected by `YAHOO_STOCK_MCP_STORAGE_BACKEND`. The MySQL form is the original v0.4.0 SQL and is
- * kept solely so the MySQL suite stays green until C6 removes it.
- *
- * Both forms must take the same parameters, which `assertDualParity` enforces before execution —
- * a botched conversion (a lost or duplicated `?`) fails loudly instead of binding the wrong values.
- */
-export interface DualStatement {
-  /** Original MySQL SQL. */
-  mysql: string;
-  /** SQLite SQL executed by `node:sqlite`. */
-  sqlite: string;
-  params: unknown[];
-  /** Decimal parameters to quantize before binding (SQLite path only). */
   decimals?: readonly DecimalBinding[];
 }
 
@@ -100,88 +31,59 @@ function placeholders(sql: string): number {
 }
 
 /**
- * Verify both SQL forms expose the same number of placeholders and that the caller supplied
- * exactly that many parameters. Catches a statement that was converted but not re-checked.
+ * Verify the statement exposes as many placeholders as the caller supplied parameters. A lost or
+ * duplicated `?` fails loudly instead of binding the wrong values.
  */
-export function assertDualParity(statement: DualStatement, context = "statement"): void {
-  const mysqlCount = placeholders(statement.mysql);
-  const sqliteCount = placeholders(statement.sqlite);
-  if (mysqlCount !== sqliteCount) {
-    throw new Error(
-      `${context}: placeholder count differs between backends (${mysqlCount} mysql vs ${sqliteCount} sqlite)`
-    );
-  }
-  if (mysqlCount !== statement.params.length) {
-    throw new Error(`${context}: ${statement.params.length} parameter(s) for ${mysqlCount} placeholder(s)`);
+export function assertStatementArity(statement: Statement, context = "statement"): void {
+  const expected = placeholders(statement.sql);
+  if (expected !== statement.params.length) {
+    throw new Error(`${context}: ${statement.params.length} parameter(s) for ${expected} placeholder(s)`);
   }
 }
 
-/** Execute one dual-form statement on the active backend. */
-export async function executeEither(statement: DualStatement, context = "statement"): Promise<void> {
-  assertDualParity(statement, context);
-  if (storageBackend() === "mysql") {
-    await mysqlQuery(statement.mysql, statement.params as any[]);
-    return;
-  }
+/** `col = excluded.col` for a plain upsert. */
+export function upsertUpdates(columns: readonly string[]): string {
+  return columns.map((c) => `${c} = excluded.${c}`).join(", ");
+}
+
+/** Execute one statement. */
+export async function execute(statement: Statement, context = "statement"): Promise<void> {
+  assertStatementArity(statement, context);
   const db = await sqliteDatabase();
   const params = statement.decimals?.length ? quantizeBindings(statement.params, statement.decimals) : statement.params;
-  db.prepare(statement.sqlite).run(...toSqliteParams(params, context));
+  db.prepare(statement.sql).run(...toSqliteParams(params, context));
 }
 
-/** Execute several dual-form statements in one transaction on the active backend. */
-export async function batchEither(statements: readonly DualStatement[], context = "batch"): Promise<void> {
+/** Execute several statements in one transaction; all of them land, or none do. */
+export async function executeBatch(statements: readonly Statement[], context = "batch"): Promise<void> {
   if (statements.length === 0) return;
-  statements.forEach((s, i) => assertDualParity(s, `${context}[${i}]`));
-  if (storageBackend() === "mysql") {
-    await mysqlRunBatch(statements.map((s) => [s.mysql, s.params as any[]]));
-    return;
-  }
+  statements.forEach((s, i) => assertStatementArity(s, `${context}[${i}]`));
   const db = await sqliteDatabase();
   withSqliteTransaction(db, () => {
     for (const statement of statements) {
       const params = statement.decimals?.length ? quantizeBindings(statement.params, statement.decimals) : statement.params;
-      db.prepare(statement.sqlite).run(...toSqliteParams(params, context));
+      db.prepare(statement.sql).run(...toSqliteParams(params, context));
     }
   });
 }
 
-/** Replace a snapshot (delete + inserts) atomically on the active backend. */
-export async function replaceEither(
-  deleteStatement: DualStatement,
-  insertStatements: readonly DualStatement[],
+/** Replace a snapshot (delete + inserts) atomically. */
+export async function replaceBatch(
+  deleteStatement: Statement,
+  insertStatements: readonly Statement[],
   context = "replace"
 ): Promise<void> {
-  assertDualParity(deleteStatement, `${context}.delete`);
-  insertStatements.forEach((s, i) => assertDualParity(s, `${context}.insert[${i}]`));
-  if (storageBackend() === "mysql") {
-    await mysqlReplaceBatch(
-      [deleteStatement.mysql, deleteStatement.params as any[]],
-      insertStatements.map((s) => [s.mysql, s.params as any[]])
-    );
-    return;
-  }
+  assertStatementArity(deleteStatement, `${context}.delete`);
+  insertStatements.forEach((s, i) => assertStatementArity(s, `${context}.insert[${i}]`));
   const db = await sqliteDatabase();
   withSqliteTransaction(db, () => {
-    db.prepare(deleteStatement.sqlite).run(...toSqliteParams(deleteStatement.params, context));
+    db.prepare(deleteStatement.sql).run(...toSqliteParams(deleteStatement.params, context));
     for (const statement of insertStatements) {
       const params = statement.decimals?.length ? quantizeBindings(statement.params, statement.decimals) : statement.params;
-      db.prepare(statement.sqlite).run(...toSqliteParams(params, context));
+      db.prepare(statement.sql).run(...toSqliteParams(params, context));
     }
   });
 }
 
-/**
- * Update lists for a plain upsert, in both dialects.
- *
- * `col = VALUES(col)` (MySQL) and `col = excluded.col` (SQLite) say exactly the same thing, so the
- * two lists are formatted from one column list rather than hand-duplicated. This is formatting, not
- * dialect translation: it handles one shape, and every other statement writes both forms out.
- */
-export function plainUpsertUpdates(columns: readonly string[]): { mysql: string; sqlite: string } {
-  return {
-    mysql: columns.map((c) => `${c} = VALUES(${c})`).join(", "),
-    sqlite: columns.map((c) => `${c} = excluded.${c}`).join(", "),
-  };
-}
+/** `col = excluded.col` for a plain upsert. */
 
-export { closeStorageBackend };

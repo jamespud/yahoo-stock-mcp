@@ -24,7 +24,6 @@ const INVESTING = JSON.parse(readFileSync(resolve(root, "scripts/fixtures/invest
 
 // ---- environment: SQLite only, offline, MySQL blocked -----------------------
 process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND = "sqlite";
-process.env.YAHOO_STOCK_MCP_DATABASE_URL = "mysql://nobody:nobody@127.0.0.1:1/nope";
 delete process.env.YAHOO_STOCK_MCP_PROXY_URL;
 process.env.YAHOO_STOCK_MCP_REQUEST_DELAY_MS = "0";
 process.env.YAHOO_STOCK_MCP_PRIMARY_PROVIDER = "yahoo";
@@ -126,7 +125,7 @@ if (process.argv.includes("--restart-child")) {
   json(p1, (p) => p.startsWith("/ws/fundamentals-timeseries/"), FIXTURE.fundamentals);
 
   const svc = await import("../src/services/sync.service.js");
-  const { closeStorageBackend } = await import("../src/storage/backend.js");
+  const { closeStorageBackend } = await import("../src/storage/sqlite.js");
   const result = await svc.syncOne("FIX", { full: false });
   closeStorageBackend();
 
@@ -158,7 +157,7 @@ async function check(name: string, fn: () => Promise<void> | void): Promise<void
 const dbPath = freshDb("main");
 process.env.YAHOO_STOCK_MCP_SQLITE_PATH = dbPath;
 const svc = await import("../src/services/sync.service.js");
-const { closeStorageBackend, sqliteDatabase } = await import("../src/storage/backend.js");
+const { closeStorageBackend, sqliteDatabase } = await import("../src/storage/sqlite.js");
 const { runWithInvestingRequestHandler } = await import("../src/providers/investing.js");
 
 await check("1. syncOne --full writes the fixture data into the target tables", async () => {
@@ -291,7 +290,6 @@ await check("8. a NEW process reopens the database and continues incrementally",
         ...process.env,
         YAHOO_STOCK_MCP_SQLITE_PATH: dbPath,
         YAHOO_STOCK_MCP_STORAGE_BACKEND: "sqlite",
-        YAHOO_STOCK_MCP_DATABASE_URL: "mysql://nobody:nobody@127.0.0.1:1/nope",
       },
     }
   );

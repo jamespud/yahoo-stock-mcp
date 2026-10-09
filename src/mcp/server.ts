@@ -6,7 +6,7 @@ import { fetchYahooOptionChain } from "../providers/yahoo.js";
 import * as q from "../services/query.service.js";
 import { listIndicatorMeta } from "../indicators/registry.js";
 import { getIndicators } from "../services/indicator.service.js";
-import { closeDb } from "../db.js";
+import { closeStorageBackend } from "../storage/sqlite.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../package-meta.js";
 import { isValidIsoDate, isoDateToUnixSeconds } from "../validation.js";
 
@@ -463,18 +463,18 @@ export async function startMcpServer(): Promise<void> {
   // wire stdin 'end'/'close' to onclose, so the open MySQL pool would
   // otherwise keep the process alive and Close() would hang.
   const shutdown = async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   };
   process.stdin.on("end", shutdown);
   process.stdin.on("close", shutdown);
   await server.connect(transport);
   process.on("SIGINT", async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   });
   process.on("SIGTERM", async () => {
-    await closeDb();
+    closeStorageBackend();
     process.exit(0);
   });
 }

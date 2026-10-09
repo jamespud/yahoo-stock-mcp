@@ -1,8 +1,8 @@
 /**
  * C5b-1a targeted tests for the migrated market/financial/holdings/analyst writes.
  *
- * `assertDualParity` only proves the two SQL forms have the same *number* of placeholders — not
- * that a parameter sits in the right column. These tests bind sentinel values and then read the
+ * `assertStatementArity` only proves a statement has as many placeholders as it has parameters —
+ * not that a parameter sits in the right column. These tests bind sentinel values and then read the
  * row back, so a column/parameter misalignment or a wrong DECIMAL binding index fails loudly.
  */
 import assert from "node:assert/strict";
@@ -12,9 +12,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "../src/storage/database.js";
 import { applySqliteMigrations } from "../src/storage/migrations.js";
-import { closeStorageBackend, sqliteDatabase } from "../src/storage/backend.js";
+import { closeStorageBackend, sqliteDatabase } from "../src/storage/sqlite.js";
 import { quantizeBindings, quantizeForColumn } from "../src/storage/quantize.js";
-import { assertDualParity, plainUpsertUpdates, type DualStatement } from "../src/storage/write.js";
+import { assertStatementArity, upsertUpdates, type Statement } from "../src/storage/write.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tmp = mkdtempSync(resolve(tmpdir(), "yahoo-stock-mcp-syncwrites-"));
@@ -39,13 +39,13 @@ async function check(name: string, fn: () => Promise<void> | void): Promise<void
 
 const db = await sqliteDatabase();
 
-/** Run a dual statement through its SQLite form with quantization applied, like the write layer. */
-function runSqlite(statement: DualStatement): void {
-  assertDualParity(statement, "test");
+/** Run a statement with quantization applied, exactly like the write layer does. */
+function runSqlite(statement: Statement): void {
+  assertStatementArity(statement, "test");
   const params = statement.decimals?.length
     ? quantizeBindings(statement.params, statement.decimals)
     : statement.params;
-  db.prepare(statement.sqlite).run(...(params as any[]));
+  db.prepare(statement.sql).run(...(params as any[]));
 }
 
 await check("provider-outlet adapter: exact strings pass through, finite numbers convert, junk throws", () => {
@@ -62,28 +62,27 @@ await check("provider-outlet adapter: exact strings pass through, finite numbers
   assert.equal(quantizeForColumn("news_articles", "title", 42), 42);
 });
 
-await check("dual parity rejects a placeholder count mismatch", () => {
+await check("statement arity rejects a parameter/placeholder mismatch", () => {
   assert.throws(
-    () => assertDualParity({ mysql: "INSERT INTO t (a) VALUES (?)", sqlite: "INSERT INTO t (a) VALUES (?, ?)", params: ["x"] }),
-    /placeholder count differs/
+    () => assertStatementArity({ sql: "INSERT INTO t (a,b) VALUES (?,?)", params: ["x"] }),
+    /1 parameter\(s\) for 2 placeholder\(s\)/
   );
   assert.throws(
-    () => assertDualParity({ mysql: "INSERT INTO t (a,b) VALUES (?,?)", sqlite: "INSERT INTO t (a,b) VALUES (?,?)", params: ["x"] }),
-    /1 parameter\(s\) for 2 placeholder\(s\)/
+    () => assertStatementArity({ sql: "INSERT INTO t (a) VALUES (?)", params: ["x", "y"] }),
+    /2 parameter\(s\) for 1 placeholder\(s\)/
+  );
+  assert.doesNotThrow(() =>
+    assertStatementArity({ sql: "INSERT INTO t (a,b) VALUES (?,?)", params: ["x", "y"] })
   );
 });
 
-await check("plainUpsertUpdates emits the same columns in both dialects", () => {
-  const { mysql, sqlite } = plainUpsertUpdates(["open", "close"]);
-  assert.equal(mysql, "open = VALUES(open), close = VALUES(close)");
-  assert.equal(sqlite, "open = excluded.open, close = excluded.close");
-  assert.deepEqual(mysql.match(/[a-z_]+(?= =)/g), sqlite.match(/[a-z_]+(?= =)/g));
+await check("upsertUpdates emits the SQLite assignment list", () => {
+  assert.equal(upsertUpdates(["open", "close"]), "open = excluded.open, close = excluded.close");
 });
 
 await check("ratios: the DECIMAL binding index points at `value`, not a neighbouring column", () => {
   runSqlite({
-    mysql: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-    sqlite: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET value = excluded.value",
+    sql: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET value = excluded.value",
     params: [1, "pe", "2026-01-02", "1.2345678", "yahoo"],
     decimals: [{ index: 3, column: "ratios.value" }],
   });
@@ -96,8 +95,7 @@ await check("ratios: the DECIMAL binding index points at `value`, not a neighbou
 
 await check("daily_bars: all five DECIMAL bindings land on their own columns", () => {
   runSqlite({
-    mysql: "INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE open = VALUES(open)",
-    sqlite: "INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET open = excluded.open",
+    sql: "INSERT INTO daily_bars (instrument_id, trade_date, open, high, low, close, adj_close, volume, source) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET open = excluded.open",
     params: [2, "2026-01-02", "1.00001", "2.00002", "3.00003", "4.00004", "5.00005", 100, "yahoo"],
     decimals: [
       { index: 2, column: "daily_bars.open" },
@@ -132,9 +130,8 @@ await check("a wrong binding index would be caught (guards the guard)", () => {
 });
 
 await check("ON CONFLICT targets the business key: a second row with the same key updates, never duplicates", () => {
-  const stmt = (value: string): DualStatement => ({
-    mysql: "INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-    sqlite: "INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (instrument_id, statement_type, period_type, period_end, field_name) DO UPDATE SET value = excluded.value",
+  const stmt = (value: string): Statement => ({
+    sql: "INSERT INTO financial_statements (instrument_id, statement_type, period_type, period_end, field_name, value, currency, source) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (instrument_id, statement_type, period_type, period_end, field_name) DO UPDATE SET value = excluded.value",
     params: [4, "INCOME", "ANNUAL", "2025-12-31", "revenue", value, "USD", "yahoo"],
     decimals: [{ index: 5, column: "financial_statements.value" }],
   });
@@ -147,8 +144,7 @@ await check("ON CONFLICT targets the business key: a second row with the same ke
 
 await check("a NULL decimal stays NULL through the binding", () => {
   runSqlite({
-    mysql: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-    sqlite: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?,?,?,?,?) ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET value = excluded.value",
+    sql: "INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?,?,?,?,?) ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET value = excluded.value",
     params: [5, "pe", "2026-01-02", null, "yahoo"],
     decimals: [{ index: 3, column: "ratios.value" }],
   });

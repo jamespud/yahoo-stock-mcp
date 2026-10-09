@@ -1,17 +1,10 @@
 import { config } from "../config.js";
 // Reads and writes both go through the unified backend: the SQLite path performs no MySQL I/O.
-import { query } from "../storage/read-bridge.js";
-import {
-  batchEither,
-  executeEither,
-  plainUpsertUpdates,
-  replaceEither,
-  type DualStatement,
-} from "../storage/write.js";
+import { query } from "../storage/sqlite.js";
+import { execute, executeBatch, replaceBatch, upsertUpdates, type Statement } from "../storage/write.js";
 import { priorityMergeClause, priorityReplaceClause } from "../storage/upsert.js";
 import { fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
-import { needsInvestingIdentity, priorityMergeUpdate, priorityUpdate, type Provider } from "../providers/priority.js";
-import { storageBackend } from "../storage/backend.js";
+import { needsInvestingIdentity, type Provider } from "../providers/priority.js";
 import { canonicalizeRatioValue } from "../providers/ratios.js";
 import {
   extractCalendarEvents,
@@ -153,15 +146,9 @@ export async function persistSyncState(
     if (status === "success") {
       const stateColumns =
         "instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error";
-      await executeEither(
+      await execute(
         {
-          mysql:
-            `INSERT INTO sync_state (${stateColumns})` +
-            ` VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)` +
-            ` ON DUPLICATE KEY UPDATE` +
-            ` full_synced = 1, last_full_sync_at = NOW(), last_bar_date = VALUES(last_bar_date),` +
-            ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
-          sqlite:
+          sql:
             `INSERT INTO sync_state (${stateColumns})` +
             ` VALUES (?, 1, CURRENT_TIMESTAMP, NULL, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
             ` ON CONFLICT (instrument_id) DO UPDATE SET` +
@@ -175,14 +162,9 @@ export async function persistSyncState(
       return;
     }
 
-    await executeEither(
+    await execute(
       {
-        mysql:
-          `INSERT INTO sync_state (${stateColumns})` +
-          ` VALUES (?, 0, NULL, NULL, ?, IF(?, NOW(), NULL), ?, ?)` +
-          ` ON DUPLICATE KEY UPDATE last_bar_date = VALUES(last_bar_date),` +
-          ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
-        sqlite:
+        sql:
           `INSERT INTO sync_state (${stateColumns})` +
           ` VALUES (?, 0, NULL, NULL, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
           ` ON CONFLICT (instrument_id) DO UPDATE SET last_bar_date = excluded.last_bar_date,` +
@@ -194,14 +176,9 @@ export async function persistSyncState(
     );
     return;
   }
-  await executeEither(
+  await execute(
     {
-      mysql:
-        `INSERT INTO sync_state (${stateColumns})` +
-        ` VALUES (?, 0, NULL, NOW(), ?, IF(?, NOW(), NULL), ?, ?)` +
-        ` ON DUPLICATE KEY UPDATE last_incremental_at = NOW(), last_bar_date = VALUES(last_bar_date),` +
-        ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
-      sqlite:
+      sql:
         `INSERT INTO sync_state (${stateColumns})` +
         ` VALUES (?, 0, NULL, CURRENT_TIMESTAMP, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
         ` ON CONFLICT (instrument_id) DO UPDATE SET last_incremental_at = CURRENT_TIMESTAMP,` +
@@ -298,15 +275,9 @@ export async function applyInstrumentProfile(
     phone: row.phone ?? null,
   };
   const p = mergeInstrumentProfile(primary, yahooModules, investing, existing);
-  await executeEither(
+  await execute(
     {
-      mysql:
-        `UPDATE instruments SET
-           name = ?, exchange = ?, currency = ?, yahoo_symbol = ?, investing_id = ?,
-           sector = ?, industry = ?, business_summary = ?, employees = ?, website = ?,
-           street_address = ?, city = ?, country = ?, phone = ?, updated_at = NOW()
-         WHERE id = ?`,
-      sqlite:
+      sql:
         `UPDATE instruments SET
            name = ?, exchange = ?, currency = ?, yahoo_symbol = ?, investing_id = ?,
            sector = ?, industry = ?, business_summary = ?, employees = ?, website = ?,
@@ -365,13 +336,9 @@ export async function ensureInstrument(
     "industry = excluded.industry, business_summary = excluded.business_summary, employees = excluded.employees, " +
     "website = excluded.website, street_address = excluded.street_address, city = excluded.city, " +
     "country = excluded.country, phone = excluded.phone";
-  await executeEither(
+  await execute(
     {
-      mysql:
-        `INSERT INTO instruments (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` +
-        ` ON DUPLICATE KEY UPDATE ` +
-        updates.replace(/excluded\.([a-z_]+)/g, "VALUES($1)"),
-      sqlite:
+      sql:
         `INSERT INTO instruments (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` +
         ` ON CONFLICT (symbol) DO UPDATE SET ${updates}`,
       params: [
@@ -406,14 +373,11 @@ async function syncBars(instrument: InstrumentRow, from: string, to: string): Pr
   const bars = await fetchYahooBars(instrument.yahoo_symbol ?? instrument.symbol, "1d", from, to);
   if (bars.length === 0) return 0;
   const barColumns = "instrument_id, trade_date, open, high, low, close, adj_close, volume, source";
-  const barUpdates = plainUpsertUpdates(["open", "high", "low", "close", "adj_close", "volume"]);
+  const barUpdates = upsertUpdates(["open", "high", "low", "close", "adj_close", "volume"]);
   const stmts = bars.map((b) => ({
-    mysql:
+    sql:
       `INSERT INTO daily_bars (${barColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` +
-      ` ON DUPLICATE KEY UPDATE ${barUpdates.mysql}`,
-    sqlite:
-      `INSERT INTO daily_bars (${barColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` +
-      ` ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET ${barUpdates.sqlite}`,
+      ` ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET ${barUpdates}`,
     params: [
       instrument.id,
       b.date,
@@ -435,7 +399,7 @@ async function syncBars(instrument: InstrumentRow, from: string, to: string): Pr
     ],
   }));
   for (let i = 0; i < stmts.length; i += 500) {
-    await batchEither(stmts.slice(i, i + 500), "daily_bars");
+    await executeBatch(stmts.slice(i, i + 500), "daily_bars");
   }
   return bars.length;
 }
@@ -453,25 +417,21 @@ export async function saveFinancials(
 ): Promise<void> {
   const observed = fields.filter((f) => f.value != null);
   if (observed.length === 0) return;
-  const keep = priorityUpdate(primary, ["value", "currency"]);
-  const keepSqlite = priorityReplaceClause(primary, "financial_statements", ["value", "currency"]);
+  const keep = priorityReplaceClause(primary, "financial_statements", ["value", "currency"]);
   const stmtColumns =
     "instrument_id, statement_type, period_type, period_end, field_name, value, currency, source";
   const stmts = observed.map((f) => ({
-    mysql:
-      `INSERT INTO financial_statements (${stmtColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)` +
-      ` ON DUPLICATE KEY UPDATE ${keep.sql}`,
-    sqlite:
+    sql:
       `INSERT INTO financial_statements (${stmtColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)` +
       ` ON CONFLICT (instrument_id, statement_type, period_type, period_end, field_name)` +
-      ` DO UPDATE SET ${keepSqlite.sql}`,
+      ` DO UPDATE SET ${keep.sql}`,
     params: [
       instrumentId, f.statementType, f.periodType, f.periodEnd, f.fieldName, f.value, f.currency, f.source,
       ...keep.params,
     ],
     decimals: [{ index: 5, column: "financial_statements.value" }],
   }));
-  for (let i = 0; i < stmts.length; i += 500) await batchEither(stmts.slice(i, i + 500), "financial_statements");
+  for (let i = 0; i < stmts.length; i += 500) await executeBatch(stmts.slice(i, i + 500), "financial_statements");
 }
 
 export async function saveRatios(
@@ -483,19 +443,15 @@ export async function saveRatios(
     .map(canonicalizeRatioValue)
     .filter((r) => r.value != null);
   if (observed.length === 0) return;
-  const keep = priorityUpdate(primary, ["value"]);
-  const keepSqlite = priorityReplaceClause(primary, "ratios", ["value"]);
+  const keep = priorityReplaceClause(primary, "ratios", ["value"]);
   const stmts = observed.map((r) => ({
-    mysql:
+    sql:
       `INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?, ?, ?, ?, ?)` +
-      ` ON DUPLICATE KEY UPDATE ${keep.sql}`,
-    sqlite:
-      `INSERT INTO ratios (instrument_id, metric, as_of, value, source) VALUES (?, ?, ?, ?, ?)` +
-      ` ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET ${keepSqlite.sql}`,
+      ` ON CONFLICT (instrument_id, metric, as_of) DO UPDATE SET ${keep.sql}`,
     params: [instrumentId, r.metric, r.asOf, r.value, r.source, ...keep.params],
     decimals: [{ index: 3, column: "ratios.value" }],
   }));
-  await batchEither(stmts, "ratios");
+  await executeBatch(stmts, "ratios");
 }
 
 function forecastNumber(value: unknown): number | null {
@@ -535,7 +491,7 @@ export async function saveAnalystForecast(
 
   if (latest && sameAnalystForecast(latest, forecast)) return false;
 
-  const forecastUpdates = plainUpsertUpdates([
+  const forecastUpdates = upsertUpdates([
     "consensus",
     "n_buy",
     "n_hold",
@@ -547,14 +503,11 @@ export async function saveAnalystForecast(
   ]);
   const forecastColumns =
     "instrument_id, as_of, consensus, n_buy, n_hold, n_sell, n_estimates, target_high, target_low, target_mean, source";
-  await executeEither(
+  await execute(
     {
-      mysql:
+      sql:
         `INSERT INTO analyst_forecasts (${forecastColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` +
-        ` ON DUPLICATE KEY UPDATE ${forecastUpdates.mysql}`,
-      sqlite:
-        `INSERT INTO analyst_forecasts (${forecastColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` +
-        ` ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${forecastUpdates.sqlite}`,
+        ` ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${forecastUpdates}`,
       decimals: [
         { index: 7, column: "analyst_forecasts.target_high" },
         { index: 8, column: "analyst_forecasts.target_low" },
@@ -586,16 +539,12 @@ export async function saveDividends(
 ): Promise<void> {
   if (dividends.length === 0) return;
   const mergeColumns = ["amount", "pay_date", "ttm_dividend", "yield_pct"];
-  const keep = priorityMergeUpdate(primary, mergeColumns);
-  const keepSqlite = priorityMergeClause(primary, "dividends", mergeColumns);
+  const keep = priorityMergeClause(primary, "dividends", mergeColumns);
   const stmts = dividends.map((d) => ({
-    mysql:
-      `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)` +
-      ` VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ${keep.sql}`,
-    sqlite:
+    sql:
       `INSERT INTO dividends (instrument_id, ex_date, amount, pay_date, ttm_dividend, yield_pct, source)` +
       ` VALUES (?, ?, ?, ?, ?, ?, ?)` +
-      ` ON CONFLICT (instrument_id, ex_date) DO UPDATE SET ${keepSqlite.sql}`,
+      ` ON CONFLICT (instrument_id, ex_date) DO UPDATE SET ${keep.sql}`,
     params: [instrumentId, d.exDate, d.amount, d.payDate, d.ttmDividend, d.yieldPct, d.source, ...keep.params],
     decimals: [
       { index: 2, column: "dividends.amount" },
@@ -603,7 +552,7 @@ export async function saveDividends(
       { index: 5, column: "dividends.yield_pct" },
     ],
   }));
-  await batchEither(stmts, "dividends");
+  await executeBatch(stmts, "dividends");
 }
 
 export async function saveCompanyEvents(
@@ -613,51 +562,40 @@ export async function saveCompanyEvents(
 ): Promise<void> {
   if (events.length === 0) return;
   const mergeColumns = ["event_date", "details"];
-  const keep = priorityMergeUpdate(primary, mergeColumns);
-  const keepSqlite = priorityMergeClause(primary, "company_events", mergeColumns);
+  const keep = priorityMergeClause(primary, "company_events", mergeColumns);
   const eventCols = "instrument_id, event_type, event_date, details, source";
   const stmts = events.map((e) => ({
-    mysql:
+    sql:
       `INSERT INTO company_events (${eventCols}) VALUES (?, ?, ?, ?, ?)` +
-      ` ON DUPLICATE KEY UPDATE ${keep.sql}`,
-    sqlite:
-      `INSERT INTO company_events (${eventCols}) VALUES (?, ?, ?, ?, ?)` +
-      ` ON CONFLICT (instrument_id, event_type) DO UPDATE SET ${keepSqlite.sql}`,
+      ` ON CONFLICT (instrument_id, event_type) DO UPDATE SET ${keep.sql}`,
     params: [instrumentId, e.eventType, e.eventDate, e.details, e.source, ...keep.params],
   }));
-  await batchEither(stmts, "company_events");
+  await executeBatch(stmts, "company_events");
 }
 
 export async function saveNews(instrumentId: number, news: NewsItem[]): Promise<void> {
   if (news.length === 0) return;
   const newsCols = "id, symbols, title, link, publisher, published_at, news_type";
-  const newsMerge = plainUpsertUpdates(["symbols", "title", "link", "publisher", "published_at", "news_type"]);
-  const statements: DualStatement[] = [];
+  const newsMerge = upsertUpdates(["symbols", "title", "link", "publisher", "published_at", "news_type"]);
+  const statements: Statement[] = [];
   for (const item of news) {
     statements.push({
-      mysql:
+      sql:
         `INSERT INTO news_articles (${newsCols}) VALUES (?, ?, ?, ?, ?, ?, ?)` +
-        ` ON DUPLICATE KEY UPDATE ${newsMerge.mysql.replace(
-          /([a-z_]+) = VALUES\(([a-z_]+)\)/g,
-          "$1 = COALESCE(VALUES($2), $1)"
-        )}`,
-      sqlite:
-        `INSERT INTO news_articles (${newsCols}) VALUES (?, ?, ?, ?, ?, ?, ?)` +
-        ` ON CONFLICT (id) DO UPDATE SET ${newsMerge.sqlite.replace(
+        ` ON CONFLICT (id) DO UPDATE SET ${newsMerge.replace(
           /([a-z_]+) = excluded\.([a-z_]+)/g,
           "$1 = COALESCE(excluded.$2, news_articles.$1)"
         )}`,
       params: [item.id, item.symbols, item.title, item.link, item.publisher, item.publishedAt, item.type],
     });
     statements.push({
-      mysql: "INSERT IGNORE INTO instrument_news (instrument_id, news_id) VALUES (?, ?)",
-      sqlite:
+      sql:
         "INSERT INTO instrument_news (instrument_id, news_id) VALUES (?, ?)" +
         " ON CONFLICT (instrument_id, news_id) DO NOTHING",
       params: [instrumentId, item.id],
     });
   }
-  await batchEither(statements, "news");
+  await executeBatch(statements, "news");
 }
 
 export async function saveYahooOptionsSnapshot(
@@ -668,8 +606,7 @@ export async function saveYahooOptionsSnapshot(
     "instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source";
   const optionInsert = `INSERT INTO options (${optionColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`;
   const statements = legs.map((leg) => ({
-    mysql: optionInsert,
-    sqlite: optionInsert,
+    sql: optionInsert,
     params: [
       instrumentId,
       leg.contractSymbol,
@@ -693,10 +630,9 @@ export async function saveYahooOptionsSnapshot(
       { index: 10, column: "options.implied_vol" },
     ],
   }));
-  await replaceEither(
+  await replaceBatch(
     {
-      mysql: "DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'",
-      sqlite: "DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'",
+      sql: "DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'",
       params: [instrumentId],
     },
     statements,
@@ -708,22 +644,18 @@ export async function saveYahooSectorMembersSnapshot(
   sectorCode: string,
   members: SectorHolding[]
 ): Promise<void> {
-  const memberUpd = plainUpsertUpdates(["name", "weight"]);
+  const memberUpd = upsertUpdates(["name", "weight"]);
   const memberCols = "sector_code, symbol, name, weight, source";
   const statements = members.map((member) => ({
-    mysql:
+    sql:
       `INSERT INTO sector_members (${memberCols}) VALUES (?, ?, ?, ?, 'yahoo')` +
-      ` ON DUPLICATE KEY UPDATE ${memberUpd.mysql}`,
-    sqlite:
-      `INSERT INTO sector_members (${memberCols}) VALUES (?, ?, ?, ?, 'yahoo')` +
-      ` ON CONFLICT (sector_code, symbol) DO UPDATE SET ${memberUpd.sqlite}`,
+      ` ON CONFLICT (sector_code, symbol) DO UPDATE SET ${memberUpd}`,
     params: [sectorCode, member.symbol, member.name, member.weight],
     decimals: [{ index: 3, column: "sector_members.weight" }],
   }));
-  await replaceEither(
+  await replaceBatch(
     {
-      mysql: "DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
-      sqlite: "DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
+      sql: "DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
       params: [sectorCode],
     },
     statements,
@@ -749,14 +681,13 @@ async function syncYahooChecklist(
     if (!si) return;
     const cols =
       "instrument_id, as_of, shares_short, shares_short_prior_month, short_ratio, short_percent_of_float, shares_percent_shares_out, short_date, source";
-    const upd = plainUpsertUpdates([
+    const upd = upsertUpdates([
       "shares_short", "shares_short_prior_month", "short_ratio",
       "short_percent_of_float", "shares_percent_shares_out", "short_date",
     ]);
-    await executeEither(
+    await execute(
       {
-        mysql: `INSERT INTO short_interest (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-        sqlite: `INSERT INTO short_interest (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${upd.sqlite}`,
+        sql: `INSERT INTO short_interest (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${upd}`,
         params: [instrument.id, si.asOf, si.sharesShort, si.sharesShortPriorMonth, si.shortRatio, si.shortPercentOfFloat, si.sharesPercentSharesOut, si.shortDate],
         decimals: [
           { index: 2, column: "short_interest.shares_short" },
@@ -775,13 +706,12 @@ async function syncYahooChecklist(
     if (!hb) return;
     const cols =
       "instrument_id, as_of, insiders_percent, institutions_percent, institutions_float_percent, institutions_count, source";
-    const upd = plainUpsertUpdates([
+    const upd = upsertUpdates([
       "insiders_percent", "institutions_percent", "institutions_float_percent", "institutions_count",
     ]);
-    await executeEither(
+    await execute(
       {
-        mysql: `INSERT INTO holder_breakdown (${cols}) VALUES (?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-        sqlite: `INSERT INTO holder_breakdown (${cols}) VALUES (?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${upd.sqlite}`,
+        sql: `INSERT INTO holder_breakdown (${cols}) VALUES (?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, as_of, source) DO UPDATE SET ${upd}`,
         params: [instrument.id, hb.asOf, hb.insidersPercent, hb.institutionsPercent, hb.institutionsFloatPercent, hb.institutionsCount],
         decimals: [
           { index: 2, column: "holder_breakdown.insiders_percent" },
@@ -796,39 +726,37 @@ async function syncYahooChecklist(
   safe("insider_transactions", async () => {
     const insiders = extractInsiderTransactions(modules);
     if (!insiders.length) return;
-    const upd = plainUpsertUpdates(["shares", "value"]);
+    const upd = upsertUpdates(["shares", "value"]);
     const cols =
       "instrument_id, transaction_date, insider_name, title, transaction_text, shares, value, ownership, source";
     const stmts = insiders.map((t) => ({
-      mysql: `INSERT INTO insider_transactions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-      sqlite: `INSERT INTO insider_transactions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, transaction_date, insider_name, transaction_text_key) DO UPDATE SET ${upd.sqlite}`,
+      sql: `INSERT INTO insider_transactions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, transaction_date, insider_name, transaction_text_key) DO UPDATE SET ${upd}`,
       params: [instrument.id, t.transactionDate, t.insiderName, t.title, t.transactionText, t.shares, t.value, t.ownership],
       decimals: [
         { index: 5, column: "insider_transactions.shares" },
         { index: 6, column: "insider_transactions.value" },
       ],
     }));
-    await batchEither(stmts, "insider_transactions");
+    await executeBatch(stmts, "insider_transactions");
   });
 
   safe("analyst_actions", async () => {
     const actions = extractUpgradeDowngrades(modules);
     if (!actions.length) return;
-    const upd = plainUpsertUpdates([
+    const upd = upsertUpdates([
       "action_type", "price_target_action", "current_price_target", "prior_price_target",
     ]);
     const cols =
       "instrument_id, action_date, firm, from_grade, to_grade, action_type, price_target_action, current_price_target, prior_price_target, source";
     const stmts = actions.map((a) => ({
-      mysql: `INSERT INTO analyst_actions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-      sqlite: `INSERT INTO analyst_actions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, action_date, firm_key, to_grade_key, from_grade_key, action_type_key, price_target_action_key) DO UPDATE SET ${upd.sqlite}`,
+      sql: `INSERT INTO analyst_actions (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, action_date, firm_key, to_grade_key, from_grade_key, action_type_key, price_target_action_key) DO UPDATE SET ${upd}`,
       params: [instrument.id, a.actionDate, a.firm, a.fromGrade, a.toGrade, a.actionType, a.priceTargetAction, a.currentPriceTarget, a.priorPriceTarget],
       decimals: [
         { index: 7, column: "analyst_actions.current_price_target" },
         { index: 8, column: "analyst_actions.prior_price_target" },
       ],
     }));
-    await batchEither(stmts, "analyst_actions");
+    await executeBatch(stmts, "analyst_actions");
   });
 
   safe("company_events", async () => {
@@ -838,7 +766,7 @@ async function syncYahooChecklist(
   safe("earnings_trend", async () => {
     const etrend = extractEarningsTrend(modules);
     if (!etrend.length) return;
-    const upd = plainUpsertUpdates([
+    const upd = upsertUpdates([
       "eps_estimate", "eps_low", "eps_high", "eps_growth", "revenue_estimate", "revenue_growth",
       "n_analysts", "eps_current", "eps_7d_ago", "eps_30d_ago", "eps_60d_ago", "eps_90d_ago",
       "up_7d", "up_30d", "down_7d", "down_30d",
@@ -851,37 +779,34 @@ async function syncYahooChecklist(
       column: `earnings_trend.${["", "", "", "eps_estimate", "eps_low", "eps_high", "eps_growth", "revenue_estimate", "revenue_growth", "", "eps_current", "eps_7d_ago", "eps_30d_ago", "eps_60d_ago", "eps_90d_ago"][i]}`,
     }));
     const stmts = etrend.map((t) => ({
-      mysql: `INSERT INTO earnings_trend (${cols}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-      sqlite: `INSERT INTO earnings_trend (${cols}) VALUES (${placeholders}) ON CONFLICT (instrument_id, period_end, source) DO UPDATE SET ${upd.sqlite}`,
+      sql: `INSERT INTO earnings_trend (${cols}) VALUES (${placeholders}) ON CONFLICT (instrument_id, period_end, source) DO UPDATE SET ${upd}`,
       params: [instrument.id, t.periodEnd, t.periodLabel, t.epsEstimate, t.epsLow, t.epsHigh, t.epsGrowth,
         t.revenueEstimate, t.revenueGrowth, t.nAnalysts, t.epsCurrent, t.eps7dAgo, t.eps30dAgo, t.eps60dAgo, t.eps90dAgo,
         t.up7d, t.up30d, t.down7d, t.down30d],
       decimals: epsDecimals,
     }));
-    await batchEither(stmts, "earnings_trend");
+    await executeBatch(stmts, "earnings_trend");
   });
 
   safe("recommendation_trend", async () => {
     const rectrend = extractRecommendationTrend(modules);
     if (!rectrend.length) return;
-    const upd = plainUpsertUpdates(["strong_buy", "buy", "hold", "sell", "strong_sell"]);
+    const upd = upsertUpdates(["strong_buy", "buy", "hold", "sell", "strong_sell"]);
     const cols = "instrument_id, period_label, strong_buy, buy, hold, sell, strong_sell, source";
     const stmts = rectrend.map((t) => ({
-      mysql: `INSERT INTO recommendation_trend (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-      sqlite: `INSERT INTO recommendation_trend (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, period_label, source) DO UPDATE SET ${upd.sqlite}`,
+      sql: `INSERT INTO recommendation_trend (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, period_label, source) DO UPDATE SET ${upd}`,
       params: [instrument.id, t.periodLabel, t.strongBuy, t.buy, t.hold, t.sell, t.strongSell],
     }));
-    await batchEither(stmts, "recommendation_trend");
+    await executeBatch(stmts, "recommendation_trend");
   });
 
   safe("fund_holders", async () => {
     const funds = extractFundHolders(modules);
     if (!funds.length) return;
-    const upd = plainUpsertUpdates(["pct_held", "position", "value", "pct_change"]);
+    const upd = upsertUpdates(["pct_held", "position", "value", "pct_change"]);
     const cols = "instrument_id, holding_date, owner_name, pct_held, position, value, pct_change, source";
     const stmts = funds.map((f) => ({
-      mysql: `INSERT INTO fund_holders (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${upd.mysql}`,
-      sqlite: `INSERT INTO fund_holders (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${upd.sqlite}`,
+      sql: `INSERT INTO fund_holders (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${upd}`,
       params: [instrument.id, f.holdingDate, f.ownerName, f.pctHeld, f.position, f.value, f.pctChange],
       decimals: [
         { index: 3, column: "fund_holders.pct_held" },
@@ -890,7 +815,7 @@ async function syncYahooChecklist(
         { index: 6, column: "fund_holders.pct_change" },
       ],
     }));
-    await batchEither(stmts, "fund_holders");
+    await executeBatch(stmts, "fund_holders");
   });
 
   return runChecklistTasks(tasks);
@@ -913,14 +838,11 @@ async function syncIntradayBars(instrument: InstrumentRow, interval: IntradayInt
   const bars: IntradayBar[] = await fetchYahooIntradayBars(instrument.yahoo_symbol ?? instrument.symbol, interval, from, today);
   if (!bars.length) return 0;
   const intradayCols = "instrument_id, ts, bar_interval, open, high, low, close, volume, source";
-  const intradayUpd = plainUpsertUpdates(["open", "high", "low", "close", "volume"]);
+  const intradayUpd = upsertUpdates(["open", "high", "low", "close", "volume"]);
   const stmts = bars.map((b) => ({
-    mysql:
+    sql:
       `INSERT INTO intraday_bars (${intradayCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
-      ` ON DUPLICATE KEY UPDATE ${intradayUpd.mysql}`,
-    sqlite:
-      `INSERT INTO intraday_bars (${intradayCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
-      ` ON CONFLICT (instrument_id, bar_interval, ts) DO UPDATE SET ${intradayUpd.sqlite}`,
+      ` ON CONFLICT (instrument_id, bar_interval, ts) DO UPDATE SET ${intradayUpd}`,
     params: [instrument.id, b.ts.replace("T", " ").replace("Z", ""), interval, b.open, b.high, b.low, b.close, b.volume],
     decimals: [
       { index: 3, column: "intraday_bars.open" },
@@ -930,7 +852,7 @@ async function syncIntradayBars(instrument: InstrumentRow, interval: IntradayInt
     ],
   }));
   for (let i = 0; i < stmts.length; i += 500) {
-    await batchEither(stmts.slice(i, i + 500), "intraday_bars");
+    await executeBatch(stmts.slice(i, i + 500), "intraday_bars");
   }
   return bars.length;
 }
@@ -1016,13 +938,12 @@ export async function syncOne(
     }
 
     // holders from yahoo institutionOwnership
-    const holderUpd = plainUpsertUpdates(["shares_held", "percent_of_shares", "total_value"]);
+    const holderUpd = upsertUpdates(["shares_held", "percent_of_shares", "total_value"]);
     const holderCols = "instrument_id, holding_date, owner_name, shares_held, percent_of_shares, percent_of_portfolio, shares_changed, total_value, source";
     const holderStmts = extractInstitutionalHolders(modules)
       .slice(0, 30)
       .map((h) => ({
-        mysql: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON DUPLICATE KEY UPDATE ${holderUpd.mysql}`,
-        sqlite: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${holderUpd.sqlite}`,
+        sql: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${holderUpd}`,
         params: [
           instrument.id,
           h.holdingDate,
@@ -1041,7 +962,7 @@ export async function syncOne(
         { index: 7, column: "holders.total_value" },
       ],
       }));
-    if (holderStmts.length) await batchEither(holderStmts, "holders");
+    if (holderStmts.length) await executeBatch(holderStmts, "holders");
 
     // data checklist: short interest / holder breakdown / insiders / analyst actions /
     // forward events / earnings trend / recommendation trend / fund holders
@@ -1076,25 +997,15 @@ export async function syncOne(
     await saveFinancials(instrument.id, snapshot.financials);
     await saveRatios(instrument.id, snapshot.ratios);
     await saveDividends(instrument.id, snapshot.dividends);
-    const summaryKeep = priorityUpdate(config.primaryProvider, [
-      "dividend_yield",
-      "payout_ratio",
-      "annualized_payout",
-      "five_year_growth",
-      "next_dividend_date",
-    ]);
-    const summaryKeepSqlite = priorityReplaceClause(config.primaryProvider, "dividends_summary", [
+    const summaryKeep = priorityReplaceClause(config.primaryProvider, "dividends_summary", [
       "dividend_yield", "payout_ratio", "annualized_payout", "five_year_growth", "next_dividend_date",
     ]);
-    await executeEither(
+    await execute(
       {
-        mysql:
-          `INSERT INTO dividends_summary (instrument_id, dividend_yield, payout_ratio, annualized_payout, five_year_growth, next_dividend_date, source)` +
-          ` VALUES (?, ?, ?, ?, ?, ?, 'investing') ON DUPLICATE KEY UPDATE ${summaryKeep.sql}`,
-        sqlite:
+        sql:
           `INSERT INTO dividends_summary (instrument_id, dividend_yield, payout_ratio, annualized_payout, five_year_growth, next_dividend_date, source)` +
           ` VALUES (?, ?, ?, ?, ?, ?, 'investing')` +
-          ` ON CONFLICT (instrument_id) DO UPDATE SET ${summaryKeepSqlite.sql}`,
+          ` ON CONFLICT (instrument_id) DO UPDATE SET ${summaryKeep.sql}`,
         decimals: [
           { index: 1, column: "dividends_summary.dividend_yield" },
           { index: 2, column: "dividends_summary.payout_ratio" },
@@ -1118,11 +1029,10 @@ export async function syncOne(
       await saveAnalystForecast(instrument.id, snapshot.forecast);
     }
 
-    const holderUpd = plainUpsertUpdates(["shares_held", "percent_of_shares", "total_value"]);
+    const holderUpd = upsertUpdates(["shares_held", "percent_of_shares", "total_value"]);
     const holderCols = "instrument_id, holding_date, owner_name, shares_held, percent_of_shares, percent_of_portfolio, shares_changed, total_value, source";
     const holderStmts2 = snapshot.holders.map((h) => ({
-      mysql: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON DUPLICATE KEY UPDATE ${holderUpd.mysql}`,
-      sqlite: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${holderUpd.sqlite}`,
+      sql: `INSERT INTO holders (${holderCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON CONFLICT (instrument_id, holding_date, owner_name, source) DO UPDATE SET ${holderUpd}`,
       params: [instrument.id, h.holdingDate, h.ownerName, h.sharesHeld, h.percentOfShares, h.percentOfPortfolio, h.sharesChanged, h.totalValue],
       decimals: [
         { index: 3, column: "holders.shares_held" },
@@ -1132,7 +1042,7 @@ export async function syncOne(
         { index: 7, column: "holders.total_value" },
       ],
     }));
-    if (holderStmts2.length) await batchEither(holderStmts2, "holders");
+    if (holderStmts2.length) await executeBatch(holderStmts2, "holders");
 
     if (snapshot.institutionalHoldings.percent != null) {
       await saveRatios(instrument.id, [{
@@ -1143,12 +1053,11 @@ export async function syncOne(
       }]);
     }
 
-    const earnUpd = plainUpsertUpdates(["eps_actual", "eps_forecast", "revenue_actual", "revenue_forecast"]);
+    const earnUpd = upsertUpdates(["eps_actual", "eps_forecast", "revenue_actual", "revenue_forecast"]);
     const earnCols =
       "instrument_id, report_year, report_month, report_date, eps_actual, eps_forecast, revenue_actual, revenue_forecast, source";
     const earnStmts = snapshot.earnings.map((e) => ({
-      mysql: `INSERT INTO earnings (${earnCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON DUPLICATE KEY UPDATE ${earnUpd.mysql}`,
-      sqlite: `INSERT INTO earnings (${earnCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON CONFLICT (instrument_id, report_year, report_month, source) DO UPDATE SET ${earnUpd.sqlite}`,
+      sql: `INSERT INTO earnings (${earnCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'investing') ON CONFLICT (instrument_id, report_year, report_month, source) DO UPDATE SET ${earnUpd}`,
       params: [instrument.id, e.reportYear, e.reportMonth, e.reportDate, e.epsActual, e.epsForecast, e.revenueActual, e.revenueForecast],
       decimals: [
         { index: 4, column: "earnings.eps_actual" },
@@ -1157,7 +1066,7 @@ export async function syncOne(
         { index: 7, column: "earnings.revenue_forecast" },
       ],
     }));
-    if (earnStmts.length) await batchEither(earnStmts, "earnings");
+    if (earnStmts.length) await executeBatch(earnStmts, "earnings");
 
       // forward calendar: next earnings date from investing
       await syncInvestingCalendar(instrument, snapshot.nextEarningsDate);
@@ -1322,10 +1231,9 @@ async function syncSectorEtf(
   const instrument = await ensureInstrument(etf);
   // No dialect difference here, but the write still has to go through the unified backend so the
   // SQLite path never touches MySQL.
-  await executeEither(
+  await execute(
     {
-      mysql: "UPDATE sectors SET instrument_id = ? WHERE sector_code = ?",
-      sqlite: "UPDATE sectors SET instrument_id = ? WHERE sector_code = ?",
+      sql: "UPDATE sectors SET instrument_id = ? WHERE sector_code = ?",
       params: [instrument.id, sector.sector_code],
     },
     "sectors instrument link"
@@ -1350,14 +1258,11 @@ async function syncSectorEtf(
     const bars = await fetchYahooBars(instrument.yahoo_symbol ?? etf, "1d", from, today);
     if (bars.length) {
       const etfCols = "instrument_id, trade_date, open, high, low, close, adj_close, volume, source";
-      const etfUpd = plainUpsertUpdates(["open", "high", "low", "close", "adj_close", "volume"]);
+      const etfUpd = upsertUpdates(["open", "high", "low", "close", "adj_close", "volume"]);
       const stmts = bars.map((b) => ({
-        mysql:
+        sql:
           `INSERT INTO daily_bars (${etfCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
-          ` ON DUPLICATE KEY UPDATE ${etfUpd.mysql}`,
-        sqlite:
-          `INSERT INTO daily_bars (${etfCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
-          ` ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET ${etfUpd.sqlite}`,
+          ` ON CONFLICT (instrument_id, trade_date, source) DO UPDATE SET ${etfUpd}`,
         params: [instrument.id, b.date, b.open, b.high, b.low, b.close, b.adjClose, b.volume],
         decimals: [
           { index: 2, column: "daily_bars.open" },
@@ -1367,7 +1272,7 @@ async function syncSectorEtf(
           { index: 6, column: "daily_bars.adj_close" },
         ],
       }));
-      for (let i = 0; i < stmts.length; i += 500) await batchEither(stmts.slice(i, i + 500), "daily_bars");
+      for (let i = 0; i < stmts.length; i += 500) await executeBatch(stmts.slice(i, i + 500), "daily_bars");
       barsN = bars.length;
     }
     components.bars = { status: "ok", count: barsN };

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { closeDb, initSchema, migrateSchema } from "./db.js";
 import { syncAll, syncOne, syncSectors, type IntradayInterval } from "./services/sync.service.js";
 import { startMcpServer } from "./mcp/server.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./package-meta.js";
+import { openDatabase } from "./storage/database.js";
+import { initSqliteSchema } from "./storage/migrations.js";
 
 const INTRADAY_INTERVALS = ["1m", "5m", "15m", "30m", "60m"] as const;
 
@@ -159,9 +160,8 @@ function parseArgs(args: string[]): SyncArgs {
  * the v0.5.0 migration. `--sqlite` with no value falls back to the env var, then to a
  * conventional per-user data location.
  */
-function resolveSqlitePath(flag: string | undefined): string | null {
+function resolveSqlitePath(flag: string | undefined): string {
   const envPath = process.env.YAHOO_STOCK_MCP_SQLITE_PATH;
-  if (flag === undefined && !envPath) return null;
   if (flag && flag !== ":default:") return flag;
   if (envPath) return envPath;
   return defaultSqlitePath();
@@ -224,7 +224,7 @@ async function main() {
       // SQLite bootstrap is opt-in during the migration (C1): without --sqlite (or the
       // YAHOO_STOCK_MCP_SQLITE_PATH env var) this command keeps its existing MySQL behaviour.
       const sqlitePath = resolveSqlitePath(sqlite);
-      if (sqlitePath) {
+      {
         // Imported lazily: src/storage/database.ts loads `node:sqlite`, which does not exist
         // before Node 22.5. A static import here would break every command — including the
         // still-supported MySQL path — for Node 20 users and CI. The dependency is only
@@ -244,8 +244,6 @@ async function main() {
         }
         break;
       }
-      await initSchema();
-      break;
     }
 
     case "db:migrate":
@@ -253,7 +251,15 @@ async function main() {
         printHelp("db:migrate");
         return;
       }
-      await migrateSchema();
+      {
+        const conn = openDatabase(resolveSqlitePath(sqlite));
+        try {
+          const applied = initSqliteSchema(conn);
+          console.log(applied.length ? `migrations applied: ${applied.join(", ")}` : "migrations up to date");
+        } finally {
+          conn.close();
+        }
+      }
       break;
 
     case "sync":
@@ -294,7 +300,6 @@ async function main() {
       console.error(`run "${NAME} --help" to see available commands`);
       process.exitCode = 1;
   }
-  await closeDb();
 }
 
 main().catch((e) => {

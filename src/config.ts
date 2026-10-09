@@ -69,6 +69,30 @@ export interface DbTarget {
   url?: string;
 }
 
+
+/**
+ * v0.5.0 removed the MySQL backend. Silently ignoring a leftover MySQL connection string would
+ * look exactly like "my data disappeared", so any legacy MySQL configuration is a hard error that
+ * points at the one-off migration tool (C8) instead.
+ */
+const LEGACY_MYSQL_ENV = [
+  "YAHOO_STOCK_MCP_DATABASE_URL",
+  "YAHOO_STOCK_MCP_DB_HOST",
+  "YAHOO_STOCK_MCP_DB_PORT",
+  "YAHOO_STOCK_MCP_DB_USER",
+  "YAHOO_STOCK_MCP_DB_PASSWORD",
+  "YAHOO_STOCK_MCP_DB_NAME",
+];
+const legacyMysqlVar = LEGACY_MYSQL_ENV.find((name) => (process.env[name] ?? "").trim() !== "");
+if (legacyMysqlVar) {
+  throw new Error(
+    `${legacyMysqlVar} is set, but yahoo-stock-mcp v0.5.0 no longer uses MySQL: SQLite is the only ` +
+      `backend. Unset the YAHOO_STOCK_MCP_DATABASE_URL / YAHOO_STOCK_MCP_DB_* variables to start with ` +
+      `a local SQLite database. To bring existing MySQL data across, use the one-off migration tool ` +
+      `(scripts/mysql-to-sqlite) — it is a separate program and is never loaded by the MCP server.`
+  );
+}
+
 export function parseDatabaseUrl(raw: string): DbTarget {
   let u: URL;
   try {

@@ -19,14 +19,12 @@ const setup = openDatabase(dbPath);
 applySqliteMigrations(setup);
 setup.close();
 
-// ---- the active MySQL block: any MySQL I/O in this run cannot succeed ----
 process.env.YAHOO_STOCK_MCP_STORAGE_BACKEND = "sqlite";
 process.env.YAHOO_STOCK_MCP_SQLITE_PATH = dbPath;
-process.env.YAHOO_STOCK_MCP_DATABASE_URL = "mysql://nobody:nobody@127.0.0.1:1/nope";
 
 // Imported after the env is set so src/config.ts captures the dead MySQL endpoint.
 const { persistSyncState, syncAll, syncOne, syncSectors } = await import("../src/services/sync.service.js");
-const { closeStorageBackend, sqliteDatabase } = await import("../src/storage/backend.js");
+const { closeStorageBackend, sqliteDatabase } = await import("../src/storage/sqlite.js");
 const db = await sqliteDatabase();
 
 let failures = 0;
@@ -118,7 +116,6 @@ await check("syncOne is no longer blocked by the migration guard", async () => {
   } catch (err: any) {
     const message = String(err?.message ?? err);
     assert.doesNotMatch(message, /not available on the SQLite backend yet/);
-    assert.doesNotMatch(message, /ECONNREFUSED 127\.0\.0\.1:1/, "no MySQL I/O may occur on the SQLite path");
   }
 });
 

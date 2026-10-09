@@ -1,6 +1,4 @@
-// Reads go through the temporary read bridge so this module can run against SQLite in tests.
-// The bridge defaults to MySQL; see src/storage/read-bridge.ts (deleted in C6).
-import { query } from "../storage/read-bridge.js";
+import { query } from "../storage/sqlite.js";
 import { config } from "../config.js";
 import { canonicalizeStoredRatioRows } from "../providers/ratios.js";
 import { sortByDecimalKeys, sortRows, utcDateOnlyDaysAgo } from "../storage/values.js";

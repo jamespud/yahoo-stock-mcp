@@ -387,7 +387,7 @@ which rows would now be distinct that MySQL treated as one.
 | C5b-1a (landed) | market/financial/holdings/analyst writes via `DualStatement` + `scripts/test-sync-writes.ts` | both SQL forms present; binding positions verified by round-trip |
 | C5b-1b (landed) | remaining tables + `sync_state`; guard removed; `scripts/test-sync-state.ts` | all writes dual-form; SQLite entries run with MySQL blocked |
 | C5b-1b (superseded) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
-| C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
+| C6 (landed) | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
 | C7 | README, `docs/USAGE*`, `docs/REFERENCE*`, `stock-data-setup` skill, Codex plugin, release notes | `verify:pack`, `test:plugin`, `check:skill-references` green |
 
@@ -592,6 +592,34 @@ for had never been written. `quantize.ts` now converts a finite number with the 
 `decimalFromNumber` for parameters declared as DECIMAL columns, and only there. Exact strings and
 bigints still pass through unchanged; `NaN`, `Infinity` and values needing exponential notation are
 still rejected.
+
+### 6.8 C6: SQLite is the sole backend (landed)
+
+The dual-SQL scaffold, the read bridge and the backend selector are gone. `Statement` carries one
+SQLite statement; `execute` / `executeBatch` / `replaceBatch` talk only to `node:sqlite` through
+`src/storage/sqlite.ts`, which owns the single connection, the synchronous transaction boundary and
+the read-query row normalization.
+
+Deleted: `src/db.ts`, `mysql2`, `db/schema.sql`, `db/migrations/`, `deploy/`, the MySQL CI service,
+and the MySQL-only test scripts. `engines` is now `>=22.13.0`.
+
+**Legacy configuration is a hard error.** If any of `YAHOO_STOCK_MCP_DATABASE_URL` or
+`YAHOO_STOCK_MCP_DB_*` is set, `src/config.ts` throws at load with a message pointing at the C8
+one-off tool. Silently ignoring a leftover MySQL URL would look exactly like lost data.
+
+**Historical schema for C8** lives in `scripts/mysql-to-sqlite/fixtures/`: the terminal DDL captured
+from a fully migrated MySQL instance (`mysql-v0.4.0-final.sql`) plus `schema-manifest.json`, which
+records the source tag/commit, MySQL version, applied migrations, structure counts, a checksum and
+the C8 compatibility policy. It is *not* the bootstrap `db/schema.sql` — that file described the
+pre-0003 state. The manifest distinguishes the 25 source tables from the 24 business tables
+(`schema_migrations` is bookkeeping, read for version validation and never copied), and records
+that MySQL's 6 generated columns are unrelated to the SQLite schema's 6 `ON UPDATE` triggers.
+
+Test coverage was recovered rather than dropped: `test-sqlite-db.ts` carries the business/query
+regressions that still mean something on SQLite, and `test-mcp.ts` is a real MCP-layer integration
+test over stdio against a SQLite database. MySQL-only migration-executor and
+`information_schema` assertions were removed by decision; their historical structure is preserved
+by the C8 fixture.
 
 ## 7. C1 acceptance criteria
 

@@ -11,12 +11,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "../src/storage/database.js";
 import { applySqliteMigrations } from "../src/storage/migrations.js";
-import { sqliteDatabase, storageBackend, withSqliteTransaction, closeStorageBackend } from "../src/storage/backend.js";
+import { sqliteDatabase, storageBackend, withSqliteTransaction, closeStorageBackend } from "../src/storage/sqlite.js";
 import { DECIMAL_COLUMNS, quantizeBindings, quantizeForColumn } from "../src/storage/quantize.js";
 import { execute, executeBatch, replaceBatch } from "../src/storage/write.js";
-import { readBackend } from "../src/storage/read-bridge.js";
 import { buildPriorityUpsert } from "../src/storage/upsert.js";
-import { query } from "../src/storage/read-bridge.js";
+import { query } from "../src/storage/sqlite.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tmp = mkdtempSync(resolve(tmpdir(), "yahoo-stock-mcp-write-"));
@@ -39,13 +38,6 @@ async function check(name: string, fn: () => Promise<void> | void): Promise<void
     console.error(`FAIL  ${name}\n      ${err?.message ?? String(err)}`);
   }
 }
-
-await check("reads and writes share one backend selector", async () => {
-  assert.equal(storageBackend(), "sqlite");
-  assert.equal(readBackend(), "sqlite", "the read path must follow the same switch");
-  const db = await sqliteDatabase();
-  assert.equal(typeof db.prepare, "function");
-});
 
 await check("quantization registry matches the 63 DECIMAL columns in the schema", () => {
   assert.equal(Object.keys(DECIMAL_COLUMNS).length, 63);
