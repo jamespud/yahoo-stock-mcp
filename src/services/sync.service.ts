@@ -1,9 +1,13 @@
 import { config } from "../config.js";
-// Reads go through the temporary read bridge so the SQLite path never touches MySQL; the legacy
-// MySQL batch helpers remain for call sites that C5b-1 has not migrated yet.
-import { replaceBatch as legacyReplaceBatch, runBatch as legacyRunBatch } from "../db.js";
+// Reads and writes both go through the unified backend: the SQLite path performs no MySQL I/O.
 import { query } from "../storage/read-bridge.js";
-import { batchEither, executeEither, replaceEither, plainUpsertUpdates } from "../storage/write.js";
+import {
+  batchEither,
+  executeEither,
+  plainUpsertUpdates,
+  replaceEither,
+  type DualStatement,
+} from "../storage/write.js";
 import { priorityMergeClause, priorityReplaceClause } from "../storage/upsert.js";
 import { fetchInvestingSnapshot, type InvestingSnapshot } from "../providers/investing.js";
 import { needsInvestingIdentity, priorityMergeUpdate, priorityUpdate, type Provider } from "../providers/priority.js";
@@ -143,48 +147,70 @@ export async function persistSyncState(
 ): Promise<void> {
   const errorCount = warnings.length;
   const lastError = warnings.length ? warnings[warnings.length - 1] : null;
+  const stateColumns =
+    "instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error";
   if (full) {
     if (status === "success") {
-      await query(
-        `INSERT INTO sync_state
-           (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
-         VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)
-         ON DUPLICATE KEY UPDATE
-           full_synced = 1,
-           last_full_sync_at = NOW(),
-           last_bar_date = VALUES(last_bar_date),
-           last_quote_at = IF(?, NOW(), last_quote_at),
-           error_count = VALUES(error_count),
-           last_error = VALUES(last_error)`,
-        [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+      const stateColumns =
+        "instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error";
+      await executeEither(
+        {
+          mysql:
+            `INSERT INTO sync_state (${stateColumns})` +
+            ` VALUES (?, 1, NOW(), NULL, ?, IF(?, NOW(), NULL), ?, ?)` +
+            ` ON DUPLICATE KEY UPDATE` +
+            ` full_synced = 1, last_full_sync_at = NOW(), last_bar_date = VALUES(last_bar_date),` +
+            ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
+          sqlite:
+            `INSERT INTO sync_state (${stateColumns})` +
+            ` VALUES (?, 1, CURRENT_TIMESTAMP, NULL, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
+            ` ON CONFLICT (instrument_id) DO UPDATE SET` +
+            ` full_synced = 1, last_full_sync_at = CURRENT_TIMESTAMP, last_bar_date = excluded.last_bar_date,` +
+            ` last_quote_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sync_state.last_quote_at END,` +
+            ` error_count = excluded.error_count, last_error = excluded.last_error`,
+          params: [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0],
+        },
+        "sync_state full success"
       );
       return;
     }
 
-    await query(
-      `INSERT INTO sync_state
-         (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
-       VALUES (?, 0, NULL, NULL, ?, IF(?, NOW(), NULL), ?, ?)
-       ON DUPLICATE KEY UPDATE
-         last_bar_date = VALUES(last_bar_date),
-         last_quote_at = IF(?, NOW(), last_quote_at),
-         error_count = VALUES(error_count),
-         last_error = VALUES(last_error)`,
-      [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+    await executeEither(
+      {
+        mysql:
+          `INSERT INTO sync_state (${stateColumns})` +
+          ` VALUES (?, 0, NULL, NULL, ?, IF(?, NOW(), NULL), ?, ?)` +
+          ` ON DUPLICATE KEY UPDATE last_bar_date = VALUES(last_bar_date),` +
+          ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
+        sqlite:
+          `INSERT INTO sync_state (${stateColumns})` +
+          ` VALUES (?, 0, NULL, NULL, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
+          ` ON CONFLICT (instrument_id) DO UPDATE SET last_bar_date = excluded.last_bar_date,` +
+          ` last_quote_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sync_state.last_quote_at END,` +
+          ` error_count = excluded.error_count, last_error = excluded.last_error`,
+        params: [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0],
+      },
+      "sync_state full failure"
     );
     return;
   }
-  await query(
-    `INSERT INTO sync_state
-       (instrument_id, full_synced, last_full_sync_at, last_incremental_at, last_bar_date, last_quote_at, error_count, last_error)
-     VALUES (?, 0, NULL, NOW(), ?, IF(?, NOW(), NULL), ?, ?)
-     ON DUPLICATE KEY UPDATE
-       last_incremental_at = NOW(),
-       last_bar_date = VALUES(last_bar_date),
-       last_quote_at = IF(?, NOW(), last_quote_at),
-       error_count = VALUES(error_count),
-       last_error = VALUES(last_error)`,
-    [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0]
+  await executeEither(
+    {
+      mysql:
+        `INSERT INTO sync_state (${stateColumns})` +
+        ` VALUES (?, 0, NULL, NOW(), ?, IF(?, NOW(), NULL), ?, ?)` +
+        ` ON DUPLICATE KEY UPDATE last_incremental_at = NOW(), last_bar_date = VALUES(last_bar_date),` +
+        ` last_quote_at = IF(?, NOW(), last_quote_at), error_count = VALUES(error_count), last_error = VALUES(last_error)`,
+      sqlite:
+        `INSERT INTO sync_state (${stateColumns})` +
+        ` VALUES (?, 0, NULL, CURRENT_TIMESTAMP, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)` +
+        ` ON CONFLICT (instrument_id) DO UPDATE SET last_incremental_at = CURRENT_TIMESTAMP,` +
+        ` last_bar_date = excluded.last_bar_date,` +
+        ` last_quote_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sync_state.last_quote_at END,` +
+        ` error_count = excluded.error_count, last_error = excluded.last_error`,
+      params: [instrumentId, lastBarDate ?? null, quoteSucceeded ? 1 : 0, errorCount, lastError, quoteSucceeded ? 1 : 0],
+    },
+    "sync_state incremental"
   );
 }
 
@@ -586,50 +612,65 @@ export async function saveCompanyEvents(
   primary: Provider = config.primaryProvider
 ): Promise<void> {
   if (events.length === 0) return;
-  const keep = priorityMergeUpdate(primary, ["event_date", "details"]);
-  const sql =
-    `INSERT INTO company_events (instrument_id, event_type, event_date, details, source)
-     VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE ${keep.sql}`;
-  const stmts = events.map((e): [string, any[]] => [
-    sql,
-    [instrumentId, e.eventType, e.eventDate, e.details, e.source, ...keep.params],
-  ]);
-  await legacyRunBatch(stmts);
+  const mergeColumns = ["event_date", "details"];
+  const keep = priorityMergeUpdate(primary, mergeColumns);
+  const keepSqlite = priorityMergeClause(primary, "company_events", mergeColumns);
+  const eventCols = "instrument_id, event_type, event_date, details, source";
+  const stmts = events.map((e) => ({
+    mysql:
+      `INSERT INTO company_events (${eventCols}) VALUES (?, ?, ?, ?, ?)` +
+      ` ON DUPLICATE KEY UPDATE ${keep.sql}`,
+    sqlite:
+      `INSERT INTO company_events (${eventCols}) VALUES (?, ?, ?, ?, ?)` +
+      ` ON CONFLICT (instrument_id, event_type) DO UPDATE SET ${keepSqlite.sql}`,
+    params: [instrumentId, e.eventType, e.eventDate, e.details, e.source, ...keep.params],
+  }));
+  await batchEither(stmts, "company_events");
 }
 
 export async function saveNews(instrumentId: number, news: NewsItem[]): Promise<void> {
   if (news.length === 0) return;
-  const statements: Array<[string, any[]]> = [];
+  const newsCols = "id, symbols, title, link, publisher, published_at, news_type";
+  const newsMerge = plainUpsertUpdates(["symbols", "title", "link", "publisher", "published_at", "news_type"]);
+  const statements: DualStatement[] = [];
   for (const item of news) {
-    statements.push([
-      `INSERT INTO news_articles (id, symbols, title, link, publisher, published_at, news_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         symbols = COALESCE(VALUES(symbols), symbols),
-         title = COALESCE(VALUES(title), title),
-         link = COALESCE(VALUES(link), link),
-         publisher = COALESCE(VALUES(publisher), publisher),
-         published_at = COALESCE(VALUES(published_at), published_at),
-         news_type = COALESCE(VALUES(news_type), news_type)`,
-      [item.id, item.symbols, item.title, item.link, item.publisher, item.publishedAt, item.type],
-    ]);
-    statements.push([
-      `INSERT IGNORE INTO instrument_news (instrument_id, news_id) VALUES (?, ?)`,
-      [instrumentId, item.id],
-    ]);
+    statements.push({
+      mysql:
+        `INSERT INTO news_articles (${newsCols}) VALUES (?, ?, ?, ?, ?, ?, ?)` +
+        ` ON DUPLICATE KEY UPDATE ${newsMerge.mysql.replace(
+          /([a-z_]+) = VALUES\(([a-z_]+)\)/g,
+          "$1 = COALESCE(VALUES($2), $1)"
+        )}`,
+      sqlite:
+        `INSERT INTO news_articles (${newsCols}) VALUES (?, ?, ?, ?, ?, ?, ?)` +
+        ` ON CONFLICT (id) DO UPDATE SET ${newsMerge.sqlite.replace(
+          /([a-z_]+) = excluded\.([a-z_]+)/g,
+          "$1 = COALESCE(excluded.$2, news_articles.$1)"
+        )}`,
+      params: [item.id, item.symbols, item.title, item.link, item.publisher, item.publishedAt, item.type],
+    });
+    statements.push({
+      mysql: "INSERT IGNORE INTO instrument_news (instrument_id, news_id) VALUES (?, ?)",
+      sqlite:
+        "INSERT INTO instrument_news (instrument_id, news_id) VALUES (?, ?)" +
+        " ON CONFLICT (instrument_id, news_id) DO NOTHING",
+      params: [instrumentId, item.id],
+    });
   }
-  await legacyRunBatch(statements);
+  await batchEither(statements, "news");
 }
 
 export async function saveYahooOptionsSnapshot(
   instrumentId: number,
   legs: OptionLeg[]
 ): Promise<void> {
-  const statements = legs.map((leg): [string, any[]] => [
-    `INSERT INTO options (instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`,
-    [
+  const optionColumns =
+    "instrument_id, contract_symbol, expiration, option_type, strike, last_price, bid, ask, volume, open_interest, implied_vol, in_the_money, currency, source";
+  const optionInsert = `INSERT INTO options (${optionColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')`;
+  const statements = legs.map((leg) => ({
+    mysql: optionInsert,
+    sqlite: optionInsert,
+    params: [
       instrumentId,
       leg.contractSymbol,
       leg.expiration,
@@ -644,10 +685,22 @@ export async function saveYahooOptionsSnapshot(
       leg.inTheMoney ? 1 : 0,
       leg.currency,
     ],
-  ]);
-  await legacyReplaceBatch(
-    ["DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'", [instrumentId]],
-    statements
+    decimals: [
+      { index: 4, column: "options.strike" },
+      { index: 5, column: "options.last_price" },
+      { index: 6, column: "options.bid" },
+      { index: 7, column: "options.ask" },
+      { index: 10, column: "options.implied_vol" },
+    ],
+  }));
+  await replaceEither(
+    {
+      mysql: "DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'",
+      sqlite: "DELETE FROM options WHERE instrument_id = ? AND source = 'yahoo'",
+      params: [instrumentId],
+    },
+    statements,
+    "options snapshot"
   );
 }
 
@@ -655,15 +708,26 @@ export async function saveYahooSectorMembersSnapshot(
   sectorCode: string,
   members: SectorHolding[]
 ): Promise<void> {
-  const statements = members.map((member): [string, any[]] => [
-    `INSERT INTO sector_members (sector_code, symbol, name, weight, source)
-     VALUES (?, ?, ?, ?, 'yahoo')
-     ON DUPLICATE KEY UPDATE name = VALUES(name), weight = VALUES(weight)`,
-    [sectorCode, member.symbol, member.name, member.weight],
-  ]);
-  await legacyReplaceBatch(
-    ["DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'", [sectorCode]],
-    statements
+  const memberUpd = plainUpsertUpdates(["name", "weight"]);
+  const memberCols = "sector_code, symbol, name, weight, source";
+  const statements = members.map((member) => ({
+    mysql:
+      `INSERT INTO sector_members (${memberCols}) VALUES (?, ?, ?, ?, 'yahoo')` +
+      ` ON DUPLICATE KEY UPDATE ${memberUpd.mysql}`,
+    sqlite:
+      `INSERT INTO sector_members (${memberCols}) VALUES (?, ?, ?, ?, 'yahoo')` +
+      ` ON CONFLICT (sector_code, symbol) DO UPDATE SET ${memberUpd.sqlite}`,
+    params: [sectorCode, member.symbol, member.name, member.weight],
+    decimals: [{ index: 3, column: "sector_members.weight" }],
+  }));
+  await replaceEither(
+    {
+      mysql: "DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
+      sqlite: "DELETE FROM sector_members WHERE sector_code = ? AND source = 'yahoo'",
+      params: [sectorCode],
+    },
+    statements,
+    "sector members snapshot"
   );
 }
 
@@ -848,17 +912,25 @@ async function syncIntradayBars(instrument: InstrumentRow, interval: IntradayInt
   const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const bars: IntradayBar[] = await fetchYahooIntradayBars(instrument.yahoo_symbol ?? instrument.symbol, interval, from, today);
   if (!bars.length) return 0;
-  const sql =
-    `INSERT INTO intraday_bars (instrument_id, ts, bar_interval, open, high, low, close, volume, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')
-     ON DUPLICATE KEY UPDATE open = VALUES(open), high = VALUES(high), low = VALUES(low),
-       close = VALUES(close), volume = VALUES(volume)`;
-  const stmts = bars.map((b): [string, any[]] => [
-    sql,
-    [instrument.id, b.ts.replace("T", " ").replace("Z", ""), interval, b.open, b.high, b.low, b.close, b.volume],
-  ]);
+  const intradayCols = "instrument_id, ts, bar_interval, open, high, low, close, volume, source";
+  const intradayUpd = plainUpsertUpdates(["open", "high", "low", "close", "volume"]);
+  const stmts = bars.map((b) => ({
+    mysql:
+      `INSERT INTO intraday_bars (${intradayCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
+      ` ON DUPLICATE KEY UPDATE ${intradayUpd.mysql}`,
+    sqlite:
+      `INSERT INTO intraday_bars (${intradayCols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'yahoo')` +
+      ` ON CONFLICT (instrument_id, bar_interval, ts) DO UPDATE SET ${intradayUpd.sqlite}`,
+    params: [instrument.id, b.ts.replace("T", " ").replace("Z", ""), interval, b.open, b.high, b.low, b.close, b.volume],
+    decimals: [
+      { index: 3, column: "intraday_bars.open" },
+      { index: 4, column: "intraday_bars.high" },
+      { index: 5, column: "intraday_bars.low" },
+      { index: 6, column: "intraday_bars.close" },
+    ],
+  }));
   for (let i = 0; i < stmts.length; i += 500) {
-    await legacyRunBatch(stmts.slice(i, i + 500));
+    await batchEither(stmts.slice(i, i + 500), "intraday_bars");
   }
   return bars.length;
 }
@@ -879,7 +951,6 @@ export async function syncOne(
   components: Record<string, SyncComponentResult>;
   warnings: string[];
 }> {
-  assertSyncBackendSupported("sync --symbol");
   const instrument = await ensureInstrument(symbol);
   const today = new Date().toISOString().slice(0, 10);
   const warnings: string[] = [];
@@ -1185,26 +1256,9 @@ export interface BatchSyncResult {
 }
 
 
-/**
- * Guard: the sync write path is still being migrated to SQLite (C5b-1).
- *
- * Until every write statement below runs on SQLite, a SQLite run would complete some operations
- * and fail on MySQL-only SQL for others. Refuse the whole operation rather than leave a
- * partially-synced database.
- */
-function assertSyncBackendSupported(operation: string): void {
-  if (storageBackend() === "sqlite") {
-    throw new Error(
-      `${operation} is not available on the SQLite backend yet: the sync write path is still ` +
-        `being migrated (C5b-1). Use the default MySQL backend until that lands.`
-    );
-  }
-}
-
 export async function syncAll(
   opts: { full: boolean; intraday?: IntradayInterval | null }
 ): Promise<BatchSyncResult> {
-  assertSyncBackendSupported("sync --all");
   const rows = await query<Array<{ symbol: string }>>("SELECT symbol FROM instruments ORDER BY symbol");
   const results: BatchSyncItemResult[] = [];
 
@@ -1352,7 +1406,6 @@ async function syncSectorEtf(
 }
 
 export async function syncSectors(opts: { members?: boolean } = {}): Promise<SectorBatchSyncResult> {
-  assertSyncBackendSupported("sync --sectors");
   const rows = await query<SectorRow[]>(
     "SELECT sector_code, name, etf_symbol, is_benchmark, instrument_id FROM sectors ORDER BY is_benchmark, sector_code"
   );

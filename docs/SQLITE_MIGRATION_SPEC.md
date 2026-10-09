@@ -362,7 +362,8 @@ which rows would now be distinct that MySQL treated as one.
 | C4b (landed) | `src/storage/read-bridge.ts` (temporary), `db/sqlite/fixtures/read-path.sql`, `scripts/test-read-bridge.ts` | all 26 read functions run on SQLite; MySQL differential 25/26 byte-identical, 1 tie-order-only, 0 row-set differences |
 | C5a (landed) | `src/storage/{backend,quantize,write}.ts` + `scripts/test-sqlite-write.ts` | quantization once at the boundary; batch/replace atomic; one backend for reads and writes |
 | C5b-1a (landed) | market/financial/holdings/analyst writes via `DualStatement` + `scripts/test-sync-writes.ts` | both SQL forms present; binding positions verified by round-trip |
-| C5b-1b (remaining) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
+| C5b-1b (landed) | remaining tables + `sync_state`; guard removed; `scripts/test-sync-state.ts` | all writes dual-form; SQLite entries run with MySQL blocked |
+| C5b-1b (superseded) | `sync.service.ts` onto `write.ts`; retarget its SQL and decimal bindings | sync → idempotent re-sync → restart → re-sync, with no MySQL |
 | C6 | Remove `mysql2`, MySQL pool, `db/migrations`, `db/schema.sql`, Compose, CI service, isolated-DB harness; flip the runtime default to SQLite | full suite green with **no MySQL present** |
 | C8 | `tools/migrate-mysql/` one-off migrator | §5 checks; `npm pack` contains no MySQL driver |
 | C7 | README, `docs/USAGE*`, `docs/REFERENCE*`, `stock-data-setup` skill, Codex plugin, release notes | `verify:pack`, `test:plugin`, `check:skill-references` green |
@@ -527,6 +528,25 @@ both a surrogate `id` and a business key are covered.
 
 C5b-1b still owns news, options, sector members, company events, intraday bars and `sync_state`,
 after which the guard comes down. The guard stays in force until then.
+
+### 6.6 C5b-1b: remaining writes and guard removal (landed)
+
+`company_events`, `news_articles` + `instrument_news`, `options`, `sector_members`,
+`intraday_bars` and the three `sync_state` statements are migrated to `DualStatement`.
+`sync.service.ts` no longer imports the MySQL write helpers at all, and every read and write goes
+through the unified backend.
+
+`sync_state` keeps the MySQL state machine: a full **success** sets `full_synced = 1`, stamps
+`last_full_sync_at`, clears `last_incremental_at` and stamps `last_quote_at` only when the quote
+succeeded; a full **failure/partial** leaves `full_synced = 0`; an incremental stamps
+`last_incremental_at` and preserves the full-sync record and the previous quote time when the quote
+failed. `error_count` follows the warning count and `last_error` is the final warning.
+
+`assertSyncBackendSupported()` is **removed**. `scripts/test-sync-state.ts` replaces the refusal
+tests with positive ones: `syncAll` and `syncSectors` complete on an empty SQLite database, and
+`syncOne` proceeds past the migration gate. MySQL is actively blocked for that run —
+`YAHOO_STOCK_MCP_DATABASE_URL` points at a dead endpoint, so any stray MySQL I/O fails loudly
+instead of passing unnoticed.
 
 ## 7. C1 acceptance criteria
 
