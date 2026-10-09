@@ -278,14 +278,20 @@ try {
     assert.match(second.stdout, /already up to date/);
   });
 
-  await check("db:init without --sqlite still targets MySQL (SQLite stays opt-in)", async () => {
-    // Point MySQL at a dead endpoint so the check cannot accidentally pass by reaching a
-    // real server. The command must fail on the MySQL path and never quietly bootstrap SQLite.
+  await check("db:init defaults to SQLite now that MySQL is gone", async () => {
+    const res = await runCli(["db:init"], { YAHOO_STOCK_MCP_SQLITE_PATH: resolve(tmp, "default-init.db") });
+    assert.equal(res.code, 0, `expected success, got:\n${res.stdout}${res.stderr}`);
+    assert.match(res.stdout, /sqlite schema ready/);
+  });
+
+  await check("a leftover MySQL configuration is a hard error, not a silent empty database", async () => {
     const res = await runCli(["db:init"], {
       YAHOO_STOCK_MCP_DATABASE_URL: "mysql://nobody:nobody@127.0.0.1:1/nope",
+      YAHOO_STOCK_MCP_SQLITE_PATH: resolve(tmp, "legacy-config.db"),
     });
-    assert.notEqual(res.code, 0, `expected MySQL failure, got:\n${res.stdout}${res.stderr}`);
-    assert.doesNotMatch(res.stdout, /sqlite schema/);
+    assert.notEqual(res.code, 0, "must refuse to start");
+    assert.match(res.stderr, /no longer uses MySQL/, "the error must explain the switch");
+    assert.doesNotMatch(res.stdout, /sqlite schema/, "it must not quietly bootstrap an empty database");
   });
 } finally {
   rmSync(tmp, { recursive: true, force: true });

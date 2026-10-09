@@ -299,10 +299,24 @@ check("sqlite: booleans bind as 0/1 through the whole round trip", () => {
   conn.db.prepare("INSERT INTO sectors (sector_code, name, etf_symbol, is_benchmark) VALUES (?,?,?,?)")
     .run(...toSqliteParams(["XLZ", "Test", "XLZ", true]));
   assert.equal(conn.db.prepare("SELECT is_benchmark b FROM sectors WHERE sector_code='XLZ'").get().b, 1);
-  assert.throws(
-    () => conn.db.prepare("INSERT INTO sectors (sector_code, name, etf_symbol, is_benchmark) VALUES (?,?,?,?)").run("XLY", "T", "XLY", true as any),
-    /cannot be bound to SQLite parameter/
-  );
+  // `node:sqlite` changed here: Node 22 rejects a raw boolean, Node 24 binds it as 0/1. Our own
+  // binding layer always converts, so the write path is unaffected either way — but the test must
+  // not encode one Node version's behaviour as the contract.
+  try {
+    conn.db.prepare("INSERT INTO sectors (sector_code, name, etf_symbol, is_benchmark) VALUES (?,?,?,?)")
+      .run("XLY", "T", "XLY", true as any);
+    assert.equal(
+      conn.db.prepare("SELECT is_benchmark b FROM sectors WHERE sector_code='XLY'").get().b,
+      1,
+      "Node 24 binds a raw true as 1"
+    );
+  } catch (err: any) {
+    assert.match(
+      String(err?.message ?? err),
+      /cannot be bound to SQLite parameter/,
+      "Node 22 rejects a raw boolean"
+    );
+  }
 });
 
 check("sqlite: an explicit updated_at is preserved while the trigger still fires", () => {
