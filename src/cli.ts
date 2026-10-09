@@ -68,7 +68,15 @@ MCP clients (Claude Desktop, Cursor, Codex, ...) launch this server with:
 Usage:
   ${NAME} server`;
 
-const DBINIT_HELP = `Initialise the configured MySQL database.
+const DBINIT_HELP = `Initialise the configured database.
+
+By default this initialises the configured MySQL database (v0.4.x behaviour). Pass --sqlite
+(or set YAHOO_STOCK_MCP_SQLITE_PATH) to bootstrap the v0.5.0 SQLite schema instead:
+
+  ${NAME} db:init --sqlite /path/to/stocks.db
+  ${NAME} db:init --sqlite            # uses $YAHOO_STOCK_MCP_SQLITE_PATH, or a per-user default
+
+MySQL mode:
 
 If the target database does not exist, db:init first attempts to create it with
 utf8mb4/utf8mb4_unicode_ci using the configured credentials, then installs the
@@ -114,6 +122,7 @@ interface SyncArgs {
   sectors: boolean;
   sectorMembers: boolean;
   intraday?: IntradayInterval;
+  sqlite?: string;
   help: boolean;
 }
 
@@ -128,6 +137,8 @@ function parseArgs(args: string[]): SyncArgs {
     else if (a === "--incremental") opts.full = false;
     else if (a === "--sectors") opts.sectors = true;
     else if (a === "--no-members") opts.sectorMembers = false;
+    else if (a === "--sqlite") opts.sqlite = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : ":default:";
+    else if (a.startsWith("--sqlite=")) opts.sqlite = a.slice("--sqlite=".length) || ":default:";
     else if (a === "-h" || a === "--help") opts.help = true;
     else if (a === "--intraday") {
       const iv = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "15m";
@@ -139,6 +150,34 @@ function parseArgs(args: string[]): SyncArgs {
     }
   }
   return opts;
+}
+
+/**
+ * Resolve the SQLite database path for `db:init`.
+ *
+ * Returns null when SQLite is not requested, which keeps the MySQL path the default during
+ * the v0.5.0 migration. `--sqlite` with no value falls back to the env var, then to a
+ * conventional per-user data location.
+ */
+function resolveSqlitePath(flag: string | undefined): string | null {
+  const envPath = process.env.YAHOO_STOCK_MCP_SQLITE_PATH;
+  if (flag === undefined && !envPath) return null;
+  if (flag && flag !== ":default:") return flag;
+  if (envPath) return envPath;
+  return defaultSqlitePath();
+}
+
+function defaultSqlitePath(): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ".";
+  if (process.platform === "win32") {
+    const base = process.env.APPDATA ?? home;
+    return `${base}/yahoo-stock-mcp/stocks.db`;
+  }
+  if (process.platform === "darwin") {
+    return `${home}/Library/Application Support/yahoo-stock-mcp/stocks.db`;
+  }
+  const base = process.env.XDG_DATA_HOME ?? `${home}/.local/share`;
+  return `${base}/yahoo-stock-mcp/stocks.db`;
 }
 
 async function main() {
@@ -154,7 +193,7 @@ async function main() {
     return;
   }
 
-  const { cmd, symbol, all, full, sectors, sectorMembers, intraday, help } = parseArgs(args);
+  const { cmd, symbol, all, full, sectors, sectorMembers, intraday, sqlite, help } = parseArgs(args);
 
   switch (cmd) {
     case "version":
@@ -177,13 +216,37 @@ async function main() {
       return;
     }
 
-    case "db:init":
+    case "db:init": {
       if (help) {
         printHelp("db:init");
         return;
       }
+      // SQLite bootstrap is opt-in during the migration (C1): without --sqlite (or the
+      // YAHOO_STOCK_MCP_SQLITE_PATH env var) this command keeps its existing MySQL behaviour.
+      const sqlitePath = resolveSqlitePath(sqlite);
+      if (sqlitePath) {
+        // Imported lazily: src/storage/database.ts loads `node:sqlite`, which does not exist
+        // before Node 22.5. A static import here would break every command — including the
+        // still-supported MySQL path — for Node 20 users and CI. The dependency is only
+        // pulled in when SQLite is actually requested.
+        const { openDatabase } = await import("./storage/database.js");
+        const { initSqliteSchema } = await import("./storage/migrations.js");
+        const conn = openDatabase(sqlitePath);
+        try {
+          const applied = initSqliteSchema(conn);
+          console.log(
+            applied.length
+              ? `sqlite schema ready at ${conn.path}; migrations applied: ${applied.join(", ")}`
+              : `sqlite schema already up to date at ${conn.path}`
+          );
+        } finally {
+          conn.close();
+        }
+        break;
+      }
       await initSchema();
       break;
+    }
 
     case "db:migrate":
       if (help) {
