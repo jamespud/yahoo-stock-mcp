@@ -12,31 +12,12 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: root123
-          MYSQL_ROOT_HOST: "%"
-          MYSQL_DATABASE: yahoo_stock_mcp
-          MYSQL_USER: stock
-          MYSQL_PASSWORD: stock123
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot123"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=20
-    env:
-      YAHOO_STOCK_MCP_DATABASE_URL: mysql://stock:stock123@127.0.0.1:3306/yahoo_stock_mcp
-      YAHOO_STOCK_MCP_TEST_ADMIN_DATABASE_URL: mysql://root:root123@127.0.0.1:3306/mysql
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
 
@@ -44,6 +25,7 @@ jobs:
         if: github.event_name == 'push'
         run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
 
+      # No database service: SQLite is the only backend.
       - run: npm ci
 
       - name: Validate TypeScript and tests
