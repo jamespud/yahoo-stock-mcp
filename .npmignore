@@ -9,3 +9,10 @@ deploy/
 .cache/
 .env
 *.tsbuildinfo
+
+# Python runtime bytecode and local environments are never distributable artifacts.
+**/__pycache__/
+**/*.pyc
+quant/.venv/
+quant/.pytest_cache/
+quant/.hypothesis/

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yahoo-stock-quant"
+version = "0.1.0"
+description = "Quant strategy contracts and execution runtime for yahoo-stock-mcp"
+requires-python = ">=3.12"
+dependencies = [
+    "exchange-calendars==4.13.2",
+    "numpy>=2.3,<3",
+    "pandas>=2.2,<4",
+    "pyarrow>=21,<27",
+    "pydantic>=2.12,<3",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "hypothesis>=6,<7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stock_quant"]

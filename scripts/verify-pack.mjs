@@ -47,6 +47,12 @@ if (shipped.size === 0) throw new Error("npm pack reported no files");
 const required = new Set([
   "package.json",
   "dist/cli.js",
+  "dist/quant/bridge.js",
+  "dist/quant/tools.js",
+  "quant/pyproject.toml",
+  "quant/uv.lock",
+  "quant/README.md",
+  ...walk(resolve(root, "quant/src")).filter((p) => p.endsWith(".py")),
   "db/sqlite/migrations/0001_initial.sql",
   "README.md",
   "README.zh-CN.md",
@@ -68,6 +74,9 @@ const forbidden = [...shipped]
   .filter(
     (p) =>
       /^(src|scripts|deploy|node_modules)\//.test(p) ||
+      p.includes("/__pycache__/") ||
+      p.endsWith(".pyc") ||
+      /^quant\/(tests|\.venv|\.pytest_cache|\.hypothesis)\//.test(p) ||
       p === ".env" ||
       p.startsWith(".git/") ||
       // no MySQL runtime or legacy schema may ship again

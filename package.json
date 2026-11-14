@@ -15,7 +15,11 @@
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
-    ".env.example"
+    ".env.example",
+    "quant/src/**/*.py",
+    "quant/pyproject.toml",
+    "quant/uv.lock",
+    "quant/README.md"
   ],
   "repository": {
     "type": "git",
@@ -66,7 +70,9 @@
     "test:sync-writes": "tsx scripts/test-sync-writes.ts",
     "test:transport": "tsx scripts/test-investing-transport.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify:pack": "node scripts/verify-pack.mjs"
+    "verify:pack": "node scripts/verify-pack.mjs",
+    "test:quant": "uv run --project quant pytest quant/tests",
+    "test:quant-mcp": "tsx scripts/test-quant-mcp.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

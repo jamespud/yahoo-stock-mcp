@@ -85,3 +85,7 @@ scheduled live-provider canary 会 hard-gate Yahoo 以及 Investing 的数据契
 - provider 访问受上方提示及上游条款约束
 
 安装和命令请继续阅读 **[docs/USAGE.zh-CN.md](./docs/USAGE.zh-CN.md)**。
+
+### 量化研究平台
+
+可选 Python 量化运行时提供类型化 DSL/DAG 编译、多周期 Point-in-Time 数据、异步共享资金组合回测、显式企业行动、绩效分析和不可变 Parquet 结果；支持有界网格优化、Walk-forward、横截面筛选及受限 NumPy 计算路径。Python 生命周期策略通过由操作者固定镜像的可选 Docker 沙箱执行。通过 `QUANT_ENABLED=1` 开启量化工具；安装、示例及研究版本边界见 [量化运行时说明](quant/README.md)。本地 Yahoo OHLC 默认标记为价格口径未核实，订单回测前需要调用者明确声明已确认原始历史价格。
