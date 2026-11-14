@@ -1,0 +1,114 @@
+{
+  "scenario": "screening",
+  "budget": {
+    "scenario": "screening",
+    "candidates": 4,
+    "evaluations": 0,
+    "max_tool_calls": 100,
+    "max_jobs": 1,
+    "request": {
+      "search_space": {
+        "fast": [
+          5,
+          10
+        ],
+        "slow": [
+          20,
+          30
+        ]
+      },
+      "train_top_k": 2,
+      "cost_multipliers": [
+        1,
+        2
+      ],
+      "windows": [
+        {
+          "train_start": "2025-03-04T14:30:00+00:00",
+          "train_end": "2025-04-01T13:30:00+00:00",
+          "validation_start": "2025-04-01T13:30:00+00:00",
+          "validation_end": "2025-04-15T13:30:00+00:00",
+          "test_start": "2025-04-15T13:30:00+00:00",
+          "test_end": "2025-04-30T13:30:00+00:00"
+        },
+        {
+          "train_start": "2025-04-30T13:30:00+00:00",
+          "train_end": "2025-05-29T13:30:00+00:00",
+          "validation_start": "2025-05-29T13:30:00+00:00",
+          "validation_end": "2025-06-12T13:30:00+00:00",
+          "test_start": "2025-06-12T13:30:00+00:00",
+          "test_end": "2025-06-27T13:30:00+00:00"
+        },
+        {
+          "train_start": "2025-06-27T13:30:00+00:00",
+          "train_end": "2025-07-28T13:30:00+00:00",
+          "validation_start": "2025-07-28T13:30:00+00:00",
+          "validation_end": "2025-08-11T13:30:00+00:00",
+          "test_start": "2025-08-11T13:30:00+00:00",
+          "test_end": "2025-08-25T13:30:00+00:00"
+        },
+        {
+          "train_start": "2025-08-25T13:30:00+00:00",
+          "train_end": "2025-09-23T13:30:00+00:00",
+          "validation_start": "2025-09-23T13:30:00+00:00",
+          "validation_end": "2025-10-07T13:30:00+00:00",
+          "test_start": "2025-10-07T13:30:00+00:00",
+          "test_end": "2025-10-21T13:30:00+00:00"
+        }
+      ],
+      "max_trials": 4,
+      "max_evaluations": 36,
+      "random_seed": 80421,
+      "config": {
+        "initial_cash": 10000,
+        "quantity": 10,
+        "commission_bps": 10,
+        "slippage_bps": 5
+      }
+    }
+  },
+  "windows": [
+    {
+      "train_start": "2025-03-04T14:30:00+00:00",
+      "train_end": "2025-04-01T13:30:00+00:00",
+      "validation_start": "2025-04-01T13:30:00+00:00",
+      "validation_end": "2025-04-15T13:30:00+00:00",
+      "test_start": "2025-04-15T13:30:00+00:00",
+      "test_end": "2025-04-30T13:30:00+00:00"
+    },
+    {
+      "train_start": "2025-04-30T13:30:00+00:00",
+      "train_end": "2025-05-29T13:30:00+00:00",
+      "validation_start": "2025-05-29T13:30:00+00:00",
+      "validation_end": "2025-06-12T13:30:00+00:00",
+      "test_start": "2025-06-12T13:30:00+00:00",
+      "test_end": "2025-06-27T13:30:00+00:00"
+    },
+    {
+      "train_start": "2025-06-27T13:30:00+00:00",
+      "train_end": "2025-07-28T13:30:00+00:00",
+      "validation_start": "2025-07-28T13:30:00+00:00",
+      "validation_end": "2025-08-11T13:30:00+00:00",
+      "test_start": "2025-08-11T13:30:00+00:00",
+      "test_end": "2025-08-25T13:30:00+00:00"
+    },
+    {
+      "train_start": "2025-08-25T13:30:00+00:00",
+      "train_end": "2025-09-23T13:30:00+00:00",
+      "validation_start": "2025-09-23T13:30:00+00:00",
+      "validation_end": "2025-10-07T13:30:00+00:00",
+      "test_start": "2025-10-07T13:30:00+00:00",
+      "test_end": "2025-10-21T13:30:00+00:00"
+    }
+  ],
+  "as_of": "2025-11-17T21:01:00.000Z",
+  "intraday_start": "2025-11-13T14:30:00+00:00",
+  "metadata": {
+    "data_kind": "synthetic",
+    "source": "synthetic_seeded",
+    "price_basis": "raw",
+    "raw_attested": false
+  },
+  "fixture_version": "dsh-complex-v1",
+  "data_hash": "sha256:41fcee0da3becfc4444a79cbb444488b9f51328860f0c8cd5a3cf8654c30efeb"
+}

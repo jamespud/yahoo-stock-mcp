@@ -1,0 +1,93 @@
+[
+  {
+    "command": "npm run sync:skill-references",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 0.123
+  },
+  {
+    "command": "npm run build:plugin",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 0.104
+  },
+  {
+    "command": "npm run test:skills",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 0.754
+  },
+  {
+    "command": "npm run test:skills:quant",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 4.102
+  },
+  {
+    "command": "npm run test:plugin",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 0.147
+  },
+  {
+    "command": "npm run test:quant",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 17.448
+  },
+  {
+    "command": "npm run test:quant-mcp",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 25.25
+  },
+  {
+    "command": "npm run test:quant-regression",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 26.772
+  },
+  {
+    "command": "npm run test:quant-semantic",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 4.014
+  },
+  {
+    "command": "npm run typecheck",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 1.434
+  },
+  {
+    "command": "npm run build",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 1.584
+  },
+  {
+    "command": "npm run test",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 95.279
+  },
+  {
+    "command": "npm run verify:pack",
+    "status": "PASSED",
+    "exit_code": 0,
+    "signal": null,
+    "seconds": 0.443
+  }
+]

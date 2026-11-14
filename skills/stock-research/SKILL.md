@@ -76,6 +76,8 @@ Keep this skill's report shallow on these topics and hand them off:
 | dividend history, yield, payout, coverage | `dividend-research` |
 | sector comparison, rotation, sector constituents | `sector-rotation` |
 | option chain, implied volatility, open interest | `options-analysis` |
+| quantitative hypothesis, DSL signals, dated screening, parameter search | `quant-strategy-research` |
+| backtesting, accounting, costs, reproducibility, holdout reliability | `quant-research-reliability` |
 | ownership depth, short interest, holder breakdown | extend the report from `get_holders`, `get_short_interest`, and `get_holder_breakdown` |
 
 Do not answer a technical, earnings, dividend, sector, or options question from this skill's data

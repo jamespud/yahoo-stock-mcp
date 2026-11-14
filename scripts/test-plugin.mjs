@@ -5,6 +5,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { refreshSkillReport } from "./sync-skill-references.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginRoot = resolve(root, "plugins/yahoo-stock-mcp");
 const buildScript = resolve(root, "scripts/build-plugin.mjs");
@@ -46,8 +48,18 @@ const bundledSkills = readdirSync(resolve(pluginRoot, "skills"))
   .filter((name) => statSync(resolve(pluginRoot, "skills", name)).isDirectory())
   .sort();
 assert.deepEqual(bundledSkills, sourceSkills);
+assert.equal(sourceSkills.length, 9);
+for (const name of ["quant-strategy-research", "quant-research-reliability"]) {
+  assert.ok(bundledSkills.includes(name));
+  assert.equal(readFileSync(resolve(pluginRoot, "skills", name, "references/quant-research-policy.md"), "utf8"),
+    readFileSync(resolve(root, "skills/references/quant-research-policy.md"), "utf8"));
+}
+assert.match(plugin.description, /opt-in quantitative/);
+assert.match(plugin.extensions["com.openai"].interface.longDescription, /leakage, benchmarks, costs/);
+assert.match(readFileSync(resolve(pluginRoot, "README.md"), "utf8"), /QUANT_ENABLED=1/);
 for (const name of bundledSkills) {
   assert.ok(existsSync(resolve(pluginRoot, "skills", name, "SKILL.md")));
   assert.ok(existsSync(resolve(pluginRoot, "skills", name, "references", "data-policy.md")));
 }
+refreshSkillReport({skills: Object.fromEntries(sourceSkills.map(name => [name, {plugin_packaging: "PASS"}]))});
 console.log(`plugin tests OK: ${bundledSkills.length} skills, MCP pinned to yahoo-stock-mcp@${pkg.version}`);

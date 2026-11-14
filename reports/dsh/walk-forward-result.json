@@ -1,0 +1,179 @@
+{
+  "scenario_id": "quant-dsh-walkforward-v1",
+  "final_status": "PASS",
+  "runs_attempted": 3,
+  "runs_passed": 3,
+  "success_rate": 1.0,
+  "runs": [
+    {
+      "run_index": 1,
+      "scenario_id": "quant-dsh-walkforward-v1",
+      "final_status": "PASS",
+      "semantic_grader_results": {
+        "status": "PASS",
+        "checked_claims": 7,
+        "errors": []
+      },
+      "correctness_gate_results": {
+        "quant_job_terminal": "completed",
+        "accounting_identity": "retrieved_and_graded",
+        "pit_rule": "prompted_and_result_checked"
+      },
+      "failure_classification": null,
+      "model": {
+        "provider": "sub2api-go",
+        "model": "deepseek-v4.1-flash",
+        "reasoning_effort": "low",
+        "credential_source": "saved sub2api-go credential reference"
+      },
+      "prompt_version": "dsh-quant-scenario-v1",
+      "prompt_sha256": "sha256:6460ee00c6fc195b54e42bfd8db77826558be4b909a77241e8b81b965d0ca6b5",
+      "tool_catalog_hash": {
+        "cli": "sha256:2823232dfe70c8e1e63a69e0d79d6f0973c56af3383366da44be7dab2f66642e",
+        "tools": "sha256:2c24a76443715c0f6f0ded9876e0e7c91623d7009a4965f3a74480ffe79205cb",
+        "bridge": "sha256:020bb0f0e84bddacdcf0d4e55ad4d566ec38d6659107e425db1c1bde74394232"
+      },
+      "dataset_hash": "sha256:41fcee0da3becfc4444a79cbb444488b9f51328860f0c8cd5a3cf8654c30efeb",
+      "fixture_version": "dsh-complex-v1",
+      "fixture_metadata_sha256": "sha256:490d5c5b0cdede3121aecf6f6bc634df09ca0e661e6b48ed7b3818991ee9b050",
+      "job_ids": [
+        "opt_b187dabfdad748fc8d3ff66f6f765d8a"
+      ],
+      "tool_calls": 8,
+      "quant_tool_calls": 8,
+      "tool_errors": 0,
+      "tools_used": [
+        "quant_compile_strategy",
+        "quant_get_capabilities",
+        "quant_get_job",
+        "quant_get_result",
+        "quant_optimize",
+        "quant_register_strategy",
+        "quant_validate_strategy"
+      ],
+      "tool_request_bytes": 3684,
+      "tool_result_bytes": 24014,
+      "model_steps": 9,
+      "token_usage": {
+        "max_context_tokens": 26087,
+        "output_tokens": 6935,
+        "max_cache_read_tokens": 21760
+      },
+      "elapsed_time_seconds": 148.206,
+      "elapsed_time_basis": "artifact_mtime_span",
+      "artifacts": "reports/dsh/reliability-retest/walk-forward/run-1"
+    },
+    {
+      "run_index": 2,
+      "scenario_id": "quant-dsh-walkforward-v1",
+      "final_status": "PASS",
+      "semantic_grader_results": {
+        "status": "PASS",
+        "checked_claims": 7,
+        "errors": []
+      },
+      "correctness_gate_results": {
+        "quant_job_terminal": "completed",
+        "accounting_identity": "retrieved_and_graded",
+        "pit_rule": "prompted_and_result_checked"
+      },
+      "failure_classification": null,
+      "model": {
+        "provider": "sub2api-go",
+        "model": "deepseek-v4.1-flash",
+        "reasoning_effort": "low",
+        "credential_source": "saved sub2api-go credential reference"
+      },
+      "prompt_version": "dsh-quant-scenario-v1",
+      "prompt_sha256": "sha256:6460ee00c6fc195b54e42bfd8db77826558be4b909a77241e8b81b965d0ca6b5",
+      "tool_catalog_hash": {
+        "cli": "sha256:2823232dfe70c8e1e63a69e0d79d6f0973c56af3383366da44be7dab2f66642e",
+        "tools": "sha256:2c24a76443715c0f6f0ded9876e0e7c91623d7009a4965f3a74480ffe79205cb",
+        "bridge": "sha256:020bb0f0e84bddacdcf0d4e55ad4d566ec38d6659107e425db1c1bde74394232"
+      },
+      "dataset_hash": "sha256:41fcee0da3becfc4444a79cbb444488b9f51328860f0c8cd5a3cf8654c30efeb",
+      "fixture_version": "dsh-complex-v1",
+      "fixture_metadata_sha256": "sha256:490d5c5b0cdede3121aecf6f6bc634df09ca0e661e6b48ed7b3818991ee9b050",
+      "job_ids": [
+        "opt_d22fa49b2c5742e58f01f4d2afe79ac5"
+      ],
+      "tool_calls": 6,
+      "quant_tool_calls": 6,
+      "tool_errors": 0,
+      "tools_used": [
+        "quant_get_capabilities",
+        "quant_get_job",
+        "quant_get_result",
+        "quant_optimize",
+        "quant_register_strategy"
+      ],
+      "tool_request_bytes": 2529,
+      "tool_result_bytes": 20285,
+      "model_steps": 6,
+      "token_usage": {
+        "max_context_tokens": 22541,
+        "output_tokens": 5358,
+        "max_cache_read_tokens": 15744
+      },
+      "elapsed_time_seconds": 122.053,
+      "elapsed_time_basis": "artifact_mtime_span",
+      "artifacts": "reports/dsh/reliability-retest/walk-forward/run-2"
+    },
+    {
+      "run_index": 3,
+      "scenario_id": "quant-dsh-walkforward-v1",
+      "final_status": "PASS",
+      "semantic_grader_results": {
+        "status": "PASS",
+        "checked_claims": 7,
+        "errors": []
+      },
+      "correctness_gate_results": {
+        "quant_job_terminal": "completed",
+        "accounting_identity": "retrieved_and_graded",
+        "pit_rule": "prompted_and_result_checked"
+      },
+      "failure_classification": null,
+      "model": {
+        "provider": "sub2api-go",
+        "model": "deepseek-v4.1-flash",
+        "reasoning_effort": "low",
+        "credential_source": "saved sub2api-go credential reference"
+      },
+      "prompt_version": "dsh-quant-scenario-v1",
+      "prompt_sha256": "sha256:6460ee00c6fc195b54e42bfd8db77826558be4b909a77241e8b81b965d0ca6b5",
+      "tool_catalog_hash": {
+        "cli": "sha256:2823232dfe70c8e1e63a69e0d79d6f0973c56af3383366da44be7dab2f66642e",
+        "tools": "sha256:2c24a76443715c0f6f0ded9876e0e7c91623d7009a4965f3a74480ffe79205cb",
+        "bridge": "sha256:020bb0f0e84bddacdcf0d4e55ad4d566ec38d6659107e425db1c1bde74394232"
+      },
+      "dataset_hash": "sha256:41fcee0da3becfc4444a79cbb444488b9f51328860f0c8cd5a3cf8654c30efeb",
+      "fixture_version": "dsh-complex-v1",
+      "fixture_metadata_sha256": "sha256:490d5c5b0cdede3121aecf6f6bc634df09ca0e661e6b48ed7b3818991ee9b050",
+      "job_ids": [
+        "opt_39cae8e16ba84ad08a5d0390f03a1034"
+      ],
+      "tool_calls": 7,
+      "quant_tool_calls": 7,
+      "tool_errors": 0,
+      "tools_used": [
+        "quant_get_capabilities",
+        "quant_get_job",
+        "quant_get_result",
+        "quant_optimize",
+        "quant_register_strategy"
+      ],
+      "tool_request_bytes": 2619,
+      "tool_result_bytes": 20513,
+      "model_steps": 6,
+      "token_usage": {
+        "max_context_tokens": 23070,
+        "output_tokens": 5805,
+        "max_cache_read_tokens": 16000
+      },
+      "elapsed_time_seconds": 132.859,
+      "elapsed_time_basis": "artifact_mtime_span",
+      "artifacts": "reports/dsh/reliability-retest/walk-forward/run-3"
+    }
+  ]
+}

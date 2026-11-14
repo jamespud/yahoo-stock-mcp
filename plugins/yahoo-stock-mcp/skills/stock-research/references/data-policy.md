@@ -5,7 +5,8 @@ shared contract that keeps results reproducible and traceable.
 
 ## 1. Data is a synced snapshot, not a live feed
 
-All read tools except `get_option_quote` read from the local SQLite database. "Latest" means
+The market-data read tools except `get_option_quote` read from the local SQLite database. Quant tools
+read immutable snapshots, the quant registry and result artifacts under their separate contracts. "Latest" means
 "latest synced row", not "current market price".
 
 - Anchor every report to explicit timestamps: `get_quote` -> `syncedAt` and `latestBar.trade_date`,
@@ -102,9 +103,11 @@ construct one, show the inputs and the arithmetic.
 
 ## 8. Scope
 
-These skills produce research. They do not produce investment advice, trade instructions, or
-executed orders, and the repository exposes no screening, backtesting, or trading capability.
-Do not present a skill's output as any of those.
+These skills produce research, not investment advice or live broker orders. Screening, backtesting,
+parameter optimization and walk-forward are available only through the opt-in quant catalog
+(`QUANT_ENABLED=1`) and the deployed `quant_get_capabilities` contract. Simulated orders are not
+broker orders. When quant tools are absent, state that boundary and route to setup; do not invent
+execution. Quant skills additionally follow their local `references/quant-research-policy.md`.
 
 ## 9. Full-history and bulk syncs are the user's decision
 

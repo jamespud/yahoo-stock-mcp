@@ -1,0 +1,469 @@
+{
+  "claims": [
+    {
+      "kind": "fold",
+      "evidence": {
+        "callId": "eval-7",
+        "path": "/rows/0"
+      },
+      "value": {
+        "boundaries": {
+          "test_end": "2025-04-30T13:30:00Z",
+          "test_start": "2025-04-15T13:30:00Z",
+          "train_end": "2025-04-01T13:30:00Z",
+          "train_start": "2025-03-04T14:30:00Z",
+          "validation_end": "2025-04-15T13:30:00Z",
+          "validation_start": "2025-04-01T13:30:00Z"
+        },
+        "cost_sensitivity": [
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 1
+          },
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 2
+          }
+        ],
+        "selected_parameters": {
+          "fast": 5,
+          "slow": 30
+        },
+        "selected_plan_id": "sha256:18292a89c72f609aed96a24ae0c0405d2fabf4a5fa7751667164645addcfb2d6",
+        "test": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "train": {
+          "annualized_volatility": 0.017958630547234726,
+          "cagr": 0.14419498977831402,
+          "commission_paid": 1.2903892778101018,
+          "fill_count": 1,
+          "max_drawdown": -0.00212368336087565,
+          "metric_warnings": [],
+          "sharpe": 8.24261362130543,
+          "signal_diagnostics": {
+            "evaluated_decisions": 20,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0.010092620706751099,
+          "turnover": 0.1290389277810102
+        },
+        "validation": {
+          "annualized_volatility": 0.020094506151565664,
+          "cagr": -0.18263893024622888,
+          "commission_paid": 2.677750171979617,
+          "fill_count": 2,
+          "max_drawdown": -0.007300956185999685,
+          "metric_warnings": [],
+          "sharpe": -10.781224824111513,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": -0.007300956185999685,
+          "turnover": 0.2677750171979617
+        },
+        "window": 0
+      }
+    },
+    {
+      "kind": "fold",
+      "evidence": {
+        "callId": "eval-7",
+        "path": "/rows/1"
+      },
+      "value": {
+        "boundaries": {
+          "test_end": "2025-06-27T13:30:00Z",
+          "test_start": "2025-06-12T13:30:00Z",
+          "train_end": "2025-05-29T13:30:00Z",
+          "train_start": "2025-04-30T13:30:00Z",
+          "validation_end": "2025-06-12T13:30:00Z",
+          "validation_start": "2025-05-29T13:30:00Z"
+        },
+        "cost_sensitivity": [
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 1
+          },
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 2
+          }
+        ],
+        "selected_parameters": {
+          "fast": 10,
+          "slow": 30
+        },
+        "selected_plan_id": "sha256:4a96c202a04d9e465800b3a3021399bfcc1dec79ea58e1a0b1316c6e171cdf25",
+        "test": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "train": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 20,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "validation": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "window": 1
+      }
+    },
+    {
+      "kind": "fold",
+      "evidence": {
+        "callId": "eval-7",
+        "path": "/rows/2"
+      },
+      "value": {
+        "boundaries": {
+          "test_end": "2025-08-25T13:30:00Z",
+          "test_start": "2025-08-11T13:30:00Z",
+          "train_end": "2025-07-28T13:30:00Z",
+          "train_start": "2025-06-27T13:30:00Z",
+          "validation_end": "2025-08-11T13:30:00Z",
+          "validation_start": "2025-07-28T13:30:00Z"
+        },
+        "cost_sensitivity": [
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 1
+          },
+          {
+            "metrics": {
+              "annualized_volatility": 0,
+              "cagr": 0,
+              "commission_paid": 0,
+              "fill_count": 0,
+              "max_drawdown": 0,
+              "metric_warnings": [],
+              "sharpe": null,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0,
+              "turnover": 0
+            },
+            "multiplier": 2
+          }
+        ],
+        "selected_parameters": {
+          "fast": 10,
+          "slow": 30
+        },
+        "selected_plan_id": "sha256:4a96c202a04d9e465800b3a3021399bfcc1dec79ea58e1a0b1316c6e171cdf25",
+        "test": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "train": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 20,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "validation": {
+          "annualized_volatility": 0,
+          "cagr": 0,
+          "commission_paid": 0,
+          "fill_count": 0,
+          "max_drawdown": 0,
+          "metric_warnings": [],
+          "sharpe": null,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0,
+          "turnover": 0
+        },
+        "window": 2
+      }
+    },
+    {
+      "kind": "fold",
+      "evidence": {
+        "callId": "eval-7",
+        "path": "/rows/3"
+      },
+      "value": {
+        "boundaries": {
+          "test_end": "2025-10-21T13:30:00Z",
+          "test_start": "2025-10-07T13:30:00Z",
+          "train_end": "2025-09-23T13:30:00Z",
+          "train_start": "2025-08-25T13:30:00Z",
+          "validation_end": "2025-10-07T13:30:00Z",
+          "validation_start": "2025-09-23T13:30:00Z"
+        },
+        "cost_sensitivity": [
+          {
+            "metrics": {
+              "annualized_volatility": 0.018226666009288947,
+              "cagr": 0.2396158575208926,
+              "commission_paid": 1.1723967820823398,
+              "fill_count": 1,
+              "max_drawdown": -0.001524160956922982,
+              "metric_warnings": [],
+              "sharpe": 9.515192309802373,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0.007835245267791446,
+              "turnover": 0.11723967820823397
+            },
+            "multiplier": 1
+          },
+          {
+            "metrics": {
+              "annualized_volatility": 0.017757748058772282,
+              "cagr": 0.23367353797251364,
+              "commission_paid": 2.3459653750413234,
+              "fill_count": 1,
+              "max_drawdown": -0.0015244283272152215,
+              "metric_warnings": [],
+              "sharpe": 9.466190075292307,
+              "signal_diagnostics": {
+                "evaluated_decisions": 10,
+                "undefined_entry_decisions": 0,
+                "undefined_exit_decisions": 0
+              },
+              "total_return": 0.007659297864663239,
+              "turnover": 0.11729826875206616
+            },
+            "multiplier": 2
+          }
+        ],
+        "selected_parameters": {
+          "fast": 10,
+          "slow": 30
+        },
+        "selected_plan_id": "sha256:4a96c202a04d9e465800b3a3021399bfcc1dec79ea58e1a0b1316c6e171cdf25",
+        "test": {
+          "annualized_volatility": 0.018226666009288947,
+          "cagr": 0.2396158575208926,
+          "commission_paid": 1.1723967820823398,
+          "fill_count": 1,
+          "max_drawdown": -0.001524160956922982,
+          "metric_warnings": [],
+          "sharpe": 9.515192309802373,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0.007835245267791446,
+          "turnover": 0.11723967820823397
+        },
+        "train": {
+          "annualized_volatility": 0.013616557369088686,
+          "cagr": 0.06103070405867723,
+          "commission_paid": 1.0480768750522482,
+          "fill_count": 1,
+          "max_drawdown": -0.001293118175908714,
+          "metric_warnings": [],
+          "sharpe": 4.959794298811706,
+          "signal_diagnostics": {
+            "evaluated_decisions": 20,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0.004595901382683509,
+          "turnover": 0.10480768750522482
+        },
+        "validation": {
+          "annualized_volatility": 0.018139582290691448,
+          "cagr": 0.16168715275530013,
+          "commission_paid": 1.0951959169510883,
+          "fill_count": 1,
+          "max_drawdown": -0.0015068648616580749,
+          "metric_warnings": [],
+          "sharpe": 7.574623169193077,
+          "signal_diagnostics": {
+            "evaluated_decisions": 10,
+            "undefined_entry_decisions": 0,
+            "undefined_exit_decisions": 0
+          },
+          "total_return": 0.0054604306267631575,
+          "turnover": 0.10951959169510883
+        },
+        "window": 3
+      }
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-8",
+        "path": "/out_of_sample_used_for_selection"
+      },
+      "value": false
+    },
+    {
+      "kind": "provenance",
+      "value": {
+        "data_kind": "synthetic",
+        "source": "synthetic_seeded",
+        "price_basis": "raw",
+        "raw_attested": false
+      }
+    },
+    {
+      "kind": "limitation",
+      "value": "independent_fresh_capital_folds"
+    }
+  ]
+}

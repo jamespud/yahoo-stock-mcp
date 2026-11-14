@@ -1,0 +1,18 @@
+{
+  "scenario": "walkforward",
+  "status": "FAIL",
+  "errors": [
+    "DSH wall-clock timeout (120s); no matching completed final event"
+  ],
+  "credentialSource": "saved DSH credential reference",
+  "artifacts": "reports/dsh/walkforward",
+  "execution": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": true
+  },
+  "executedBeforeFinalRefinements": false,
+  "originalErrors": [
+    "Missing matching session/final event"
+  ]
+}

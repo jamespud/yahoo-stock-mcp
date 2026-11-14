@@ -89,3 +89,10 @@ never as an observation, and never as advice.
 - Nulls and short series are reported, not smoothed over.
 - An indicator without enough warm-up never supports a conclusion: report it as not computable.
 - A full-history sync is proposed, not executed on your own initiative - see `stock-data-setup`.
+
+## Quant routing
+
+For a quantitative hypothesis, typed DSL, dated screening or parameter search, use
+`quant-strategy-research`. For backtest fills, costs, accounting, holdouts and reproducibility,
+use `quant-research-reliability`. First inspect the actual tools/list: quant is opt-in and requires
+`quant_get_capabilities`; descriptive indicators alone cannot establish strategy performance.

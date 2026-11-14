@@ -1,0 +1,10 @@
+{
+  "scenario": "multitimeframe",
+  "status": "PASS",
+  "errors": [],
+  "checkedClaims": 14,
+  "credentialSource": "saved sub2api-go credential reference",
+  "provider": "sub2api-go",
+  "model": "deepseek-v4.1-flash",
+  "artifacts": "/tmp/quant-dsh-final-multitimeframe/multitimeframe-sAnVoV"
+}

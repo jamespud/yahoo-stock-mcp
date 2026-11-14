@@ -1,0 +1,125 @@
+{
+  "version": "qqq-real-snapshot-v1",
+  "data_kind": "real_vendor_history",
+  "execution_price_basis": "vendor_quote_raw_assumption_not_independently_certified",
+  "availability_policy": "modeled_bar_end_plus_1_second_not_historical_publication",
+  "corporate_action_policy": "vendor_ex_dates_and_amounts; unknown_pay_dates; receivables_retained_to_exclusive_end; no_reinvestment",
+  "registry_path": ".cache/qqq-real-2026-11-14-curl/quant.db",
+  "datasets": [
+    {
+      "timeframe": "1m",
+      "vendor_interval": "1m",
+      "data_snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+      "bar_count": 8190,
+      "action_count": 0,
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_ids": [
+        "sha256:120b96b9e0fd17833b7bf1bd760791131756e03810b0aa241a544076f5a13022"
+      ],
+      "lineage": null,
+      "dataset_hash": "sha256:e2ae07fc1609ef7293aa560b50a6ae5d963af0cdbb15be81fe1bb9e581f25ac0",
+      "first_start": "2026-10-16T13:30:00+00:00",
+      "last_end": "2026-11-13T21:00:00+00:00",
+      "calendar_id": "sha256:120b96b9e0fd17833b7bf1bd760791131756e03810b0aa241a544076f5a13022",
+      "bars_file": ".cache/qqq-real-2026-11-14-curl/snapshot-bars-1m.json",
+      "price_basis_evidence": {
+        "field": "indicators.quote; not indicators.adjclose",
+        "returned_split_events": 0,
+        "independent_raw_verification": "NOT_TESTED",
+        "basis_is_execution_assumption": true
+      }
+    },
+    {
+      "timeframe": "15m",
+      "vendor_interval": "15m",
+      "data_snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+      "bar_count": 1118,
+      "action_count": 1,
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_ids": [
+        "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed"
+      ],
+      "lineage": null,
+      "dataset_hash": "sha256:4d98e12bf80b2ac3707256aab8d3bf750a48b4024d36a5837679aa844c265719",
+      "first_start": "2026-09-16T13:30:00+00:00",
+      "last_end": "2026-11-13T21:00:00+00:00",
+      "calendar_id": "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed",
+      "bars_file": ".cache/qqq-real-2026-11-14-curl/snapshot-bars-15m.json",
+      "price_basis_evidence": {
+        "field": "indicators.quote; not indicators.adjclose",
+        "returned_split_events": 0,
+        "independent_raw_verification": "NOT_TESTED",
+        "basis_is_execution_assumption": true
+      }
+    },
+    {
+      "timeframe": "1h",
+      "vendor_interval": "60m",
+      "data_snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+      "bar_count": 1740,
+      "action_count": 4,
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_ids": [
+        "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001"
+      ],
+      "lineage": null,
+      "dataset_hash": "sha256:30cba068d6315602d08b169083667bbdf566246b5df28a17b1e2b4a11576bcb7",
+      "first_start": "2025-11-14T14:30:00+00:00",
+      "last_end": "2026-11-13T21:00:00+00:00",
+      "calendar_id": "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001",
+      "bars_file": ".cache/qqq-real-2026-11-14-curl/snapshot-bars-1h.json",
+      "price_basis_evidence": {
+        "field": "indicators.quote; not indicators.adjclose",
+        "returned_split_events": 0,
+        "independent_raw_verification": "NOT_TESTED",
+        "basis_is_execution_assumption": true
+      }
+    },
+    {
+      "timeframe": "1d",
+      "vendor_interval": "1d",
+      "data_snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+      "bar_count": 251,
+      "action_count": 4,
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_ids": [
+        "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001"
+      ],
+      "lineage": null,
+      "dataset_hash": "sha256:55ae6ecaa54b0ad5d874678caf84ec29da6fc6d9522980936c744ce0b1f150ee",
+      "first_start": "2025-11-14T14:30:00+00:00",
+      "last_end": "2026-11-13T21:00:00+00:00",
+      "calendar_id": "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001",
+      "bars_file": ".cache/qqq-real-2026-11-14-curl/snapshot-bars-1d.json",
+      "price_basis_evidence": {
+        "field": "indicators.quote; not indicators.adjclose",
+        "returned_split_events": 0,
+        "independent_raw_verification": "NOT_TESTED",
+        "basis_is_execution_assumption": true
+      }
+    },
+    {
+      "timeframe": "5m",
+      "vendor_interval": "5m",
+      "data_snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+      "bar_count": 3354,
+      "action_count": 1,
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_ids": [
+        "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed"
+      ],
+      "lineage": null,
+      "dataset_hash": "sha256:f31e78b23e2150dc2aac81d5f6471549b056cde3b9b1916dc7d29cf7b2160230",
+      "first_start": "2026-09-16T13:30:00+00:00",
+      "last_end": "2026-11-13T21:00:00+00:00",
+      "calendar_id": "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed",
+      "bars_file": ".cache/qqq-real-2026-11-14-curl/snapshot-bars-5m.json",
+      "price_basis_evidence": {
+        "field": "indicators.quote; not indicators.adjclose",
+        "returned_split_events": 0,
+        "independent_raw_verification": "NOT_TESTED",
+        "basis_is_execution_assumption": true
+      }
+    }
+  ]
+}

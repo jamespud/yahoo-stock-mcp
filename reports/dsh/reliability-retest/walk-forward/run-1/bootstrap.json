@@ -1,0 +1,48 @@
+{
+  "data_snapshot_id": "sha256:d0a1ffb6fb6e781774a1dd46220d8a64cfe3e7b716f82a5a31878b01d0a40a7e",
+  "bar_count": 2637,
+  "action_count": 0,
+  "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+  "calendar_ids": [
+    "sha256:10298cf69e7d1088e302389f02a4ee2b3b28c30f79f56f8288c60074a49c586a"
+  ],
+  "lineage": null,
+  "preflight": {
+    "status": "PASS",
+    "scope": "deterministic MCP requests; not autonomous LLM acceptance",
+    "data_snapshot_id": "sha256:d0a1ffb6fb6e781774a1dd46220d8a64cfe3e7b716f82a5a31878b01d0a40a7e",
+    "multitimeframe": {
+      "strategy_id": "sha256:35ac3370c5fe950a38cf5b48092e8ca8453a81ed0788da5379bdf9b24109fd11",
+      "plan_id": "sha256:d1194648063c1f276dc6893623f64255d21b80512b97d6e2cb211185051b96ce",
+      "job_id": "bt_75ba105b28e04997b24311bc07199ae4",
+      "fills": 4,
+      "buy_fills": 2,
+      "sell_fills": 2,
+      "commission_paid": 5.453211347987275,
+      "trade_sample_sufficient": false
+    },
+    "screening": {
+      "strategy_id": "sha256:6691cf090c4dd2c8ec414a0cd1caac45ebd9c0ef9edf2d9cd83cf8940a0b50dc",
+      "job_id": "screen_5fd223dd4b134254ba0c68b59412ace5",
+      "symbols": [
+        "MSFT",
+        "AAPL",
+        "QTEST"
+      ],
+      "missing_symbol": "QTEST"
+    },
+    "walkforward": {
+      "strategy_id": "sha256:a6aee34229d8a64be63c9280bcfa878be856e2286fb7209a08a12109c4acc29a",
+      "job_id": "opt_818c3b62485149338f798a3c7932a6df",
+      "selected_plan_ids": [
+        "sha256:2c7670d59237732e713e11b95d97f7c32b6b965e7cf7a7f4bdb29ba404508fa4",
+        "sha256:f48993a5a6befc022a1929f61d8bb994b659d4c53985ee6dab044db0e73e4ac2",
+        "sha256:f48993a5a6befc022a1929f61d8bb994b659d4c53985ee6dab044db0e73e4ac2",
+        "sha256:f48993a5a6befc022a1929f61d8bb994b659d4c53985ee6dab044db0e73e4ac2"
+      ],
+      "folds": 4,
+      "candidates": 4,
+      "evaluations": 36
+    }
+  }
+}

@@ -1,0 +1,253 @@
+[
+  {
+    "name": "ema-rsi",
+    "valid": true,
+    "request": {
+      "strategy": {
+        "schema_version": "1.0",
+        "name": "ema-rsi",
+        "decision_timeframe": "1d",
+        "entry": {
+          "kind": "binary",
+          "op": "and",
+          "left": {
+            "kind": "binary",
+            "op": "gt",
+            "left": {
+              "kind": "ref",
+              "symbol": "$symbol",
+              "field": "close",
+              "timeframe": "1d"
+            },
+            "right": {
+              "kind": "call",
+              "operator": "ema",
+              "args": [
+                {
+                  "kind": "ref",
+                  "symbol": "$symbol",
+                  "field": "close",
+                  "timeframe": "1d"
+                }
+              ],
+              "params": {
+                "period": 5
+              }
+            }
+          },
+          "right": {
+            "kind": "binary",
+            "op": "lt",
+            "left": {
+              "kind": "call",
+              "operator": "rsi",
+              "args": [
+                {
+                  "kind": "ref",
+                  "symbol": "$symbol",
+                  "field": "close",
+                  "timeframe": "1d"
+                }
+              ],
+              "params": {
+                "period": 3
+              }
+            },
+            "right": {
+              "kind": "const",
+              "value": 70
+            }
+          }
+        },
+        "exit": {
+          "kind": "binary",
+          "op": "lt",
+          "left": {
+            "kind": "ref",
+            "symbol": "$symbol",
+            "field": "close",
+            "timeframe": "1d"
+          },
+          "right": {
+            "kind": "call",
+            "operator": "ema",
+            "args": [
+              {
+                "kind": "ref",
+                "symbol": "$symbol",
+                "field": "close",
+                "timeframe": "1d"
+              }
+            ],
+            "params": {
+              "period": 5
+            }
+          }
+        }
+      },
+      "symbol": "AAPL"
+    }
+  },
+  {
+    "name": "bound-parameters",
+    "valid": true,
+    "request": {
+      "strategy": {
+        "schema_version": "1.0",
+        "name": "bound-ema",
+        "decision_timeframe": "1d",
+        "entry": {
+          "kind": "binary",
+          "op": "gt",
+          "left": {
+            "kind": "ref",
+            "symbol": "$symbol",
+            "field": "close",
+            "timeframe": "1d"
+          },
+          "right": {
+            "kind": "call",
+            "operator": "ema",
+            "args": [
+              {
+                "kind": "ref",
+                "symbol": "$symbol",
+                "field": "close",
+                "timeframe": "1d"
+              }
+            ],
+            "params": {
+              "period": {
+                "kind": "param",
+                "name": "period"
+              }
+            }
+          }
+        },
+        "exit": {
+          "kind": "binary",
+          "op": "lt",
+          "left": {
+            "kind": "ref",
+            "symbol": "$symbol",
+            "field": "close",
+            "timeframe": "1d"
+          },
+          "right": {
+            "kind": "call",
+            "operator": "ema",
+            "args": [
+              {
+                "kind": "ref",
+                "symbol": "$symbol",
+                "field": "close",
+                "timeframe": "1d"
+              }
+            ],
+            "params": {
+              "period": 5
+            }
+          }
+        },
+        "parameters": {
+          "period": {
+            "value_type": "integer",
+            "default": 5,
+            "minimum": 2,
+            "maximum": 20
+          }
+        }
+      },
+      "symbol": "AAPL",
+      "parameters": {
+        "period": 8
+      }
+    }
+  },
+  {
+    "name": "explicit-alignment",
+    "valid": true,
+    "request": {
+      "strategy": {
+        "schema_version": "1.0",
+        "name": "completed-daily-on-hourly",
+        "decision_timeframe": "1h",
+        "entry": {
+          "kind": "binary",
+          "op": "gt",
+          "left": {
+            "kind": "align",
+            "value": {
+              "kind": "call",
+              "operator": "ema",
+              "args": [
+                {
+                  "kind": "ref",
+                  "symbol": "$symbol",
+                  "field": "close",
+                  "timeframe": "1d"
+                }
+              ],
+              "params": {
+                "period": 5
+              }
+            },
+            "timeframe": "1h",
+            "policy": "last_completed"
+          },
+          "right": {
+            "kind": "const",
+            "value": 10
+          }
+        },
+        "exit": {
+          "kind": "const",
+          "value": false
+        }
+      },
+      "symbol": "AAPL"
+    }
+  },
+  {
+    "name": "numeric-entry-rejected",
+    "valid": false,
+    "error_code": "TYPE_MISMATCH",
+    "request": {
+      "strategy": {
+        "schema_version": "1.0",
+        "name": "ema-rsi",
+        "decision_timeframe": "1d",
+        "entry": {
+          "kind": "const",
+          "value": 1
+        },
+        "exit": {
+          "kind": "binary",
+          "op": "lt",
+          "left": {
+            "kind": "ref",
+            "symbol": "$symbol",
+            "field": "close",
+            "timeframe": "1d"
+          },
+          "right": {
+            "kind": "call",
+            "operator": "ema",
+            "args": [
+              {
+                "kind": "ref",
+                "symbol": "$symbol",
+                "field": "close",
+                "timeframe": "1d"
+              }
+            ],
+            "params": {
+              "period": 5
+            }
+          }
+        }
+      },
+      "symbol": "AAPL"
+    }
+  }
+]

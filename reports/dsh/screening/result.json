@@ -1,0 +1,16 @@
+{
+  "scenario": "screening",
+  "status": "FAIL",
+  "errors": [
+    "Labels only permitted on scalar metrics"
+  ],
+  "checkedClaims": 26,
+  "credentialSource": "saved DSH credential reference",
+  "artifacts": "reports/dsh/screening",
+  "execution": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false
+  },
+  "executedBeforeFinalRefinements": false
+}

@@ -1,0 +1,122 @@
+{
+  "version": "qqq-financial-replay-v1",
+  "commands": [
+    {
+      "phase": "prepare",
+      "exit_code": 0,
+      "elapsed_ms": 1983,
+      "error": null
+    },
+    {
+      "phase": "mcp",
+      "exit_code": 0,
+      "elapsed_ms": 46868,
+      "error": null
+    },
+    {
+      "phase": "oracle",
+      "exit_code": 0,
+      "elapsed_ms": 379,
+      "error": null
+    }
+  ],
+  "results": [
+    {
+      "timeframe": "1m",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_de2b863ed8564bc2a53d313e2f5f31b0",
+        "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+        "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+        "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+      },
+      "after": {
+        "job_id": "bt_57050571321a4f2982f50913767757f3",
+        "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+        "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+        "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+      }
+    },
+    {
+      "timeframe": "5m",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_2d13c0b0fe054d229914bf4908e79cc4",
+        "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+        "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+        "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+      },
+      "after": {
+        "job_id": "bt_fc03ff10c2284726b7698ca2e00b5d07",
+        "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+        "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+        "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+      }
+    },
+    {
+      "timeframe": "15m",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_ca6e3d7c0e1b4b608df3e55e10f65710",
+        "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+        "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+        "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+      },
+      "after": {
+        "job_id": "bt_ed52c6f8247e4b27af195ff1b17fe44d",
+        "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+        "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+        "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+      }
+    },
+    {
+      "timeframe": "1h",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_496c2342e1e5477a8cf1055b780770bf",
+        "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+        "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+        "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+      },
+      "after": {
+        "job_id": "bt_616b066b33904cf99296cb288bf40443",
+        "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+        "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+        "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+      }
+    },
+    {
+      "timeframe": "1d",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_fad6a95aa392440982ddecbfd6bfa789",
+        "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+        "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+        "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+      },
+      "after": {
+        "job_id": "bt_7d0c87d1bc174ea4a99d2581adcd5762",
+        "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+        "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+        "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+      }
+    },
+    {
+      "timeframe": "1w",
+      "status": "PASSED",
+      "before": {
+        "job_id": "bt_c2b3367418f947e48e90478c4a64c2dd",
+        "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+        "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+        "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+      },
+      "after": {
+        "job_id": "bt_c7e7f1823d0749e9b062f59e2b35a0ef",
+        "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+        "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+        "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+      }
+    }
+  ],
+  "status": "PASSED"
+}

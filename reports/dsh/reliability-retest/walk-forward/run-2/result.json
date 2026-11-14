@@ -1,0 +1,10 @@
+{
+  "scenario": "walkforward",
+  "status": "PASS",
+  "errors": [],
+  "checkedClaims": 7,
+  "credentialSource": "saved sub2api-go credential reference",
+  "provider": "sub2api-go",
+  "model": "deepseek-v4.1-flash",
+  "artifacts": "/tmp/quant-dsh-final-walkforward/walkforward-5CpyVL"
+}

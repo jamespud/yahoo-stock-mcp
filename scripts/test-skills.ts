@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync, cpSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
+// @ts-ignore JavaScript report helper shared with plugin validation.
+import { refreshSkillReport } from "./sync-skill-references.mjs";
+import { tmpdir } from "node:os";
 
 /**
  * Structural checks for the skills/ tree. Behavioural evaluation needs a model, so this script
@@ -193,17 +196,25 @@ class McpProbe {
 
   waitExit(ms: number): Promise<[number | null, string | null]> {
     if (this.exitInfo) return Promise.resolve(this.exitInfo);
-    return Promise.race([
-      once(this.child, "exit") as Promise<[number | null, string | null]>,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout waiting for exit")), ms)),
-    ]);
+    return new Promise((resolveExit, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout waiting for exit")), ms);
+      once(this.child, "exit").then(value => {
+        clearTimeout(timer);
+        resolveExit(value as [number | null, string | null]);
+      }, reject);
+    });
   }
 }
 
 /** The real, running tool surface - the skills are checked against this, not against a list here. */
-async function liveToolNames(): Promise<string[]> {
+async function liveToolNames(enabled: boolean, skills: Skill[]): Promise<string[]> {
   const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
-  const child = spawn(tsxBin, ["src/cli.ts", "server"], { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
+  const temp = mkdtempSync(join(tmpdir(), "skills-mcp-"));
+  const child = spawn(tsxBin, ["src/cli.ts", "server"], { cwd: root,
+    env: {...process.env, QUANT_ENABLED: enabled ? "1" : "0", QUANT_SANDBOX_IMAGE: "",
+      QUANT_PYTHON: enabled ? (process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python")) : join(temp, "python-must-not-run"),
+      QUANT_REGISTRY_PATH: join(temp, "quant.db"), YAHOO_STOCK_MCP_SQLITE_PATH: join(temp, "data.db")},
+    stdio: ["pipe", "pipe", "pipe"] });
   const probe = new McpProbe(child);
   probe.start();
   try {
@@ -215,18 +226,75 @@ async function liveToolNames(): Promise<string[]> {
     assert.ok(init.result, `initialize failed: ${JSON.stringify(init)}`);
     probe.notify("notifications/initialized");
     const list = await probe.request("tools/list");
-    return list.result.tools.map((t: any) => t.name).sort();
+    assert.ok(list.result?.tools, JSON.stringify(list));
+    const names: string[] = list.result.tools.map((t: any) => t.name).sort();
+    if (!enabled) {
+      assert.equal(names.some(name => name.startsWith("quant_")), false);
+      assert.equal(existsSync(join(temp, "quant.db")), false);
+    }
+    else {
+      async function call(name: string, args: unknown = {}) {
+        const response = await probe.request("tools/call", {name, arguments: args}, 40_000);
+        assert.ok(!response.error && !response.result?.isError, JSON.stringify(response));
+        return JSON.parse(response.result.content[0].text);
+      }
+      const caps = await call("quant_get_capabilities");
+      assert.equal(caps.mcp_execution_enabled, true);
+      assert.ok(caps.dsl_schema && caps.strategy_modes.includes("dsl"));
+      assert.equal(caps.python_sandbox, false);
+      assert.equal(caps.sandbox.available, false);
+      assert.ok(caps.research.methods.includes("walk_forward"));
+      for (const section of ["reproducibility", "artifacts", "analytics", "trials", "walk_forward"])
+        assert.ok(caps.result_sections.includes(section));
+      const registeredNames = [...readFileSync(resolve(root, "src/quant/tools.ts"), "utf8").matchAll(/server\.tool\("(quant_[a-z_]+)"/g)].map(m => m[1]).sort();
+      assert.deepEqual(names.filter(n => n.startsWith("quant_")), registeredNames);
+      for (const skill of skills.filter(s => s.name.startsWith("quant-"))) {
+        const examples = resolve(skill.dir, "references/strategy-examples.json");
+        for (const example of JSON.parse(readFileSync(examples, "utf8"))) {
+          const result = await call("quant_validate_strategy", example.request);
+          assert.equal(result.valid, example.valid, `${skill.name}/${example.name}: ${JSON.stringify(result)}`);
+          if (example.error_code) assert.ok(result.errors.some((e: any) => e.code === example.error_code));
+        }
+      }
+      const markdown = readFileSync(resolve(skillsDir, "quant-strategy-research/references/dsl-examples.md"), "utf8");
+      const blocks = [...markdown.matchAll(/```json\n([\s\S]*?)\n```/g)];
+      assert.equal(blocks.length, 4, "expected four complete Markdown validation requests");
+      for (const [index, block] of blocks.entries()) {
+        const result = await call("quant_validate_strategy", JSON.parse(block[1]));
+        assert.equal(result.valid, index !== blocks.length - 1, JSON.stringify(result));
+      }
+      console.log("quant capabilities and 12 DSL validation requests OK (9 positive, 3 negative)");
+    }
+    return names;
   } finally {
     child.stdin.end();
-    const [code, signal] = await probe.waitExit(5000);
-    assert.equal(signal, null, `server killed by ${signal}`);
-    assert.equal(code, 0, `server exit code ${code}`);
+    try {
+      const [code, signal] = await probe.waitExit(5000);
+      assert.equal(signal, null, `server killed by ${signal}`);
+      assert.equal(code, 0, `server exit code ${code}`);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      rmSync(temp, {recursive: true, force: true});
+    }
   }
 }
 
 async function main() {
   const skills = loadSkills();
   const names = skills.map((s) => s.name);
+  for (const name of ["quant-strategy-research", "quant-research-reliability"]) assert.ok(names.includes(name), `missing ${name}`);
+  assert.equal(names.length, 9);
+  const requiredRefs: Record<string, string[]> = {
+    "quant-strategy-research": ["data-policy", "quant-research-policy", "workflow", "dsl-examples", "result-interpretation"],
+    "quant-research-reliability": ["data-policy", "quant-research-policy", "reliability-checklist", "benchmark-policy", "report-template"]
+  };
+  for (const [name, refs] of Object.entries(requiredRefs)) {
+    const skill = skills.find(s => s.name === name)!;
+    for (const ref of refs) {
+      assert.ok(existsSync(resolve(skill.dir, `references/${ref}.md`)), `${name}: missing ${ref}.md`);
+      assert.ok(skill.body.includes(`references/${ref}.md`), `${name}: unlinked ${ref}.md`);
+    }
+  }
   console.log(`skills found: ${names.join(", ")}`);
 
   // The shared policy is the one file every skill must point at.
@@ -245,9 +313,38 @@ async function main() {
     console.log(`  ${skill.name}: ${skill.tools.length} tools -> ${skill.tools.join(", ")}`);
   }
 
-  const tools = await liveToolNames();
+  // Copy each directory alone: no sibling or repository file may be needed at install time.
+  const isolated = mkdtempSync(join(tmpdir(), "skills-install-"));
+  try {
+    for (const skill of skills) {
+      const dest = join(isolated, skill.name);
+      cpSync(skill.dir, dest, {recursive: true});
+      function verify(dir: string) {
+        for (const name of readdirSync(dir)) {
+          const file = join(dir, name);
+          if (statSync(file).isDirectory()) verify(file);
+          else if (name.endsWith(".md")) {
+            const body = readFileSync(file, "utf8");
+            checkRelativeLinks(file, dir, body);
+            for (const link of relativeLinks(body)) {
+              const rel = relative(dest, resolve(dir, link));
+              assert.ok(rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel), `${file}: outside install`);
+            }
+          }
+        }
+      }
+      verify(dest);
+    }
+  } finally { rmSync(isolated, {recursive: true, force: true}); }
+  const defaultTools = await liveToolNames(false, skills);
+  const quantMode = process.argv.includes("--quant");
+  const tools = quantMode ? await liveToolNames(true, skills) : defaultTools;
+  for (const name of defaultTools) assert.ok(tools.includes(name), `quant mode lost ${name}`);
+  for (const skill of skills.filter(s => !s.name.startsWith("quant-"))) {
+    for (const tool of skill.tools) assert.ok(defaultTools.includes(tool), `${skill.name}: ${tool} needs opt-in`);
+  }
   const known = new Set(tools);
-  const referenced = [...new Set(skills.flatMap((s) => s.tools))].sort();
+  const referenced = [...new Set(skills.filter(s => quantMode || !s.name.startsWith("quant-")).flatMap((s) => s.tools))].sort();
   const unknown = referenced.filter((name) => !known.has(name));
   assert.deepEqual(
     unknown,
@@ -271,6 +368,12 @@ async function main() {
     );
   }
 
+  refreshSkillReport({skills: Object.fromEntries(skills.map(skill => [skill.name, {
+    schema: "PASS", reference_integrity: "PASS",
+    default_mode: skill.name.startsWith("quant-") ? "OPT_IN_NOT_EXPOSED" : "PASS",
+    ...(!skill.name.startsWith("quant-") || quantMode ? {resolved_tools: skill.tools.filter(t => known.has(t))} : {}),
+    ...(quantMode ? {quant_mode: "PASS"} : {})
+  }])), catalogs: {default_mode: defaultTools, ...(quantMode ? {quant_mode: tools} : {})}});
   console.log("skills tests OK");
 }
 

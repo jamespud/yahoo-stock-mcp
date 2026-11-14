@@ -34,24 +34,25 @@ const pluginManifest = {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   name: "yahoo-stock-mcp",
   version: pkg.version,
-  description: "Stock-market research skills backed by the yahoo-stock-mcp MCP server.",
+  description: "Stock-market and opt-in quantitative research skills backed by yahoo-stock-mcp.",
   author: { name: "jamespud" },
   repository: "https://github.com/jamespud/yahoo-stock-mcp",
   license: "MIT",
-  keywords: ["stocks", "research", "mcp", "yahoo-finance", "sqlite"],
+  keywords: ["stocks", "research", "mcp", "yahoo-finance", "sqlite", "quant", "backtesting", "research-reliability"],
   extensions: {
     "com.openai": {
       interface: {
         displayName: "Yahoo Stock MCP",
-        shortDescription: "Stock research skills and MCP market-data tools",
-        longDescription: "Research companies, sectors, options, dividends, earnings, and technicals with repeatable skills and the local yahoo-stock-mcp server.",
+        shortDescription: "Stock and quant research skills with MCP tools",
+        longDescription: "Research companies, sectors, options, dividends, earnings and technicals. Optional quant workflows author validated DSL experiments and audit leakage, benchmarks, costs and reproducibility; quant execution requires explicit local runtime configuration.",
         developerName: "jamespud",
         category: "Productivity",
         capabilities: ["Read"],
         websiteURL: "https://github.com/jamespud/yahoo-stock-mcp",
         defaultPrompt: [
           "Research a company using the Yahoo Stock MCP workflows.",
-          "Analyze a stock's technicals, earnings, dividends, options, or sector context."
+          "Analyze a stock's technicals, earnings, dividends, options, or sector context.",
+          "Design a quantitative research experiment or audit backtest reliability using the opt-in quant tools."
         ]
       }
     }
@@ -81,6 +82,16 @@ The plugin bundles all repository skills and launches the matching published npm
 Runtime requirements are Node.js >= 22.13 and a local SQLite database, which is created
 automatically in a per-user data directory. Keep proxy credentials in the local environment or host
 configuration; they are intentionally not stored in this plugin package.
+
+The bundle contains nine independently installable skills, including
+\`quant-strategy-research\` and \`quant-research-reliability\`. The default MCP command
+keeps quant disabled and does not require Python. To opt in, configure the host MCP environment
+with \`QUANT_ENABLED=1\`, \`QUANT_PYTHON\` pointing to the installed quant runtime, and
+\`QUANT_REGISTRY_PATH\` pointing to writable local storage. Reconnect and inspect the actual
+tools/list, then call \`quant_get_capabilities\`; provider coverage and sandbox availability
+remain separate checks. Python strategies additionally require an operator-approved immutable
+sandbox image and successful isolation preflight. This plugin embeds no runtime paths, secrets
+or image credentials, and never places live broker orders.
 
 Before advertising a repository plugin revision, publish the matching npm package version so the
 pinned MCP command can resolve.

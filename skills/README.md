@@ -31,8 +31,17 @@ Shared data discipline lives in [`references/data-policy.md`](references/data-po
 referenced by every skill: no fabricated values, explicit as-of dates, disclosure of partial syncs,
 and no circumvention of provider access denial.
 
-Screening, backtesting, and trade execution are explicitly out of scope - the server exposes no such
-capability.
+Quant research is opt-in (`QUANT_ENABLED=1`); default market-data tools do not need the Python
+runtime. Discover the actual tools/list, then `quant_get_capabilities` before making a quant claim.
+Screening and simulated backtesting do not place live broker orders.
+
+| Skill | Purpose |
+| --- | --- |
+| [`quant-strategy-research`](quant-strategy-research/SKILL.md) | Typed DSL, point-in-time signals, dated screening, bounded parameter search and walk-forward. |
+| [`quant-research-reliability`](quant-research-reliability/SKILL.md) | Historical simulation, fills/accounting, costs, reproducibility and research reliability. |
+
+Quant workflows share [quant policy](references/quant-research-policy.md), copied into each quant skill.
+Each quant skill includes validated DSL examples and all references needed for independent install.
 
 ## Format
 
@@ -66,6 +75,8 @@ skills/stock-data-setup
 skills/sector-rotation
 skills/options-analysis
 skills/dividend-research
+skills/quant-strategy-research
+skills/quant-research-reliability
 ```
 
 The installer copies each selected directory into `$CODEX_HOME/skills/<skill-name>` (normally
@@ -90,6 +101,12 @@ appear.
 - every skill links the shared data policy;
 - every tool named in a skill's `## MCP tools used` section exists in the server's live
   `tools/list` response - a skill cannot reference a tool the server does not expose.
+
+`npm run test:skills:quant` adds a second real stdio server with quant enabled, calls capabilities,
+and validates positive and negative DSL requests through MCP. `npm run test:skills` launches only
+the default server and proves the quant tools are absent, without starting Python. Both modes
+check references after copying each skill into a separate install directory. Sync hashes and copy
+status are recorded in `reports/quant-skills-sync.json` and `.md` by the reference sync script.
 
 Behavioural verification needs a model. Each skill is expected to hold up in at least these three
 situations, with a synced database and an MCP client attached:

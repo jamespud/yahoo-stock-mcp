@@ -1,0 +1,192 @@
+{
+  "claims": [
+    {
+      "kind": "provenance",
+      "value": {
+        "data_kind": "synthetic",
+        "source": "synthetic_seeded",
+        "price_basis": "raw",
+        "raw_attested": false
+      }
+    },
+    {
+      "kind": "quality",
+      "evidence": {
+        "callId": "eval-5",
+        "path": "/observed_count"
+      },
+      "value": 220
+    },
+    {
+      "kind": "quality",
+      "evidence": {
+        "callId": "eval-6",
+        "path": "/observed_count"
+      },
+      "value": 140
+    },
+    {
+      "kind": "quality",
+      "evidence": {
+        "callId": "eval-7",
+        "path": "/observed_count"
+      },
+      "value": 519
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-3",
+        "path": "/requirements"
+      },
+      "value": [
+        {
+          "field": "close",
+          "symbol": "AAPL",
+          "timeframe": "15m",
+          "warmup_bars": 1
+        },
+        {
+          "field": "close",
+          "symbol": "AAPL",
+          "timeframe": "1d",
+          "warmup_bars": 30
+        },
+        {
+          "field": "close",
+          "symbol": "AAPL",
+          "timeframe": "1h",
+          "warmup_bars": 15
+        },
+        {
+          "field": "open",
+          "symbol": "AAPL",
+          "timeframe": "15m",
+          "warmup_bars": 1
+        }
+      ]
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-3",
+        "path": "/grid_requirements"
+      },
+      "value": [
+        {
+          "timeframe": "15m",
+          "warmup_bars": 1
+        }
+      ]
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-4",
+        "path": "/signals"
+      },
+      "value": {
+        "entry": false,
+        "exit": true
+      }
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-4",
+        "path": "/grid_dependencies"
+      },
+      "value": [
+        {
+          "symbol": "AAPL",
+          "timeframe": "15m",
+          "warmup_bars": 1,
+          "available_bars": 519
+        }
+      ]
+    },
+    {
+      "kind": "metric",
+      "metric": "total_return",
+      "unit": "ratio",
+      "evidence": {
+        "callId": "eval-16",
+        "path": "/total_return"
+      },
+      "value": -0.00201723548701227
+    },
+    {
+      "kind": "metric",
+      "metric": "fill_count",
+      "unit": "count",
+      "evidence": {
+        "callId": "eval-16",
+        "path": "/fill_count"
+      },
+      "value": 4
+    },
+    {
+      "kind": "fills",
+      "evidence": {
+        "callId": "eval-17",
+        "path": "/rows"
+      },
+      "value": [
+        {
+          "commission": 1.3366207974234499,
+          "order_id": "order_1",
+          "price": 133.66207974234499,
+          "quantity": 10,
+          "side": "buy",
+          "symbol": "AAPL",
+          "time": "2025-11-13T15:00:00+00:00"
+        },
+        {
+          "commission": 1.3258425437935866,
+          "order_id": "order_2",
+          "price": 132.58425437935867,
+          "quantity": 10,
+          "side": "sell",
+          "symbol": "AAPL",
+          "time": "2025-11-13T18:45:00+00:00"
+        },
+        {
+          "commission": 1.3973444483312563,
+          "order_id": "order_3",
+          "price": 139.73444483312562,
+          "quantity": 10,
+          "side": "buy",
+          "symbol": "AAPL",
+          "time": "2025-11-14T18:45:00+00:00"
+        },
+        {
+          "commission": 1.3934035584389821,
+          "order_id": "order_4",
+          "price": 139.3403558438982,
+          "quantity": 10,
+          "side": "sell",
+          "symbol": "AAPL",
+          "time": "2025-11-17T19:45:00+00:00"
+        }
+      ]
+    },
+    {
+      "kind": "metric",
+      "metric": "commission_paid",
+      "unit": "currency",
+      "evidence": {
+        "callId": "eval-19",
+        "path": "/commission_paid"
+      },
+      "value": 5.453211347987275
+    },
+    {
+      "kind": "limitation",
+      "value": "higher_timeframe_availability"
+    },
+    {
+      "kind": "limitation",
+      "value": "insufficient_trade_sample"
+    }
+  ]
+}

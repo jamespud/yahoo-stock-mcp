@@ -1,0 +1,1354 @@
+{
+  "version": "qqq-real-data-acceptance-v1",
+  "generated_at": "2026-11-14T15:04:19.612Z",
+  "symbol": "QQQ",
+  "requested_period": {
+    "start": "2025-11-14T00:00:00.000Z",
+    "end_exclusive": "2026-11-14T00:00:00.000Z"
+  },
+  "overall_status": "BLOCKED",
+  "overall_reason": "Full-year history at every provider granularity is unavailable, and 30m/1mo execution is unsupported. Supported-engine experiments were run on actual available data.",
+  "correctness_status": "PASSED",
+  "price_basis_validation": "NOT_TESTED_INDEPENDENTLY; execution explicitly assumes vendor quote OHLC is raw; no adj_close inputs",
+  "llm_dsh_status": "NOT_TESTED_THIS_REAL_DATA_EXPERIMENT",
+  "strategy": {
+    "name": "close_vs_SMA5",
+    "entry": "close > SMA(close,5)",
+    "exit": "close < SMA(close,5)",
+    "warmup": 5,
+    "parameters_optimized": false,
+    "cash_usd": 10000,
+    "fixed_quantity": 10,
+    "commission_bps_each_fill": 5,
+    "slippage_bps_each_fill": 5,
+    "execution": "first observed open strictly after modeled publication; no market-on-close or same-timestamp fill",
+    "signal_backend": "vector"
+  },
+  "data_policy": {
+    "source": "live Yahoo chart responses",
+    "synthetic_data": false,
+    "missing_bars": "never filled",
+    "publication": "modeled end + 1 second; historical timestamps/revisions unavailable",
+    "dividends": "vendor ex-date/amount; unknown pay dates modeled outside exclusive simulation end; entitlements retained as receivables; no reinvestment",
+    "splits": "no split events returned for requested window",
+    "week_calendar": "calendar extended to Sunday 2026-11-15 so latest completed ISO week can be established; no future market observations imported"
+  },
+  "acquisition": {
+    "version": "qqq-live-acquisition-v1",
+    "symbol": "QQQ",
+    "requested_start": "2025-11-14T00:00:00.000Z",
+    "requested_end_exclusive": "2026-11-14T00:00:00.000Z",
+    "fetched_at": "2026-11-14T14:29:57.547Z",
+    "provider": "Yahoo Finance chart",
+    "run_directory": ".cache/qqq-real-2026-11-14-curl",
+    "queries": [
+      {
+        "id": 1,
+        "interval": "1m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 2078,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"1m data not available for startTime=1763078400 and endTime=1794614400. Only 8 days worth of 1m granularity data are allowed to be fetched per request.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"1m data not available for startTime=1763078400 and endTime=1794614400. Only 8 days worth of 1m granularity data are allowed to be fetched per request.\"}}}"
+      },
+      {
+        "id": 2,
+        "interval": "1m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1792108800&period2=1792713600&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 5907,
+        "bytes": 170793,
+        "response_hash": "sha256:04b549af324da6ee8352cef5c57aa174d6ef5a925977b1cdb5e0d9d922323ddf",
+        "bar_count": 1951
+      },
+      {
+        "id": 3,
+        "interval": "1m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1792713600&period2=1793318400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 5082,
+        "bytes": 170360,
+        "response_hash": "sha256:80db99159ac0ee9e2aab886bb67f728340751ceff679fbe1a552b0f37adbeec4",
+        "bar_count": 1951
+      },
+      {
+        "id": 4,
+        "interval": "1m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1793318400&period2=1793923200&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 7460,
+        "bytes": 170420,
+        "response_hash": "sha256:736f47700f009779b600c2092498f860d17a64be12e87f368db6537283d2bf6e",
+        "bar_count": 1951
+      },
+      {
+        "id": 5,
+        "interval": "1m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1793923200&period2=1794528000&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 3120,
+        "bytes": 169818,
+        "response_hash": "sha256:83b2674f562d8f5afc42b20602dca30c408ed7711b204f3b4c508627dd3c8aaf",
+        "bar_count": 1951
+      },
+      {
+        "id": 6,
+        "interval": "1m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1794528000&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 1933,
+        "bytes": 34976,
+        "response_hash": "sha256:179aa87140598a882f4ba765b3865c40071039bfc4eadd725202b702d6db9ec8",
+        "bar_count": 391
+      },
+      {
+        "id": 7,
+        "interval": "5m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 1332,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"5m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"5m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}"
+      },
+      {
+        "id": 8,
+        "interval": "5m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1789516800&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 25011,
+        "http_status": null,
+        "error": "Command failed: curl --silent --show-error --connect-timeout 8 --max-time 25 --user-agent Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 --write-out \n%{http_code} --proxy http://127.0.0.1:17890 https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1789516800&period2=1794614400&includePrePost=false&events=div%2Csplits\ncurl: (28) Operation timed out after 25002 milliseconds with 3549 bytes received\n",
+        "body": null
+      },
+      {
+        "id": 9,
+        "interval": "15m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=15m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 1061,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"15m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"15m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}"
+      },
+      {
+        "id": 10,
+        "interval": "15m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=15m&period1=1789516800&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 7694,
+        "bytes": 102282,
+        "response_hash": "sha256:69c9c3c205b9f316b789537b60fa73d76c81e428af6d205d5c0bd834eb85d364",
+        "bar_count": 1119
+      },
+      {
+        "id": 11,
+        "interval": "30m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=30m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 1475,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"30m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"30m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}"
+      },
+      {
+        "id": 12,
+        "interval": "30m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=30m&period1=1789516800&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 3195,
+        "bytes": 53697,
+        "response_hash": "sha256:e9ab195f2c5c9412702c8875a94c9a09a34cebf527fad213f78a62a3e4aed1cd",
+        "bar_count": 560
+      },
+      {
+        "id": 13,
+        "interval": "60m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=60m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 2908,
+        "bytes": 173806,
+        "response_hash": "sha256:f2cc1f5c9625f17331798bcda14602b31d2cb7f7c054c53317b9ae290188b105",
+        "bar_count": 1754
+      },
+      {
+        "id": 14,
+        "interval": "1d",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1d&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 3501,
+        "bytes": 28052,
+        "response_hash": "sha256:b8cf58e4d5b66925d3219534b82f26b347395173a4539652c4fd0748fc353301",
+        "bar_count": 251
+      },
+      {
+        "id": 15,
+        "interval": "1wk",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1wk&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 5166,
+        "bytes": 7194,
+        "response_hash": "sha256:4f582b09c17d4c22c056d00ec4c7f5fece5e2f1ae140233e34af83aab84cbe13",
+        "bar_count": 54
+      },
+      {
+        "id": 16,
+        "interval": "1mo",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1mo&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 1079,
+        "bytes": 2829,
+        "response_hash": "sha256:ba93b1604911c1d950189c9a13123c3e8b91f4f965a44cff28d010d17e5bf5ff",
+        "bar_count": 13
+      },
+      {
+        "id": 17,
+        "interval": "5m",
+        "purpose": "requested_full_year",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1763078400&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 965,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"5m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"5m data not available for startTime=1763078400 and endTime=1794614400. The requested range must be within the last 60 days.\"}}}"
+      },
+      {
+        "id": 18,
+        "interval": "5m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1789516800&period2=1790812800&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 3195,
+        "bytes": 79247,
+        "response_hash": "sha256:3001d17c7e0dbb246036478c4742e8aabea6e51080788cc25f0950a3bbe36d4e",
+        "bar_count": 859
+      },
+      {
+        "id": 19,
+        "interval": "5m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1790812800&period2=1792108800&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 2813,
+        "bytes": 78515,
+        "response_hash": "sha256:5f14fd8136ba41b0cfd7727bb33e9a927003e9002b3bd981174587cd05b9393e",
+        "bar_count": 859
+      },
+      {
+        "id": 20,
+        "interval": "5m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1792108800&period2=1793404800&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 1798,
+        "bytes": 77374,
+        "response_hash": "sha256:c140ce19a0f11055962617add22b2b1d1fb792916e2ffdf89c17512e76069eb2",
+        "bar_count": 859
+      },
+      {
+        "id": 21,
+        "interval": "5m",
+        "purpose": "available_retention_window",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=5m&period1=1793404800&period2=1794614400&includePrePost=false&events=div%2Csplits",
+        "status": "PASSED",
+        "elapsed_ms": 1253,
+        "bytes": 69922,
+        "response_hash": "sha256:3d888983ecc109e0529fd96e771009c23775218558c5999179429a6077092b50",
+        "bar_count": 781
+      },
+      {
+        "id": 22,
+        "interval": "1m",
+        "purpose": "oldest_requested_week_retention_probe",
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1m&period1=1763078400&period2=1763683200&includePrePost=false&events=div%2Csplits",
+        "status": "FAILED",
+        "elapsed_ms": 2922,
+        "http_status": 422,
+        "error": "Yahoo HTTP 422: {\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"1m data not available for startTime=1763078400 and endTime=1763683200. The requested range must be within the last 30 days.\"}}}",
+        "body": "{\"chart\":{\"result\":null,\"error\":{\"code\":\"Unprocessable Entity\",\"description\":\"1m data not available for startTime=1763078400 and endTime=1763683200. The requested range must be within the last 30 days.\"}}}"
+      }
+    ],
+    "datasets": [
+      {
+        "interval": "1m",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-1m.json",
+        "data_hash": "sha256:e2ae07fc1609ef7293aa560b50a6ae5d963af0cdbb15be81fe1bb9e581f25ac0",
+        "bar_count": 8191,
+        "first_bar": "2026-10-16T13:30:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "FAILED",
+        "data_status": "PASSED",
+        "dividend_events": 0,
+        "split_events": 0
+      },
+      {
+        "interval": "15m",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-15m.json",
+        "data_hash": "sha256:4d98e12bf80b2ac3707256aab8d3bf750a48b4024d36a5837679aa844c265719",
+        "bar_count": 1119,
+        "first_bar": "2026-09-16T13:30:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "FAILED",
+        "data_status": "PASSED",
+        "dividend_events": 1,
+        "split_events": 0
+      },
+      {
+        "interval": "30m",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-30m.json",
+        "data_hash": "sha256:23ff63d48135cc6bd6ec890b0e7cd8c9ea3799f90651bda6f9a4e15f4259a7cb",
+        "bar_count": 560,
+        "first_bar": "2026-09-16T13:30:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "FAILED",
+        "data_status": "PASSED",
+        "dividend_events": 1,
+        "split_events": 0
+      },
+      {
+        "interval": "60m",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-60m.json",
+        "data_hash": "sha256:30cba068d6315602d08b169083667bbdf566246b5df28a17b1e2b4a11576bcb7",
+        "bar_count": 1743,
+        "first_bar": "2025-11-14T14:30:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 11,
+        "full_year_request_status": "PASSED",
+        "data_status": "PASSED",
+        "dividend_events": 4,
+        "split_events": 0
+      },
+      {
+        "interval": "1d",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-1d.json",
+        "data_hash": "sha256:55ae6ecaa54b0ad5d874678caf84ec29da6fc6d9522980936c744ce0b1f150ee",
+        "bar_count": 251,
+        "first_bar": "2025-11-14T14:30:00.000Z",
+        "last_bar": "2026-11-13T14:30:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "PASSED",
+        "data_status": "PASSED",
+        "dividend_events": 4,
+        "split_events": 0
+      },
+      {
+        "interval": "1wk",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-1wk.json",
+        "data_hash": "sha256:0b98313a62bf68cf07e48568c15a113d7e9dd381048969a012ce30e2ef2c472e",
+        "bar_count": 53,
+        "first_bar": "2025-11-17T05:00:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "PASSED",
+        "data_status": "PASSED",
+        "dividend_events": 4,
+        "split_events": 0
+      },
+      {
+        "interval": "1mo",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-1mo.json",
+        "data_hash": "sha256:67b19d153cc38c271fe905343f5d48f918b8233b5fcbe5bd279fec28504ba813",
+        "bar_count": 13,
+        "first_bar": "2025-12-01T05:00:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "PASSED",
+        "data_status": "PASSED",
+        "dividend_events": 4,
+        "split_events": 0
+      },
+      {
+        "interval": "5m",
+        "file": ".cache/qqq-real-2026-11-14-curl/QQQ-5m.json",
+        "data_hash": "sha256:f31e78b23e2150dc2aac81d5f6471549b056cde3b9b1916dc7d29cf7b2160230",
+        "bar_count": 3355,
+        "first_bar": "2026-09-16T13:30:00.000Z",
+        "last_bar": "2026-11-13T21:00:00.000Z",
+        "discarded_null_rows": 0,
+        "full_year_request_status": "FAILED",
+        "data_status": "PASSED",
+        "dividend_events": 1,
+        "split_events": 0
+      }
+    ]
+  },
+  "experiments": [
+    {
+      "timeframe": "1m",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_57050571321a4f2982f50913767757f3",
+      "job_status": "completed",
+      "job_runtime_seconds": 2,
+      "strategy_id": "sha256:68612e5c0d32b9e22b953b23218cc7c1f72a08d664c9a9722b112e8d25637c40",
+      "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b",
+      "data_snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+      "dataset_hash": "sha256:e2ae07fc1609ef7293aa560b50a6ae5d963af0cdbb15be81fe1bb9e581f25ac0",
+      "calendar_id": "sha256:120b96b9e0fd17833b7bf1bd760791131756e03810b0aa241a544076f5a13022",
+      "first_bar": "2026-10-16T13:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 8190,
+      "missing_bars": 0,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": -0.34968612482387806,
+        "max_drawdown": -0.34968612482387806,
+        "cagr": -0.9961170286390669,
+        "annualized_volatility": 0.509917125124839,
+        "sharpe": -9.132161374847417,
+        "fill_count": 490
+      },
+      "commission_paid": 1743.4077371916198,
+      "accounting_residual": 0,
+      "cash": 6503.138751761219,
+      "equity": 6503.138751761219,
+      "final_quantity": 0,
+      "receivables": 0,
+      "rejected_orders": {
+        "INSUFFICIENT_CASH": 3150
+      },
+      "expired_orders": 0,
+      "correctness": {
+        "timeframe": "1m",
+        "status": "PASSED",
+        "bars": 8190,
+        "signals_checked": 8186,
+        "orders_checked": 3640,
+        "fills_checked": 490,
+        "equity_points_checked": 16380,
+        "max_equity_error": 0,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "1m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_de2b863ed8564bc2a53d313e2f5f31b0",
+          "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+          "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+          "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+        },
+        "after": {
+          "job_id": "bt_57050571321a4f2982f50913767757f3",
+          "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+          "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+          "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-1m.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "vendor",
+      "warnings": [
+        "CASH_CONSTRAINTS_STOPPED_SOME_ENTRIES",
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    },
+    {
+      "timeframe": "5m",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_fc03ff10c2284726b7698ca2e00b5d07",
+      "job_status": "completed",
+      "job_runtime_seconds": 1,
+      "strategy_id": "sha256:7865ea75bd721b1f5abf50dc385f69364561e2bc568586090268569060f56588",
+      "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41",
+      "data_snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+      "dataset_hash": "sha256:f31e78b23e2150dc2aac81d5f6471549b056cde3b9b1916dc7d29cf7b2160230",
+      "calendar_id": "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed",
+      "first_bar": "2026-09-16T13:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 3354,
+      "missing_bars": 0,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": -0.3431784728134256,
+        "max_drawdown": -0.3431784728134256,
+        "cagr": -0.9281293370534821,
+        "annualized_volatility": 0.18120036104907644,
+        "sharpe": -14.05169851423005,
+        "fill_count": 504
+      },
+      "commission_paid": 1841.0151315768433,
+      "accounting_residual": -4.547473508864641e-12,
+      "cash": 6560.705271865743,
+      "equity": 6568.2152718657435,
+      "final_quantity": 0,
+      "receivables": 7.51,
+      "rejected_orders": {
+        "INSUFFICIENT_CASH": 783
+      },
+      "expired_orders": 0,
+      "correctness": {
+        "timeframe": "5m",
+        "status": "PASSED",
+        "bars": 3354,
+        "signals_checked": 3350,
+        "orders_checked": 1287,
+        "fills_checked": 504,
+        "equity_points_checked": 6708,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "5m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_2d13c0b0fe054d229914bf4908e79cc4",
+          "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+          "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+          "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+        },
+        "after": {
+          "job_id": "bt_fc03ff10c2284726b7698ca2e00b5d07",
+          "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+          "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+          "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-5m.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "vendor",
+      "warnings": [
+        "CASH_CONSTRAINTS_STOPPED_SOME_ENTRIES",
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    },
+    {
+      "timeframe": "15m",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_ed52c6f8247e4b27af195ff1b17fe44d",
+      "job_status": "completed",
+      "job_runtime_seconds": 0,
+      "strategy_id": "sha256:aee72714a1f67a4f8ab384182bde6617a84d2e5fcd9b3933384e07ae9c22f4db",
+      "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71",
+      "data_snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+      "dataset_hash": "sha256:4d98e12bf80b2ac3707256aab8d3bf750a48b4024d36a5837679aa844c265719",
+      "calendar_id": "sha256:e9e480585cccf6750a3cc700747dead838e43822338c50cf2de0a88078ada6ed",
+      "first_bar": "2026-09-16T13:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 1118,
+      "missing_bars": 0,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": -0.23431941665274392,
+        "max_drawdown": -0.24578672259042,
+        "cagr": -0.8121923410373598,
+        "annualized_volatility": 0.16746352155060298,
+        "sharpe": -9.179474506640554,
+        "fill_count": 288
+      },
+      "commission_paid": 1039.3184869010925,
+      "accounting_residual": 5.4569682106375694e-12,
+      "cash": 7649.295833472561,
+      "equity": 7656.805833472561,
+      "final_quantity": 0,
+      "receivables": 7.51,
+      "rejected_orders": {},
+      "expired_orders": 1,
+      "correctness": {
+        "timeframe": "15m",
+        "status": "PASSED",
+        "bars": 1118,
+        "signals_checked": 1114,
+        "orders_checked": 289,
+        "fills_checked": 288,
+        "equity_points_checked": 2236,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "15m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_ca6e3d7c0e1b4b608df3e55e10f65710",
+          "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+          "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+          "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+        },
+        "after": {
+          "job_id": "bt_ed52c6f8247e4b27af195ff1b17fe44d",
+          "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+          "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+          "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-15m.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "vendor",
+      "warnings": [
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    },
+    {
+      "timeframe": "1h",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_616b066b33904cf99296cb288bf40443",
+      "job_status": "completed",
+      "job_runtime_seconds": 0,
+      "strategy_id": "sha256:363cce470e76726db8da6ea46400a3cadc66c08436c5bfa0826875c90c876da4",
+      "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2",
+      "data_snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+      "dataset_hash": "sha256:30cba068d6315602d08b169083667bbdf566246b5df28a17b1e2b4a11576bcb7",
+      "calendar_id": "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001",
+      "first_bar": "2025-11-14T14:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 1740,
+      "missing_bars": 11,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": -0.21864790394377465,
+        "max_drawdown": -0.2197579503304934,
+        "cagr": -0.21916592899107992,
+        "annualized_volatility": 0.10879494840164429,
+        "sharpe": -2.2169158275120724,
+        "fill_count": 401
+      },
+      "commission_paid": 1340.2054816986083,
+      "accounting_residual": -9.094947017729282e-12,
+      "cash": 990.9407164216291,
+      "equity": 7813.520960562254,
+      "final_quantity": 10,
+      "receivables": 23.58,
+      "rejected_orders": {},
+      "expired_orders": 0,
+      "correctness": {
+        "timeframe": "1h",
+        "status": "PASSED",
+        "bars": 1740,
+        "signals_checked": 1736,
+        "orders_checked": 401,
+        "fills_checked": 401,
+        "equity_points_checked": 3480,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "1h",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_496c2342e1e5477a8cf1055b780770bf",
+          "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+          "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+          "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+        },
+        "after": {
+          "job_id": "bt_616b066b33904cf99296cb288bf40443",
+          "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+          "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+          "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-1h.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "vendor",
+      "warnings": [
+        "MISSING_BARS_NO_IMPUTATION",
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    },
+    {
+      "timeframe": "1d",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_7d0c87d1bc174ea4a99d2581adcd5762",
+      "job_status": "completed",
+      "job_runtime_seconds": 0,
+      "strategy_id": "sha256:a5c9f1904e64a2dc6a9a0b29a7f815fe389c66b6a7fdac4caee4254510ccf365",
+      "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8",
+      "data_snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+      "dataset_hash": "sha256:55ae6ecaa54b0ad5d874678caf84ec29da6fc6d9522980936c744ce0b1f150ee",
+      "calendar_id": "sha256:cad2317e8664af945d15ca0c3dd514dc4578f338c1dde34b5143b3ca4be48001",
+      "first_bar": "2025-11-14T14:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 251,
+      "missing_bars": 0,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": 0.03951941395289871,
+        "max_drawdown": -0.10166495298746447,
+        "cagr": 0.03962771915366279,
+        "annualized_volatility": 0.09127726846190322,
+        "sharpe": 0.5598444007433023,
+        "fill_count": 57
+      },
+      "commission_paid": 191.02925860336305,
+      "accounting_residual": 2.5579538487363607e-12,
+      "cash": 3580.843993044612,
+      "equity": 10395.194139528987,
+      "final_quantity": 10,
+      "receivables": 15.45,
+      "rejected_orders": {},
+      "expired_orders": 1,
+      "correctness": {
+        "timeframe": "1d",
+        "status": "PASSED",
+        "bars": 251,
+        "signals_checked": 247,
+        "orders_checked": 58,
+        "fills_checked": 57,
+        "equity_points_checked": 502,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "1d",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_fad6a95aa392440982ddecbfd6bfa789",
+          "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+          "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+          "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+        },
+        "after": {
+          "job_id": "bt_7d0c87d1bc174ea4a99d2581adcd5762",
+          "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+          "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+          "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-1d.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "vendor",
+      "warnings": [
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    },
+    {
+      "timeframe": "1w",
+      "status": "PASSED",
+      "data_kind": "real_vendor_history",
+      "price_basis_status": "CONDITIONAL_VENDOR_OHLC_ASSUMPTION",
+      "job_id": "bt_c7e7f1823d0749e9b062f59e2b35a0ef",
+      "job_status": "completed",
+      "job_runtime_seconds": 0,
+      "strategy_id": "sha256:efaab8ffced2f3f58169828ef1d8962166c8e950776baefe27e6d7374a3594b0",
+      "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b",
+      "data_snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+      "dataset_hash": "sha256:55ae6ecaa54b0ad5d874678caf84ec29da6fc6d9522980936c744ce0b1f150ee",
+      "calendar_id": "sha256:b0e370e02f8493425e54b6784d4bb1921e39764a564d606d8788f9308dd1b6b6",
+      "first_bar": "2025-11-17T14:30:00+00:00",
+      "last_bar": "2026-11-13T21:00:00+00:00",
+      "bars": 52,
+      "missing_bars": 0,
+      "out_of_schedule_bars": 0,
+      "metrics": {
+        "total_return": 0.05662566208944719,
+        "max_drawdown": -0.0747980074310931,
+        "cagr": 0.05678211303638882,
+        "annualized_volatility": 0.09545572944907696,
+        "sharpe": 0.62783460124827,
+        "fill_count": 14
+      },
+      "commission_paid": 47.686485794982914,
+      "accounting_residual": -1.7053025658242404e-12,
+      "cash": 10558.126620894473,
+      "equity": 10566.256620894472,
+      "final_quantity": 0,
+      "receivables": 8.129999999999999,
+      "rejected_orders": {},
+      "expired_orders": 0,
+      "correctness": {
+        "timeframe": "1w",
+        "status": "PASSED",
+        "bars": 52,
+        "signals_checked": 48,
+        "orders_checked": 14,
+        "fills_checked": 14,
+        "equity_points_checked": 104,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      "replay": {
+        "timeframe": "1w",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_c2b3367418f947e48e90478c4a64c2dd",
+          "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+          "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+          "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+        },
+        "after": {
+          "job_id": "bt_c7e7f1823d0749e9b062f59e2b35a0ef",
+          "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+          "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+          "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+        }
+      },
+      "result_file": ".cache/qqq-real-2026-11-14-curl/result-1w.json",
+      "publication_delay_seconds": {
+        "min": 1,
+        "max": 1
+      },
+      "week_source": "complete_calendar_weeks_resampled_from_daily",
+      "warnings": [
+        "VENDOR_RAW_BASIS_NOT_INDEPENDENTLY_CERTIFIED",
+        "MODELED_PUBLICATION_TIMES",
+        "NO_OOS_OR_PARAMETER_SEARCH"
+      ]
+    }
+  ],
+  "unsupported": [
+    {
+      "vendor_interval": "30m",
+      "quant_status": "BLOCKED",
+      "reason": "Not in deployed quant_get_capabilities.timeframes; validation explicitly rejects 30m."
+    },
+    {
+      "vendor_interval": "1mo",
+      "quant_status": "BLOCKED",
+      "reason": "Not in deployed quant_get_capabilities.timeframes; validation explicitly rejects 1mo."
+    }
+  ],
+  "oracle": {
+    "oracle_version": "qqq-standard-library-v1",
+    "production_quant_imports": false,
+    "results": [
+      {
+        "timeframe": "1m",
+        "status": "PASSED",
+        "bars": 8190,
+        "signals_checked": 8186,
+        "orders_checked": 3640,
+        "fills_checked": 490,
+        "equity_points_checked": 16380,
+        "max_equity_error": 0,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      {
+        "timeframe": "5m",
+        "status": "PASSED",
+        "bars": 3354,
+        "signals_checked": 3350,
+        "orders_checked": 1287,
+        "fills_checked": 504,
+        "equity_points_checked": 6708,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      {
+        "timeframe": "15m",
+        "status": "PASSED",
+        "bars": 1118,
+        "signals_checked": 1114,
+        "orders_checked": 289,
+        "fills_checked": 288,
+        "equity_points_checked": 2236,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      {
+        "timeframe": "1h",
+        "status": "PASSED",
+        "bars": 1740,
+        "signals_checked": 1736,
+        "orders_checked": 401,
+        "fills_checked": 401,
+        "equity_points_checked": 3480,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      {
+        "timeframe": "1d",
+        "status": "PASSED",
+        "bars": 251,
+        "signals_checked": 247,
+        "orders_checked": 58,
+        "fills_checked": 57,
+        "equity_points_checked": 502,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      },
+      {
+        "timeframe": "1w",
+        "status": "PASSED",
+        "bars": 52,
+        "signals_checked": 48,
+        "orders_checked": 14,
+        "fills_checked": 14,
+        "equity_points_checked": 104,
+        "max_equity_error": 1.8189894035458565e-12,
+        "absolute_tolerance": 1e-7,
+        "relative_tolerance": 1e-11,
+        "checks": [
+          "SMA5",
+          "signal_to_order",
+          "first_strictly_later_open",
+          "slippage",
+          "commissions",
+          "cash",
+          "quantity",
+          "cost_basis",
+          "realized_pnl",
+          "receivables",
+          "mark",
+          "equity",
+          "total_return",
+          "max_drawdown"
+        ]
+      }
+    ],
+    "status": "PASSED"
+  },
+  "replay": {
+    "version": "qqq-financial-replay-v1",
+    "commands": [
+      {
+        "phase": "prepare",
+        "exit_code": 0,
+        "elapsed_ms": 1983,
+        "error": null
+      },
+      {
+        "phase": "mcp",
+        "exit_code": 0,
+        "elapsed_ms": 46868,
+        "error": null
+      },
+      {
+        "phase": "oracle",
+        "exit_code": 0,
+        "elapsed_ms": 379,
+        "error": null
+      }
+    ],
+    "results": [
+      {
+        "timeframe": "1m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_de2b863ed8564bc2a53d313e2f5f31b0",
+          "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+          "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+          "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+        },
+        "after": {
+          "job_id": "bt_57050571321a4f2982f50913767757f3",
+          "hash": "sha256:1d3ea6ffc0c601579ee8c718433148975a19176f6bd9de4679c606af4bb99a1e",
+          "snapshot_id": "sha256:edabbaf946fea1c8ae72942c3ce99bf57f612cbe1f708d3e4e52b603f6955177",
+          "plan_id": "sha256:d6d3177888f4de110757cb3467117015188dbee3e082f188cc6973c959895d0b"
+        }
+      },
+      {
+        "timeframe": "5m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_2d13c0b0fe054d229914bf4908e79cc4",
+          "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+          "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+          "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+        },
+        "after": {
+          "job_id": "bt_fc03ff10c2284726b7698ca2e00b5d07",
+          "hash": "sha256:5493f6a900772ace4c08280519c3e96396407c5031219c4d2aff47ebff3e01f7",
+          "snapshot_id": "sha256:219c77237941a7f08c2ef6682b35adc5ab1fb0b1dbdfddb7e10f082746d4accd",
+          "plan_id": "sha256:3efb8f80f663ed95ada04f6b163ef8dfefd4a2c0aaa2bf04a6386072893bbb41"
+        }
+      },
+      {
+        "timeframe": "15m",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_ca6e3d7c0e1b4b608df3e55e10f65710",
+          "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+          "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+          "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+        },
+        "after": {
+          "job_id": "bt_ed52c6f8247e4b27af195ff1b17fe44d",
+          "hash": "sha256:9c69e0e0203c00edf1add5adcdaf92847b01ddc46b4914be6f720e7200734490",
+          "snapshot_id": "sha256:9b4db1c957a86ad3303cfbdc9e3c7cdde6b0cf9a1d720e0fd5ddd4cdaf04c2f9",
+          "plan_id": "sha256:b61a535855730e89a1f2df6741e3af7373ae3bc50c163d25da16c746bfd0fc71"
+        }
+      },
+      {
+        "timeframe": "1h",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_496c2342e1e5477a8cf1055b780770bf",
+          "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+          "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+          "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+        },
+        "after": {
+          "job_id": "bt_616b066b33904cf99296cb288bf40443",
+          "hash": "sha256:ab4e6271ead43b3f4d5397951f442a2332fa84ba93d17304c5a135bdd68f0e30",
+          "snapshot_id": "sha256:baf85a0042cc74660d19ccc32788c175504d2978187f6b0901414af8fb25b131",
+          "plan_id": "sha256:55932e003a5fb5a114716cf5a4010977816bd936f42ea9db9203523cabe74cb2"
+        }
+      },
+      {
+        "timeframe": "1d",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_fad6a95aa392440982ddecbfd6bfa789",
+          "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+          "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+          "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+        },
+        "after": {
+          "job_id": "bt_7d0c87d1bc174ea4a99d2581adcd5762",
+          "hash": "sha256:a8ac068c1a78f3b24d5de6e12602946520144214cbc940e96dc36c57874a0cf7",
+          "snapshot_id": "sha256:ab4db4e319d0cd118fdd2ad317b506acac84a7266488606e6efffa50ec3b3f68",
+          "plan_id": "sha256:86cf4196ca9b3694f898b91e9dcf72acde4d58834cbf5a2a0e7569315e961bc8"
+        }
+      },
+      {
+        "timeframe": "1w",
+        "status": "PASSED",
+        "before": {
+          "job_id": "bt_c2b3367418f947e48e90478c4a64c2dd",
+          "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+          "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+          "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+        },
+        "after": {
+          "job_id": "bt_c7e7f1823d0749e9b062f59e2b35a0ef",
+          "hash": "sha256:55b13dbb45cad37fcc374921374d6a1c73d185286e69435ccdbc0fb6123fbc25",
+          "snapshot_id": "sha256:13e5ec14121135e4f9b8f39036d83e87d3aa62bc1d0efc4ca3c13cd67a336b5c",
+          "plan_id": "sha256:71a5a4e3b1657b6ab67b615c0b727e17fbc3fe21db37a2237422679b70972b7b"
+        }
+      }
+    ],
+    "status": "PASSED"
+  },
+  "traces": [
+    {
+      "file": ".cache/qqq-real-2026-11-14-curl/mcp-trace-1794666843349.jsonl",
+      "hash": "sha256:6c68641643caa4eb41e64047c9e1e8f5443dadeb8820beead8508c4bd3f6af5c",
+      "tool_calls": 155,
+      "tool_errors": 0,
+      "bytes": 16167277
+    },
+    {
+      "file": ".cache/qqq-real-2026-11-14-curl/mcp-trace-1794666951960.jsonl",
+      "hash": "sha256:6065386d66d0adc86ff9df80e390c1d89c0358ca75f699f73d56179f3de5a02d",
+      "tool_calls": 25,
+      "tool_errors": 0,
+      "bytes": 272751
+    },
+    {
+      "file": ".cache/qqq-real-2026-11-14-curl/mcp-trace-1794667264923.jsonl",
+      "hash": "sha256:bda6ea2444ac537cb24a70698c500f0cf78d36d4a64df9c83987853f1538d337",
+      "tool_calls": 157,
+      "tool_errors": 0,
+      "bytes": 16345250
+    },
+    {
+      "file": ".cache/qqq-real-2026-11-14-curl/mcp-trace-1794668533586.jsonl",
+      "hash": "sha256:5267f12c79efb12c928c2a54e047dd59028c9f97cd332a732b1a088a80d3251d",
+      "tool_calls": 157,
+      "tool_errors": 0,
+      "bytes": 16345250
+    }
+  ],
+  "tool_calls_total": 494,
+  "tool_errors_total": 0,
+  "platform_verification": {
+    "recorded_at": "2026-11-14T14:43:06.163599+00:00",
+    "head": "6b192e8",
+    "scope": "Actual commands completed in this session; existing src unchanged",
+    "checks": [
+      {
+        "command": "npm run build",
+        "exit_code": 0,
+        "evidence": "Executed tsc; completion exit code 0 recorded in this session."
+      },
+      {
+        "command": "npm run typecheck",
+        "exit_code": 0,
+        "log": "reports/qqq-real-data/typecheck.log"
+      },
+      {
+        "command": "npm run test:quant-mcp",
+        "exit_code": 0,
+        "log": "reports/qqq-real-data/quant-mcp-test.log"
+      },
+      {
+        "command": "UV_CACHE_DIR=\"$PWD/.cache/uv\" UV_NO_SYNC=1 npm run test:quant",
+        "exit_code": 0,
+        "passed": 209,
+        "skipped": 25,
+        "log": "reports/qqq-real-data/python-tests.log"
+      }
+    ]
+  },
+  "validation_commands": [
+    {
+      "command": "npm run build",
+      "exit_code": 0,
+      "evidence": "Executed tsc; completion exit code 0 recorded in this session.",
+      "status": "PASSED"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "log": "reports/qqq-real-data/typecheck.log",
+      "status": "PASSED"
+    },
+    {
+      "command": "npm run test:quant-mcp",
+      "exit_code": 0,
+      "log": "reports/qqq-real-data/quant-mcp-test.log",
+      "status": "PASSED"
+    },
+    {
+      "command": "UV_CACHE_DIR=\"$PWD/.cache/uv\" UV_NO_SYNC=1 npm run test:quant",
+      "exit_code": 0,
+      "passed": 209,
+      "skipped": 25,
+      "log": "reports/qqq-real-data/python-tests.log",
+      "status": "PASSED"
+    },
+    {
+      "command": "npm run test:quant-qqq",
+      "status": "PASSED"
+    }
+  ],
+  "limitations": [
+    "Periods differ across intervals; do not rank strategies from these different samples.",
+    "SMA5 is five bars, not the same elapsed horizon across intervals.",
+    "Fixed ten-share sizing; account returns are not fully invested instrument returns.",
+    "Negative returns and high turnover are research findings, not engine correctness failures.",
+    "No OOS study or real LLM/DSH test is claimed by this deterministic MCP experiment.",
+    "30m and monthly raw files are downloaded and preserved, but not represented as engine backtests."
+  ]
+}

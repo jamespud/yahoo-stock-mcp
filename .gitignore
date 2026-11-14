@@ -15,3 +15,9 @@ __pycache__/
 # Local quant data/artifact stores
 *.db.artifacts/
 *.sqlite.artifacts/
+
+# Machine-specific quant evidence and database artifacts
+reports/**/*.junit.xml
+reports/dsh/**/dsh-home/
+reports/dsh/**/eval.patch.json
+reports/dsh/**/quant.db

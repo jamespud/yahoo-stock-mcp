@@ -1,0 +1,274 @@
+{
+  "claims": [
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-ae0cddc1-358f-4860-8655-0d18155f7a15",
+        "path": "/status"
+      },
+      "value": "completed"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/total_count"
+      },
+      "value": 3,
+      "metric": "total_count",
+      "unit": "count"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/next_cursor"
+      },
+      "value": null,
+      "metric": "next_cursor",
+      "unit": "count"
+    },
+    {
+      "kind": "ranking",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows"
+      },
+      "value": [
+        {
+          "symbol": "MSFT",
+          "rank": 1,
+          "score": 162.8312436918878,
+          "percentile": 1,
+          "selected": true,
+          "errors": []
+        },
+        {
+          "symbol": "AAPL",
+          "rank": 2,
+          "score": 135.72031653951393,
+          "percentile": 0.5,
+          "selected": true,
+          "errors": []
+        },
+        {
+          "symbol": "QTEST",
+          "rank": null,
+          "score": null,
+          "percentile": null,
+          "selected": false,
+          "errors": [
+            {
+              "code": "DATA_UNAVAILABLE",
+              "symbol": "QTEST"
+            },
+            {
+              "code": "INSUFFICIENT_HISTORY",
+              "dependency": {
+                "field": "close",
+                "symbol": "QTEST",
+                "timeframe": "1d",
+                "warmup_bars": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "metric",
+      "metric": "score",
+      "unit": "currency",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/0/score"
+      },
+      "value": 162.8312436918878
+    },
+    {
+      "kind": "metric",
+      "metric": "rank",
+      "unit": "count",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/0/rank"
+      },
+      "value": 1
+    },
+    {
+      "kind": "metric",
+      "metric": "percentile",
+      "unit": "ratio",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/0/percentile"
+      },
+      "value": 1
+    },
+    {
+      "kind": "metric",
+      "metric": "score",
+      "unit": "currency",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/1/score"
+      },
+      "value": 135.72031653951393
+    },
+    {
+      "kind": "metric",
+      "metric": "rank",
+      "unit": "count",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/1/rank"
+      },
+      "value": 2
+    },
+    {
+      "kind": "metric",
+      "metric": "percentile",
+      "unit": "ratio",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/1/percentile"
+      },
+      "value": 0.5
+    },
+    {
+      "kind": "diagnostic",
+      "metric": "score",
+      "unit": "currency",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/score"
+      },
+      "value": null
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/errors/0/code"
+      },
+      "value": "DATA_UNAVAILABLE"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/errors/1/code"
+      },
+      "value": "INSUFFICIENT_HISTORY"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/errors/1/dependency/warmup_bars"
+      },
+      "value": 1,
+      "metric": "warmup_bars",
+      "unit": "count"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/selected"
+      },
+      "value": false
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-7a5e97be-dce2-4d43-8631-4df91f27507a",
+        "path": "/rows/2/errors"
+      },
+      "value": [
+        {
+          "code": "DATA_UNAVAILABLE",
+          "symbol": "QTEST"
+        },
+        {
+          "code": "INSUFFICIENT_HISTORY",
+          "dependency": {
+            "field": "close",
+            "symbol": "QTEST",
+            "timeframe": "1d",
+            "warmup_bars": 1
+          }
+        }
+      ]
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-eac1c968-2503-4f62-a678-a7ae591a1f0a",
+        "path": "/universe"
+      },
+      "value": "caller_supplied_as_of_membership; not vendor historical constituents"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-eac1c968-2503-4f62-a678-a7ae591a1f0a",
+        "path": "/ranking_population"
+      },
+      "value": "all valid symbols including unselected"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-1c735ee9-3fef-45ab-a2ed-b587cffc8a8c",
+        "path": "/data_snapshot_id"
+      },
+      "value": "sha256:d0a1ffb6fb6e781774a1dd46220d8a64cfe3e7b716f82a5a31878b01d0a40a7e"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-1c735ee9-3fef-45ab-a2ed-b587cffc8a8c",
+        "path": "/as_of"
+      },
+      "value": "2025-11-17T21:01:00+00:00"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-1c735ee9-3fef-45ab-a2ed-b587cffc8a8c",
+        "path": "/strategy_hash"
+      },
+      "value": "sha256:94d26a54b44c6c4d579b07c411dd19b114e709150eac049a194207ea6413d5e8"
+    },
+    {
+      "kind": "diagnostic",
+      "evidence": {
+        "callId": "eval-929a887d-209a-4d63-86a1-66017ad38561",
+        "path": "/data_providers/0/price_basis"
+      },
+      "value": "vendor_ohlc_unverified"
+    },
+    {
+      "kind": "limitation",
+      "value": "caller_selected_universe"
+    },
+    {
+      "kind": "limitation",
+      "value": "no_historical_index_membership_or_provider_backed_coverage_claimed"
+    },
+    {
+      "kind": "limitation",
+      "value": "QTEST_not_ranked_due_to_DATA_UNAVAILABLE_no_return_implied"
+    },
+    {
+      "kind": "provenance",
+      "value": {
+        "data_kind": "synthetic",
+        "source": "synthetic_seeded",
+        "price_basis": "raw",
+        "raw_attested": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+name: Quant regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '20 2 * * *'
+    - cron: '20 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      run_dsh:
+        description: Run paid real DSH evaluation on a provisioned runner
+        type: boolean
+        default: false
+      repeats:
+        description: LLM scenario repeats
+        default: '1'
+      budget_seconds:
+        description: Maximum seconds per LLM scenario
+        default: '300'
+
+permissions:
+  contents: read
+
+jobs:
+
+  quant:
+    name: Quant runtime / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install ./quant pytest hypothesis
+      - run: python scripts/run-quant-regression.py
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:skills
+      - run: npm run test:skills:quant
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:plugin
+      - run: npm run test:quant-semantic
+      - run: npm run test:quant-preflight
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-mcp
+        env:
+          QUANT_PYTHON: python
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quant-reports-${{ matrix.python }}
+          path: reports/
+
+  quant-sandbox:
+    name: Quant isolated Python acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ./quant pytest hypothesis
+      - name: Provision trusted test image and resolve its immutable identity
+        run: |
+          docker pull python:3.12-alpine
+          docker image inspect python:3.12-alpine --format 'QUANT_SANDBOX_IMAGE={{.Id}}' >> "$GITHUB_ENV"
+      - run: python scripts/run-quant-regression.py
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:skills
+      - run: npm run test:skills:quant
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:plugin
+      - run: npm run test:quant-semantic
+      - run: npm run test:quant-preflight
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-mcp
+        env:
+          QUANT_PYTHON: python
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quant-sandbox-reports
+          path: reports/
+
+  dsh-research:
+    name: Real DSH research (optional paid LLM)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_dsh || github.event_name == 'schedule' && github.event.schedule == '20 3 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: python -m pip install ./quant
+      - run: npm run build
+      - name: Provision the tested headless DSH release when credentials exist
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.QUANT_EVAL_DEEPSEEK_API_KEY }}
+        run: |
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            npm install --prefix "$RUNNER_TEMP/quant-dsh" @deepseek-ai/dsh@0.2.2-rc.1
+            echo "$RUNNER_TEMP/quant-dsh/node_modules/.bin" >> "$GITHUB_PATH"
+          fi
+      - name: Autonomous scenarios (exit 77 means SKIPPED)
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.QUANT_EVAL_DEEPSEEK_API_KEY }}
+          QUANT_PYTHON: python
+          QUANT_EVAL_MODEL: ${{ vars.QUANT_EVAL_MODEL }}
+          QUANT_EVAL_BASE_URL: ${{ vars.QUANT_EVAL_BASE_URL }}
+          QUANT_EVAL_OUTPUT_DIR: reports/dsh
+          QUANT_EVAL_REPEATS: ${{ inputs.repeats || '1' }}
+          QUANT_EVAL_BUDGET_SECONDS: ${{ inputs.budget_seconds || '300' }}
+        run: |
+          set +e
+          npm run test:quant-dsh
+          result=$?
+          if [ "$result" -eq 77 ]; then
+            echo 'Real LLM evaluation SKIPPED; see reports/dsh, not a PASS.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-research-evidence
+          path: reports/

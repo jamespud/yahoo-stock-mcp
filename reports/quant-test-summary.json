@@ -1,0 +1,160 @@
+{
+  "schema_version": "0.2",
+  "reliability": {
+    "status": "PASSED",
+    "counts": {
+      "PASSED": 209,
+      "FAILED": 0,
+      "SKIPPED": 25
+    },
+    "report": "quant-reliability.json"
+  },
+  "acceptance": [
+    {
+      "command": "npm run sync:skill-references",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 0.123
+    },
+    {
+      "command": "npm run build:plugin",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 0.104
+    },
+    {
+      "command": "npm run test:skills",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 0.754
+    },
+    {
+      "command": "npm run test:skills:quant",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 4.102
+    },
+    {
+      "command": "npm run test:plugin",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 0.147
+    },
+    {
+      "command": "npm run test:quant",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 17.448
+    },
+    {
+      "command": "npm run test:quant-mcp",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 25.25
+    },
+    {
+      "command": "npm run test:quant-regression",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 26.772
+    },
+    {
+      "command": "npm run test:quant-semantic",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 4.014
+    },
+    {
+      "command": "npm run typecheck",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 1.434
+    },
+    {
+      "command": "npm run build",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 1.584
+    },
+    {
+      "command": "npm run test",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 95.279
+    },
+    {
+      "command": "npm run verify:pack",
+      "status": "PASSED",
+      "exit_code": 0,
+      "signal": null,
+      "seconds": 0.443
+    }
+  ],
+  "skills_sync": {
+    "report": "quant-skills-sync.json"
+  },
+  "mcp_preflight": {
+    "status": "PASS",
+    "report": "quant-mcp-preflight.json",
+    "scope": "deterministic MCP requests; not autonomous LLM acceptance"
+  },
+  "real_dsh": {
+    "status": "PASS",
+    "provider": "sub2api-go",
+    "model": "deepseek-v4.1-flash",
+    "reasoning_effort": "low",
+    "scenarios_attempted": 3,
+    "scenarios_passed": 3,
+    "success_rate": 1,
+    "scenario_reports": {
+      "multi-timeframe": {
+        "status": "PASS",
+        "runs_attempted": 3,
+        "runs_passed": 3,
+        "success_rate": 1,
+        "report": "multi-timeframe-result.json",
+        "artifacts": "reliability-retest/multi-timeframe"
+      },
+      "screening": {
+        "status": "PASS",
+        "runs_attempted": 3,
+        "runs_passed": 3,
+        "success_rate": 1,
+        "report": "screening-result.json",
+        "artifacts": "reliability-retest/screening"
+      },
+      "walk-forward": {
+        "status": "PASS",
+        "runs_attempted": 3,
+        "runs_passed": 3,
+        "success_rate": 1,
+        "report": "walk-forward-result.json",
+        "artifacts": "reliability-retest/walk-forward"
+      }
+    },
+    "job_ids": [
+      "bt_110770a16e3c437c8e17eb2883e74929",
+      "bt_765ee3a36b00424e854f80d8869e414f",
+      "bt_b1fc8413ab8241169fc3976ce5fdc09a",
+      "opt_39cae8e16ba84ad08a5d0390f03a1034",
+      "opt_b187dabfdad748fc8d3ff66f6f765d8a",
+      "opt_d22fa49b2c5742e58f01f4d2afe79ac5",
+      "screen_2f73cd1cfb454837b32e7ee56f720b60",
+      "screen_8116049969924993aac7387c648d12b7",
+      "screen_af156fb22c584edd9eb3c6f62672754f"
+    ],
+    "report": "dsh/dsh-result.json"
+  }
+}
