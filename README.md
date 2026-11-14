@@ -88,3 +88,7 @@ to start and tells you so rather than silently creating an empty database.
 - Provider access subject to the notices and upstream terms above
 
 For setup and commands, continue with **[docs/USAGE.md](./docs/USAGE.md)**.
+
+### Quant research platform
+
+An optional Python runtime provides typed DSL/DAG compilation, multi-timeframe point-in-time data, asynchronous shared-cash portfolio backtests, explicit corporate actions, performance analysis and immutable Parquet results. It also supports bounded grid optimization, walk-forward evaluation, cross-sectional screening and a constrained NumPy feature path. Python lifecycle strategies use an opt-in Docker sandbox with an operator-pinned image. Set `QUANT_ENABLED=1` to expose quant tools; see [setup, examples and research limits](quant/README.md). Local Yahoo OHLC defaults to an unverified price basis and requires an explicit raw-price assertion before broker execution.

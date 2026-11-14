@@ -10,10 +10,14 @@ import { closeStorageBackend } from "../storage/sqlite.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "../package-meta.js";
 import { isValidIsoDate, isoDateToUnixSeconds } from "../validation.js";
 
+import { registerQuantTools } from "../quant/tools.js";
+
 const server = new McpServer({
   name: PACKAGE_NAME,
   version: PACKAGE_VERSION,
 });
+
+if (process.env.QUANT_ENABLED === "1") registerQuantTools(server);
 
 const isoDateSchema = z
   .string()
