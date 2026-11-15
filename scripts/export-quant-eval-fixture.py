@@ -5,7 +5,12 @@ Bulk rows go directly to the bootstrap importer, never into model tool output.
 import json
 import math
 from datetime import timedelta
+from pathlib import Path
 from random import Random
+import sys
+# Source-checkout execution must work with an explicit QUANT_PYTHON even before
+# `pip install ./quant`; installed CI runtimes continue to use the same package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quant" / "src"))
 from stock_quant.calendar import generate_calendar
 from stock_quant.compiler import digest
 
