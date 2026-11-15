@@ -104,15 +104,27 @@ test('ratio and count labels follow the observed quant quality schema',async()=>
 });
 test('diagnostic scalar labels match the observed screening schema and null cursor',async()=>{
   const {grade}=await load();
-  const claims=JSON.parse(await import('node:fs').then(m=>m.promises.readFile('reports/dsh/screening/claims.json','utf8'))).claims;
-  const trace=(await import('node:fs').then(m=>m.promises.readFile('reports/dsh/screening/trace.jsonl','utf8'))).trim().split('\n').map(JSON.parse);
-  const historical=grade({scenario:'screening',claims,trace,metadata,exitCode:0,finalReason:'completed'});
-  assert.equal(historical.status,'FAIL');
-  assert.equal(historical.errors[0],'Claim contradicts evidence or percent scaling');
-  // The failure is the model's incomplete projection, not the corrected labels.
-  const rows=JSON.parse(JSON.stringify(trace.find(e=>e.callId===claims[3].evidence.callId).data.rows));
-  const complete=grade({scenario:'screening',[claims[3].evidence.path.slice(1)]:rows,[claims[3].evidence.callId]:trace.find(e=>e.callId===claims[3].evidence.callId),claims:[...claims.slice(0,3),{...claims[3],value:rows},...claims.slice(4)],trace,metadata,exitCode:0,finalReason:'completed'});
-  assert.equal(complete.status,'PASS');
+  const rows=[{symbol:'MSFT',rank:1,score:162.8312436918878,percentile:1,selected:true,errors:[]},
+    {symbol:'AAPL',rank:2,score:135.72031653951393,percentile:.5,selected:true,errors:[]},
+    {symbol:'QTEST',rank:null,score:null,percentile:null,selected:false,errors:[{code:'DATA_UNAVAILABLE',symbol:'QTEST'}]}];
+  const callId='screen-result';
+  const trace=[{callId,origin:'agent',ok:true,tool:'quant_get_result',args:{job_id:'j1',section:'screen'},data:{status:'completed',total_count:3,next_cursor:null,rows}}];
+  const claims=[
+    {kind:'diagnostic',evidence:{callId,path:'/status'},value:'completed'},
+    {kind:'diagnostic',evidence:{callId,path:'/total_count'},value:3,metric:'total_count',unit:'count'},
+    {kind:'diagnostic',evidence:{callId,path:'/next_cursor'},value:null,metric:'next_cursor',unit:'count'},
+    claim('ranking',callId,'/rows',rows),
+    {kind:'metric',metric:'score',unit:'currency',evidence:{callId,path:'/rows/0/score'},value:rows[0].score},
+    {kind:'metric',metric:'rank',unit:'count',evidence:{callId,path:'/rows/0/rank'},value:rows[0].rank},
+    {kind:'metric',metric:'percentile',unit:'ratio',evidence:{callId,path:'/rows/0/percentile'},value:rows[0].percentile},
+    {kind:'diagnostic',evidence:{callId,path:'/rows/2/errors/0/code'},value:'DATA_UNAVAILABLE'},
+    {kind:'limitation',value:'caller_selected_universe'},
+    {kind:'limitation',value:'no_historical_index_membership_or_provider_backed_coverage_claimed'},
+    {kind:'limitation',value:'QTEST_not_ranked_due_to_DATA_UNAVAILABLE_no_return_implied'}
+  ];
+  assert.equal(grade(run(claims,trace)).status,'PASS');
+  const wrong=structuredClone(claims);wrong[1].unit='currency';
+  assert.equal(grade(run(wrong,trace)).status,'FAIL');
 });
 test('an isolated credential source without keys remains SKIPPED, never PASS',async()=>{
   const {mkdtempSync}=await import('node:fs');

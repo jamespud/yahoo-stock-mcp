@@ -16,8 +16,5 @@ __pycache__/
 *.db.artifacts/
 *.sqlite.artifacts/
 
-# Machine-specific quant evidence and database artifacts
-reports/**/*.junit.xml
-reports/dsh/**/dsh-home/
-reports/dsh/**/eval.patch.json
-reports/dsh/**/quant.db
+# Generated research and test artifacts stay local; CI uploads them as artifacts.
+reports/

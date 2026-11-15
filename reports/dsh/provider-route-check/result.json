@@ -1,8 +1,0 @@
-{
-  "scenario": "screening",
-  "status": "FAIL",
-  "errors": [
-    "Unexpected end of JSON input"
-  ],
-  "artifacts": "/tmp/quant-paid-dsh/screening-DK5Ef0"
-}
