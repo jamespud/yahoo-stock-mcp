@@ -16,7 +16,7 @@ export function emaStrategy() {
 }
 export async function runPreflight(client,snapshot,spec) {
   async function call(name,args={}) {const result=await client.callTool({name,arguments:args},undefined,{timeout:30000});if(result.isError)throw Error(`${name}: ${JSON.stringify(result.content)}`);return JSON.parse(result.content[0].text);}
-  async function complete(job) {for(let i=0;i<150;i++){const r=await call('quant_get_job',{job_id:job.job_id});if(r.status==='completed')return job.job_id;if(['failed','cancelled'].includes(r.status))throw Error(JSON.stringify(r));await new Promise(r=>setTimeout(r,100));}throw Error('Preflight job deadline exceeded');}
+  async function complete(job,label) {const begun=Date.now(),deadline=begun+130000;while(Date.now()<deadline){const r=await call('quant_get_job',{job_id:job.job_id});if(r.status==='completed')return job.job_id;if(['failed','cancelled'].includes(r.status))throw Error(JSON.stringify(r));await new Promise(r=>setTimeout(r,Math.min(500,Math.max(0,deadline-Date.now()))));}throw Error(`${label} preflight deadline exceeded after 130000ms`);}
   const capabilities=await call('quant_get_capabilities');
   if(!capabilities.mcp_execution_enabled)throw Error('Quant MCP execution disabled');
   const data_snapshot_id=snapshot.data_snapshot_id;
@@ -25,17 +25,17 @@ export async function runPreflight(client,snapshot,spec) {
   for(const timeframe of ['1d','1h','15m'])await call('quant_get_data_quality',{data_snapshot_id,symbol:'AAPL',timeframe,as_of:spec.as_of});
   const signal=await call('quant_evaluate_signal',{data_snapshot_id,strategy_id:multi.strategy_id,symbol:'AAPL',as_of:spec.as_of});
   if(!plan.requirements?.length||!Array.isArray(plan.grid_requirements)||!Array.isArray(signal.grid_dependencies))throw Error('Missing warmup requirements');
-  const mj=await complete(await call('quant_run_backtest',{data_snapshot_id,plan_id:plan.plan_id,symbol:'AAPL',timeframe:'15m',start:spec.intraday_start,config:{initial_cash:10000,quantity:10,commission_bps:10,slippage_bps:5}}));
+  const mj=await complete(await call('quant_run_backtest',{data_snapshot_id,plan_id:plan.plan_id,symbol:'AAPL',timeframe:'15m',start:spec.intraday_start,config:{initial_cash:10000,quantity:10,commission_bps:10,slippage_bps:5}}),'multi-timeframe backtest');
   const fills=await call('quant_get_result',{job_id:mj,section:'fills',limit:1000});
   const attribution=await call('quant_get_result',{job_id:mj,section:'attribution'});
   if(!fills.rows?.some(f=>f.side==='buy')||!fills.rows?.some(f=>f.side==='sell')||!(attribution.commission_paid>0))throw Error('Multitimeframe preflight needs actual fills and commissions');
   const screening=await call('quant_register_strategy',{strategy:{schema_version:'1.0',name:'preflight-screen',decision_timeframe:'1d',entry:{kind:'const',value:true},exit:{kind:'const',value:false},signals:{score:{kind:'ref',symbol:'$symbol',field:'close',timeframe:'1d'}}}});
-  const sj=await complete(await call('quant_run_screen',{data_snapshot_id,strategy_id:screening.strategy_id,symbols:['AAPL','MSFT','QTEST'],as_of:spec.as_of,score_signal:'score'}));
+  const sj=await complete(await call('quant_run_screen',{data_snapshot_id,strategy_id:screening.strategy_id,symbols:['AAPL','MSFT','QTEST'],as_of:spec.as_of,score_signal:'score'}),'three-symbol screening');
   const screen=await call('quant_get_result',{job_id:sj,section:'screen'});
   if(screen.rows?.length!==3||!screen.rows.find(r=>r.symbol==='QTEST'&&r.score===null&&r.errors.some(e=>e.code==='DATA_UNAVAILABLE')))throw Error('Missing third-asset diagnostics');
   const registered=await call('quant_register_strategy',{strategy:emaStrategy()});
   const request=preflight('walkforward',{windows:spec.windows}).request;
-  const wj=await complete(await call('quant_optimize',{...request,data_snapshot_id,strategy_id:registered.strategy_id,symbol:'AAPL'}));
+  const wj=await complete(await call('quant_optimize',{...request,data_snapshot_id,strategy_id:registered.strategy_id,symbol:'AAPL'}),'four-fold walk-forward');
   const summary=await call('quant_get_result',{job_id:wj,section:'summary'});
   const folds=await call('quant_get_result',{job_id:wj,section:'walk_forward'});
   if(summary.evaluations!==36||folds.rows?.length!==4||folds.rows.some(f=>f.selected_parameters.fast>=f.selected_parameters.slow))throw Error('Incorrect four-fold EMA preflight');
