@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "yahoo-stock-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Stock-market and opt-in quantitative research skills backed by yahoo-stock-mcp.",
   "author": {
     "name": "jamespud"
