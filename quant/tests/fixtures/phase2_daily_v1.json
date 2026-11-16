@@ -1,0 +1,30 @@
+{
+  "version": "phase2-daily-v1",
+  "seed": 80421,
+  "bar_count": 564,
+  "session_count": 188,
+  "regimes": [
+    {
+      "name": "rising",
+      "start_index": 0,
+      "end_index": 45
+    },
+    {
+      "name": "downtrend",
+      "start_index": 45,
+      "end_index": 90
+    },
+    {
+      "name": "range",
+      "start_index": 90,
+      "end_index": 135
+    },
+    {
+      "name": "high_vol_reversal",
+      "start_index": 135,
+      "end_index": 188
+    }
+  ],
+  "payload_hash": "sha256:cc6b4fd1cb841074203ce130ebdd4b9674ce93ab96f18f6d85a80e142ad34d1c",
+  "snapshot_id": "sha256:e444a15c4f6fc402a2558f921273f5e7d552ae2866db6da8aba5c822eeda6c39"
+}

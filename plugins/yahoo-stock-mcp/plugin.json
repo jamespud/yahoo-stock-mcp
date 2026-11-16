@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "yahoo-stock-mcp",
   "version": "0.5.0",
-  "description": "Stock-market research skills backed by the yahoo-stock-mcp MCP server.",
+  "description": "Stock-market and opt-in quantitative research skills backed by yahoo-stock-mcp.",
   "author": {
     "name": "jamespud"
   },
@@ -13,14 +13,17 @@
     "research",
     "mcp",
     "yahoo-finance",
-    "sqlite"
+    "sqlite",
+    "quant",
+    "backtesting",
+    "research-reliability"
   ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Yahoo Stock MCP",
-        "shortDescription": "Stock research skills and MCP market-data tools",
-        "longDescription": "Research companies, sectors, options, dividends, earnings, and technicals with repeatable skills and the local yahoo-stock-mcp server.",
+        "shortDescription": "Stock and quant research skills with MCP tools",
+        "longDescription": "Research companies, sectors, options, dividends, earnings and technicals. Optional quant workflows author validated DSL experiments and audit leakage, benchmarks, costs and reproducibility; quant execution requires explicit local runtime configuration.",
         "developerName": "jamespud",
         "category": "Productivity",
         "capabilities": [
@@ -29,7 +32,8 @@
         "websiteURL": "https://github.com/jamespud/yahoo-stock-mcp",
         "defaultPrompt": [
           "Research a company using the Yahoo Stock MCP workflows.",
-          "Analyze a stock's technicals, earnings, dividends, options, or sector context."
+          "Analyze a stock's technicals, earnings, dividends, options, or sector context.",
+          "Design a quantitative research experiment or audit backtest reliability using the opt-in quant tools."
         ]
       }
     }

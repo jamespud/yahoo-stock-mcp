@@ -72,7 +72,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify:pack": "node scripts/verify-pack.mjs",
     "test:quant": "uv run --project quant pytest quant/tests",
-    "test:quant-mcp": "tsx scripts/test-quant-mcp.ts"
+    "test:quant-mcp": "tsx scripts/test-quant-mcp.ts",
+    "test:skills:quant": "npm run check:skill-references && tsx scripts/test-skills.ts --quant",
+    "test:quant-regression": "uv run --project quant python scripts/run-quant-regression.py",
+    "test:quant-acceptance": "node scripts/run-quant-acceptance.mjs",
+    "test:quant-semantic": "node --test tests/quant-eval/*.test.mjs",
+    "test:quant-dsh": "node scripts/quant-eval/run-dsh.mjs",
+    "test:quant-preflight": "node scripts/quant-eval-preflight.mjs",
+    "quant:qqq:fetch": "node scripts/quant-eval/fetch-qqq-real-data.mjs",
+    "test:quant-qqq": "node scripts/quant-eval/run-qqq-real-data.mjs",
+    "test:quant-qqq:oracle": "python3 scripts/quant-eval/verify-qqq-real-data.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

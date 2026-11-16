@@ -15,3 +15,6 @@ __pycache__/
 # Local quant data/artifact stores
 *.db.artifacts/
 *.sqlite.artifacts/
+
+# Generated research and test artifacts stay local; CI uploads them as artifacts.
+reports/

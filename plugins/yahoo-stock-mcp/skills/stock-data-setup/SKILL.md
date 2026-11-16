@@ -79,3 +79,13 @@ set. Provider behaviour is controlled by `YAHOO_STOCK_MCP_PRIMARY_PROVIDER` (`ya
   the question and wait for agreement; full history against unofficial providers carries the
   data-use obligations described in the repository README.
 - Never invent rows to fill a gap. An empty table is a true statement about the snapshot.
+
+## Quant runtime setup
+
+Quant tools are absent by default. An operator opts in with `QUANT_ENABLED=1`, an installed Python
+runtime selected by `QUANT_PYTHON`, and writable `QUANT_REGISTRY_PATH`. Reconnect the client and
+inspect tools/list, then quant_get_capabilities if present. The default catalog remains market data.
+A registered tool does not establish data coverage or sandbox availability. Python strategies need
+the operator-approved immutable sandbox image and successful live isolation preflight; never run
+source directly on the host. Route hypothesis/DSL work to `quant-strategy-research` and execution/
+reliability review to `quant-research-reliability`. No provider denial workaround is part of setup.
