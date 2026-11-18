@@ -265,9 +265,9 @@ class JobStore(Registry):
     def claim(self) -> dict | None:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            self.connection.execute("UPDATE jobs SET status='failed',error_code='WORKER_LOST',finished_at=unixepoch() WHERE status='running' AND lease_until<=unixepoch() AND attempts>=3")
-            active = self.connection.execute("SELECT count(*) FROM jobs WHERE status='running' AND lease_until>unixepoch()").fetchone()[0]
-            row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash FROM jobs WHERE status='queued' OR (status='running' AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
+            self.connection.execute("UPDATE jobs SET status='failed',error_code='WORKER_LOST',finished_at=unixepoch() WHERE status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts>=3")
+            active = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('running','publishing') AND lease_until>unixepoch()").fetchone()[0]
+            row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash FROM jobs WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
             if row is None:
                 self.connection.commit()
                 return None
@@ -282,6 +282,60 @@ class JobStore(Registry):
     def heartbeat(self, claim: dict, progress=0.) -> bool:
         with self.connection:
             changed = self.connection.execute("UPDATE jobs SET lease_until=unixepoch()+15,progress=? WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (min(.99, max(0., progress)), claim["id"], claim["owner"]))
+        return changed.rowcount == 1
+
+    def _serialize_result(self, claim: dict, result: dict) -> tuple[dict, dict]:
+        references = {}
+        def checkpoint():
+            if not self.heartbeat(claim, .99):
+                raise OwnershipLost()
+        compact = {}
+        for section, value in result.items():
+            if isinstance(value, list):
+                references[section] = self.artifacts.write_rows(iter(value), checkpoint=checkpoint)
+                compact[section] = {"$artifact": references[section]}
+            else:
+                compact[section] = value
+        if len(json.dumps(compact, allow_nan=False).encode()) > 16777216:
+            raise ValueError("RESOURCE_LIMIT_EXCEEDED: result metadata exceeds 16 MiB")
+        return compact, references
+
+    def begin_publish(self, claim: dict, result: dict) -> bool:
+        """Persist result artifacts and enter an internal fenced publishing phase."""
+        if not self.connection.execute("SELECT 1 FROM jobs WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (claim["id"], claim["owner"])).fetchone():
+            return False
+        try:
+            compact, references = self._serialize_result(claim, result)
+        except OwnershipLost:
+            return False
+        except Exception as error:
+            return self.fail_publish(claim, error)
+        encoded = json.dumps(compact, allow_nan=False)
+        with self.connection:
+            changed = self.connection.execute(
+                "UPDATE jobs SET status='publishing',progress=.99,result=?,result_hash=?,error_code=NULL,error_message=NULL,lease_until=unixepoch()+15 WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()",
+                (encoded, digest(compact), claim["id"], claim["owner"]),
+            )
+            if changed.rowcount == 1:
+                self.connection.execute("DELETE FROM result_artifacts WHERE job_id=?", (claim["id"],))
+                for section, reference in references.items():
+                    self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
+        return changed.rowcount == 1
+
+    def complete_publish(self, claim: dict) -> bool:
+        with self.connection:
+            changed = self.connection.execute(
+                "UPDATE jobs SET status='completed',progress=1.,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status='publishing' AND lease_until>unixepoch()",
+                (claim["id"], claim["owner"]),
+            )
+        return changed.rowcount == 1
+
+    def fail_publish(self, claim: dict, error: Exception, error_code: str | None = None) -> bool:
+        with self.connection:
+            changed = self.connection.execute(
+                "UPDATE jobs SET status='failed',progress=0.,error_code=?,error_message=?,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()",
+                (error_code or "EXECUTION_FAILED", str(error)[:4096], claim["id"], claim["owner"]),
+            )
         return changed.rowcount == 1
 
     def finish(self, claim: dict, result: dict | None = None, error: Exception | None = None, error_code: str | None = None) -> bool:
@@ -322,11 +376,15 @@ class JobStore(Registry):
         row = self.connection.execute("SELECT id,status,progress,error_code,error_message,attempts,created_at,started_at,finished_at FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None:
             raise KeyError("Unknown job_id")
-        return dict(zip(("job_id", "status", "progress", "error_code", "error_message", "attempts", "created_at", "started_at", "finished_at"), row))
+        result = dict(zip(("job_id", "status", "progress", "error_code", "error_message", "attempts", "created_at", "started_at", "finished_at"), row))
+        if result["status"] == "publishing":
+            result["status"] = "running"
+            result["phase"] = "publishing"
+        return result
 
     def cancel(self, job_id: str) -> dict:
         with self.connection:
-            self.connection.execute("UPDATE jobs SET status='cancelled',finished_at=unixepoch(),lease_until=NULL WHERE id=? AND status IN ('queued','running')", (job_id,))
+            self.connection.execute("UPDATE jobs SET status='cancelled',finished_at=unixepoch(),lease_until=NULL WHERE id=? AND status IN ('queued','running','publishing')", (job_id,))
         return self.get_job(job_id)
 
     def get_result(self, job_id: str, section="summary", limit=100, cursor=None) -> dict:

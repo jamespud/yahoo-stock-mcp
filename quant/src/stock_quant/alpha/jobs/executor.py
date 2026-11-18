@@ -144,8 +144,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             selected_outputs = request.factor_spec.get("outputs") if request.factor_spec else None
             if selected_outputs is not None and (not isinstance(selected_outputs, list) or any(not isinstance(item, str) for item in selected_outputs)):
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Option factor_spec.outputs must be a string list")
+            tolerance = request.factor_spec.get("quote_tolerance_seconds", 60) if request.factor_spec else 60
             feature = compute_option_factors(manifest, store=datasets, underlying_prices=prices, pricing_config=config,
-                                             selected_outputs=selected_outputs, checkpoint=bounded)
+                                             selected_outputs=selected_outputs, quote_tolerance_seconds=tolerance, checkpoint=bounded)
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
@@ -191,25 +192,29 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "risk_events": run.risk_events, "diagnostics": run.diagnostics}
         else:
             raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
-        success = store.finish(claim, result)
-        if success:
+        if not store.begin_publish(claim, result):
+            return False
+        try:
             for manifest in pending:
                 datasets.register(manifest)
             if staged_model is not None:
                 final_registry.commit_from(staging_registry, staged_model.model_id)
-        return success
+            return store.complete_publish(claim)
+        except Exception as error:
+            return store.fail_publish(claim, error, "EXECUTION_FAILED")
     except AlphaError as error:
-        return store.finish(claim, error=error, error_code=error.code.value)
+        return store.fail_publish(claim, error, error.code.value)
     except FactorCompileError as error:
         wrapped = AlphaError(AlphaErrorCode.DATASET_MISMATCH, "FactorSpec compilation failed", error.diagnostic)
-        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+        return store.fail_publish(claim, wrapped, wrapped.code.value)
     except ValidationError as error:
         wrapped = AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Alpha request or schema validation failed", {"reason": str(error)})
-        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+        return store.fail_publish(claim, wrapped, wrapped.code.value)
     except ThetaDataV3ResponseError as error:
         wrapped = AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "ThetaData response contract failed", {"reason": str(error)})
-        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+        return store.fail_publish(claim, wrapped, wrapped.code.value)
     except KeyError as error:
-        return store.finish(claim, error=AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, str(error)), error_code=AlphaErrorCode.DATA_UNAVAILABLE.value)
+        wrapped = AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, str(error))
+        return store.fail_publish(claim, wrapped, wrapped.code.value)
     except Exception as error:
-        return store.finish(claim, error=error)
+        return store.fail_publish(claim, error)

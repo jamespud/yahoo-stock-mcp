@@ -82,6 +82,11 @@ def run_top_k_backtest(
         date = _utc(row["end_at"]).date()
         bars_by_date[date][row["instrument_id"]] = row
     dates = sorted(bars_by_date)
+    usable_predictions = sum(
+        any(bar_date > _utc(row["decision_at"]).date() and row["instrument_id"] in bars_by_date[bar_date] for bar_date in dates)
+        for row in predictions
+    )
+    prediction_coverage = usable_predictions / len(predictions)
     ranked_all = rank_all_predictions(predictions, config.top_k)
     signals = weekly_last_decisions(sorted(ranked_all))
     signal_index = 0
@@ -215,14 +220,18 @@ def run_top_k_backtest(
         "excess_return": (final_equity / config.initial_cash - 1 - benchmark_return) if benchmark_return is not None else None,
         "tracking_error": float(np.std(active, ddof=1) * math.sqrt(252)) if len(active) >= 2 else None,
         "information_ratio": float(np.mean(active) / np.std(active, ddof=1) * math.sqrt(252)) if len(active) >= 2 and np.std(active, ddof=1) > 0 else None,
-        "prediction_coverage": 1.0,
+        "prediction_coverage": prediction_coverage,
         "rebalance_count": len(target_rows),
-        "definition": "daily UTC close-to-close; next-open fills; zero risk-free rate; sparse positions",
+        "return_semantics": "raw_price_return_excluding_corporate_actions",
+        "corporate_actions_modeled": False,
+        "total_return_claim_supported": False,
+        "definition": "daily UTC close-to-close; next-open fills; zero risk-free rate; sparse positions; corporate-action adjustments are not modeled",
     }
     return PortfolioBacktestResult(
         metrics=metrics,
         final_account={"cash": cash, "positions_value": final_equity - cash, "equity": final_equity},
         orders=orders, fills=fills, positions=position_rows, equity_curve=equity_rows,
         target_weights=target_rows, risk_events=risk_events,
-        diagnostics={"same_bar_signal_fill": False, "target_weights_separate_from_positions": True},
+        diagnostics={"same_bar_signal_fill": False, "target_weights_separate_from_positions": True,
+                     "corporate_actions_modeled": False, "full_total_return_claim_supported": False},
     )

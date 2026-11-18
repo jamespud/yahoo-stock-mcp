@@ -76,6 +76,9 @@ def test_option_backtest_uses_ask_entry_bid_exit_and_multiplier(tmp_path):
     assert all(fill["multiplier"] == 100 for fill in result.fills)
     assert result.metrics["commission_paid"] == pytest.approx(2 * 2 * 0.65)
     assert all(trade["unresolved"] is False for trade in result.trades)
+    assert result.metrics["initial_cash"] + sum(row["amount"] for row in result.cash_ledger) == pytest.approx(result.metrics["final_cash"])
+    assert result.diagnostics["full_broker_portfolio"] is False
+    assert result.diagnostics["corporate_actions_modeled"] is False
 
 
 def test_missing_exit_quote_leaves_position_unresolved(tmp_path):

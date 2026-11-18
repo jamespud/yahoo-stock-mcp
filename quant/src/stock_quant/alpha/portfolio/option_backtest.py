@@ -24,6 +24,8 @@ class OptionExecutionConfig(StrictModel):
     commission_per_contract: float = Field(default=0.65, ge=0, strict=True)
     close_before_expiry_days: int = Field(default=1, ge=0, le=30, strict=True)
     contracts_per_trade: int = Field(default=1, ge=1, le=1000, strict=True)
+    initial_cash: float = Field(default=100_000.0, gt=0, strict=True)
+    max_premium_fraction: float = Field(default=1.0, gt=0, le=1, strict=True)
 
 
 class OptionBacktestResult(StrictModel):
@@ -31,6 +33,7 @@ class OptionBacktestResult(StrictModel):
     trades: list[dict]
     fills: list[dict]
     positions: list[dict]
+    cash_ledger: list[dict]
     risk_events: list[dict]
     diagnostics: dict
 
@@ -79,9 +82,11 @@ def run_option_backtest(
         quote = _quote(row)
         quotes_by_contract[quote.contract.contract_id].append(quote)
     ranked_all = rank_all_predictions(predictions, config.top_k)
-    trades, fills, risk_events, positions = [], [], [], []
+    trades, fills, risk_events, positions, cash_ledger = [], [], [], [], []
     traded = set()
     commission_paid = 0.0
+    cash = config.initial_cash
+    unresolved_cost = 0.0
     for decision, ranked in sorted(ranked_all.items()):
         for prediction in ranked:
             contract_id = prediction["instrument_id"]
@@ -109,11 +114,20 @@ def run_option_backtest(
             multiplier = entry.contract.multiplier
             quantity = config.contracts_per_trade
             entry_commission = quantity * config.commission_per_contract
+            premium = entry.ask * multiplier * quantity
+            capital = premium + entry_commission
+            if capital > cash or capital > config.initial_cash * config.max_premium_fraction:
+                risk_events.append({"decision_at": decision.isoformat(), "code": "INSUFFICIENT_CASH", "contract_id": contract_id, "required_cash": capital, "cash": cash})
+                traded.add(contract_id)
+                continue
+            cash -= capital
+            unresolved_cost += capital
             commission_paid += entry_commission
+            cash_ledger.append({"time": entry_at.isoformat(), "contract_id": contract_id, "kind": "premium_and_commission", "amount": -capital, "cash_after": cash})
             fills.append({"contract_id": contract_id, "decision_at": decision.isoformat(), "time": entry_at.isoformat(),
                           "side": "buy", "price": entry.ask, "bid": entry.bid, "ask": entry.ask,
-                          "quantity": quantity, "multiplier": multiplier, "commission": entry_commission})
-            positions.append({"contract_id": contract_id, "state": "open", "entry_at": entry_at.isoformat(), "quantity": quantity})
+                          "quantity": quantity, "multiplier": multiplier, "commission": entry_commission, "cash_after": cash})
+            positions.append({"contract_id": contract_id, "state": "open", "entry_at": entry_at.isoformat(), "quantity": quantity, "cost_basis": capital})
             traded.add(contract_id)
             if exit_quote is None:
                 trades.append({"contract_id": contract_id, "decision_at": decision.isoformat(), "entry_at": entry_at.isoformat(), "unresolved": True, "reason": "NO_EXIT_QUOTE"})
@@ -122,9 +136,13 @@ def run_option_backtest(
             exit_at = max(exit_quote.quote_at or exit_quote.observed_at, exit_quote.available_at)
             exit_commission = quantity * config.commission_per_contract
             commission_paid += exit_commission
+            proceeds = exit_quote.bid * multiplier * quantity - exit_commission
+            cash += proceeds
+            unresolved_cost -= positions[-1]["cost_basis"]
+            cash_ledger.append({"time": exit_at.isoformat(), "contract_id": contract_id, "kind": "sale_net_of_commission", "amount": proceeds, "cash_after": cash})
             fills.append({"contract_id": contract_id, "decision_at": decision.isoformat(), "time": exit_at.isoformat(),
                           "side": "sell", "price": exit_quote.bid, "bid": exit_quote.bid, "ask": exit_quote.ask,
-                          "quantity": quantity, "multiplier": multiplier, "commission": exit_commission})
+                          "quantity": quantity, "multiplier": multiplier, "commission": exit_commission, "cash_after": cash})
             gross = (exit_quote.bid - entry.ask) * quantity * multiplier
             pnl = gross - entry_commission - exit_commission
             trades.append({"contract_id": contract_id, "decision_at": decision.isoformat(), "entry_at": entry_at.isoformat(),
@@ -135,7 +153,11 @@ def run_option_backtest(
     return OptionBacktestResult(
         metrics={"trade_count": len(trades), "fill_count": len(fills), "commission_paid": commission_paid,
                  "unresolved_positions": unresolved, "pnl": sum(trade.get("pnl", 0) for trade in trades),
+                 "initial_cash": config.initial_cash, "final_cash": cash,
+                 "equity": cash + unresolved_cost, "unresolved_cost_basis": unresolved_cost,
                  "execution_rule": "BUY next valid Ask; SELL next valid Bid"},
-        trades=trades, fills=fills, positions=positions, risk_events=risk_events,
-        diagnostics={"mid_price_fills": False, "intrinsic_liquidation": False, "current_yahoo_snapshot_admitted": False},
+        trades=trades, fills=fills, positions=positions, cash_ledger=cash_ledger, risk_events=risk_events,
+        diagnostics={"mid_price_fills": False, "intrinsic_liquidation": False, "current_yahoo_snapshot_admitted": False,
+                     "execution_model": "long_option_trade_simulator",
+                     "full_broker_portfolio": False, "corporate_actions_modeled": False},
     )

@@ -51,7 +51,8 @@ class ModelSetManifest(StrictModel):
     validation_window: dict
     test_window: dict
     metrics: dict
-    is_alpha_certified: bool
+    validation_gate_passed: bool
+    is_alpha_certified: bool = False
 
 
 def _environment_hash() -> str:
@@ -164,6 +165,11 @@ def train_alpha(
     importance = booster.feature_importance(importance_type="gain", iteration=selected_iteration)
     environment_hash = _environment_hash()
     model_text = booster.model_to_string(num_iteration=selected_iteration)
+    validation_gate = (
+        validation_metrics.get("rank_ic_mean") is not None
+        and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
+        and validation_metrics["prediction_coverage"] >= 0.8
+    )
     label_hash = digest({"label_name": request.label_name, "target_type": request.target_type, "split": request.split.model_dump(mode="json")})
     trained = registry.save(model_text=model_text, metadata={
         "model_type": MODEL_TYPE, "model_version": MODEL_VERSION, "feature_set_id": request.feature_set_id,
@@ -173,17 +179,10 @@ def train_alpha(
         "feature_schema_hash": digest(schema), "environment_hash": environment_hash,
         "random_seed": request.random_seed, "feature_importance": dict(zip(schema, map(float, importance), strict=True)),
         "train_metrics": train_metrics, "validation_metrics": validation_metrics, "oos_metrics": oos_metrics,
+        "validation_gate_passed": validation_gate,
     })
     if checkpoint:
         checkpoint(1.0)
-    certified = (
-        oos_metrics.get("rank_ic_mean") is not None
-        and validation_metrics.get("rank_ic_mean") is not None
-        and oos_metrics["rank_ic_mean"] >= request.min_rank_ic
-        and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
-        and oos_metrics["prediction_coverage"] >= 0.8
-        and (oos_metrics.get("top_bottom_spread") or 0) > 0
-    )
     return ModelSetManifest(
         model_id=trained["model_id"], model_set_id=trained["model_set_id"], model_type=MODEL_TYPE,
         model_version=MODEL_VERSION, feature_set_id=request.feature_set_id, label_definition_hash=label_hash,
@@ -193,5 +192,6 @@ def train_alpha(
         validation_window={"start": request.split.validation_start.isoformat(), "end": request.split.validation_end.isoformat()},
         test_window={"start": request.split.test_start.isoformat(), "end": request.split.test_end.isoformat()},
         metrics={"train": train_metrics, "validation": validation_metrics, "oos": oos_metrics},
-        is_alpha_certified=certified,
+        validation_gate_passed=validation_gate,
+        is_alpha_certified=False,
     )

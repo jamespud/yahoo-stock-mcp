@@ -61,7 +61,8 @@ def test_lightgbm_training_and_predictions_are_reproducible(tmp_path):
     second = train_alpha(request, store=store, registry=registry, label_rows=labels)
     assert first.model_hash == second.model_hash
     assert first.model_id == second.model_id
-    assert first.is_alpha_certified is True
+    assert first.validation_gate_passed is True
+    assert first.is_alpha_certified is False
     prediction = predict_alpha(first.model_set_id, feature_set.dataset_id, split.test_start, split.test_end, store=store, registry=registry)
     rows = store.read_rows(prediction.dataset_id)
     assert rows
@@ -73,6 +74,7 @@ def test_noise_fixture_is_not_certified_as_alpha(tmp_path):
     store, _, _, request, labels = _fixture(tmp_path / "noise", noise=True)
     registry = AlphaModelRegistry(tmp_path / "noise-models")
     manifest = train_alpha(request, store=store, registry=registry, label_rows=labels)
+    assert manifest.validation_gate_passed is False
     assert manifest.is_alpha_certified is False
 
 
@@ -104,4 +106,15 @@ def test_training_rejects_feature_available_after_decision():
     with pytest.raises(AlphaError) as info:
         _feature_frame([{"decision_at": now, "instrument_id": "AAPL", "factor_name": "late", "factor_value": 1.0,
                          "feature_available_at": now + timedelta(minutes=1), "eligible": True, "quality_flags": [], "factor_version": "v1"}])
+    assert info.value.code == AlphaErrorCode.DATASET_MISMATCH
+
+
+def test_prediction_cannot_start_inside_validation_window(tmp_path):
+    from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
+    store, feature_set, split, request, labels = _fixture(tmp_path)
+    registry = AlphaModelRegistry(tmp_path / "models")
+    manifest = train_alpha(request, store=store, registry=registry, label_rows=labels)
+    with pytest.raises(AlphaError) as info:
+        predict_alpha(manifest.model_set_id, feature_set.dataset_id, split.train_start, split.validation_end,
+                      store=store, registry=registry)
     assert info.value.code == AlphaErrorCode.DATASET_MISMATCH

@@ -35,9 +35,9 @@ def predict_alpha(
                 break
     if loaded is None:
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model set was not found", {"model_set_id": model_set_id})
-    training_end = datetime.fromisoformat(loaded.metadata["training_window"]["train_end"].replace("Z", "+00:00"))
-    if start < training_end:
-        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Prediction period overlaps model training history")
+    validation_end = datetime.fromisoformat(loaded.metadata["validation_window"]["validation_end"].replace("Z", "+00:00"))
+    if start < validation_end:
+        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Prediction period overlaps model training or validation history")
     feature_manifest = store.load_manifest(feature_set_id)
     if feature_manifest.dataset_kind != "feature_panel":
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not a feature_panel")

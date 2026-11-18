@@ -60,7 +60,9 @@ def test_top_k_backtest_reconciles_account_and_never_fills_on_signal_bar(tmp_pat
     store, dataset, prediction_set = _fixture_store(tmp_path)
     result = run_top_k_backtest(prediction_set, dataset, store=store, config=TopKPortfolioConfig(top_k=20, initial_cash=1_000_000))
     assert result.metrics["rebalance_count"] >= 1
-    assert result.metrics["prediction_coverage"] == 1.0
+    assert 0 < result.metrics["prediction_coverage"] < 1
+    assert result.metrics["corporate_actions_modeled"] is False
+    assert result.metrics["return_semantics"] == "raw_price_return_excluding_corporate_actions"
     assert abs(result.final_account["equity"] - (result.final_account["cash"] + result.final_account["positions_value"])) < 1e-6
     assert abs(result.metrics["commission_paid"] - sum(fill["commission"] for fill in result.fills)) < 1e-9
     assert result.fills

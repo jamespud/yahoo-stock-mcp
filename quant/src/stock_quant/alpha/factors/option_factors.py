@@ -57,18 +57,42 @@ def compute_option_factors(
     underlying_prices: dict[str, list[dict]],
     pricing_config: OptionPricingConfig | None = None,
     selected_outputs: list[str] | None = None,
+    quote_tolerance_seconds: int = 60,
     checkpoint=None,
 ) -> DatasetManifest:
     if option_dataset.dataset_kind != "option_quotes":
         from ..errors import AlphaError, AlphaErrorCode
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Option factors require an option_quotes dataset")
     rows = [_quote_from_row(row) for row in store.read_rows(option_dataset.dataset_id)]
-    groups = defaultdict(list)
+    if type(quote_tolerance_seconds) is not int or not 0 <= quote_tolerance_seconds <= 3600:
+        from ..errors import AlphaError, AlphaErrorCode
+        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "quote_tolerance_seconds must be in 0..3600")
+    grouped: list[tuple[str, datetime, list[OptionQuote]]] = []
+    by_underlying = defaultdict(list)
     for quote in rows:
-        decision = quote.quote_at or quote.observed_at
-        groups[(quote.contract.underlying_id, decision)].append(quote)
+        by_underlying[quote.contract.underlying_id].append(quote)
+    tolerance = timedelta(seconds=quote_tolerance_seconds)
+    for underlying, underlying_quotes in sorted(by_underlying.items()):
+        ordered = sorted(underlying_quotes, key=lambda quote: quote.quote_at or quote.observed_at)
+        bucket = []
+        anchor = None
+        for quote in ordered:
+            stamp = quote.quote_at or quote.observed_at
+            if anchor is not None and stamp - anchor > tolerance:
+                grouped.append((underlying, anchor, bucket))
+                bucket, anchor = [], None
+            if anchor is None:
+                anchor = stamp
+            bucket.append(quote)
+        if bucket:
+            grouped.append((underlying, anchor, bucket))
     feature_rows: list[dict] = []
-    for index, ((underlying, decision), quotes) in enumerate(sorted(groups.items(), key=lambda item: (item[0][1], item[0][0]))):
+    for index, (underlying, decision, raw_quotes) in enumerate(grouped):
+        # One contract can have several quotes inside the tolerance window; use its latest observation.
+        latest = {}
+        for quote in raw_quotes:
+            latest[quote.contract.contract_id] = quote
+        quotes = list(latest.values())
         if checkpoint:
             checkpoint(index / max(1, len(groups)))
         prices = underlying_prices.get(underlying, [])
@@ -124,13 +148,13 @@ def compute_option_factors(
             put25 = _interpolate_delta(puts, 0.25)
             call25 = _interpolate_delta(calls, 0.25)
             skew = put25 - call25 if put25 is not None and call25 is not None else None
-            expiry_key = expiration.isoformat()
+            expiry_key = expiration.strftime("%Y%m%d")
             values = {
-                f"atm_iv:{expiry_key}": atm_iv,
-                f"iv_skew:{expiry_key}": skew,
-                f"put_call_oi_ratio:{expiry_key}": (put_oi / call_oi) if call_oi and put_oi is not None else None,
-                f"put_call_volume_ratio:{expiry_key}": (put_volume / call_volume) if call_volume and put_volume is not None else None,
-                f"relative_bid_ask_spread:{expiry_key}": float(np.mean(spreads)) if spreads else None,
+                f"atm_iv__{expiry_key}": atm_iv,
+                f"iv_skew__{expiry_key}": skew,
+                f"put_call_oi_ratio__{expiry_key}": (put_oi / call_oi) if call_oi and put_oi is not None else None,
+                f"put_call_volume_ratio__{expiry_key}": (put_volume / call_volume) if call_volume and put_volume is not None else None,
+                f"relative_bid_ask_spread__{expiry_key}": float(np.mean(spreads)) if spreads else None,
             }
             for name, value in values.items():
                 feature_rows.append({
@@ -151,14 +175,14 @@ def compute_option_factors(
         }
         for name, value in aggregate.items():
             feature_rows.append({
-                "decision_at": decision, "instrument_id": underlying, "factor_name": name,
+                "decision_at": factor_decision, "instrument_id": underlying, "factor_name": name,
                 "factor_value": value, "feature_available_at": available_at,
                 "eligible": value is not None, "quality_flags": [] if value is not None else ["INSUFFICIENT_HISTORY"],
                 "factor_version": OPTION_FACTOR_VERSION,
             })
     if selected_outputs is not None:
         selected = set(selected_outputs)
-        feature_rows = [row for row in feature_rows if row["factor_name"].split(":", 1)[0] in selected]
+        feature_rows = [row for row in feature_rows if row["factor_name"].split("__", 1)[0] in selected]
     if not feature_rows:
         from ..errors import AlphaError, AlphaErrorCode
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No option factors could be computed")
