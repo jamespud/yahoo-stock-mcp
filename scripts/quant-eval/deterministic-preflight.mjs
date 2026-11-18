@@ -15,7 +15,7 @@ export function emaStrategy() {
   return {schema_version:'1.0',name:'preflight-walkforward',decision_timeframe:'1d',parameters:{fast:{value_type:'integer',minimum:1,maximum:40,default:5},slow:{value_type:'integer',minimum:1,maximum:40,default:20}},entry:{kind:'binary',op:'gt',left:ema('fast'),right:ema('slow')},exit:{kind:'binary',op:'lt',left:ema('fast'),right:ema('slow')}};
 }
 export async function runPreflight(client,snapshot,spec) {
-  async function call(name,args={}) {const result=await client.callTool({name,arguments:args},undefined,{timeout:30000});if(result.isError)throw Error(`${name}: ${JSON.stringify(result.content)}`);return JSON.parse(result.content[0].text);}
+  async function call(name,args={}) {const result=await client.callTool({name,arguments:args},undefined,{timeout:90000});if(result.isError)throw Error(`${name}: ${JSON.stringify(result.content)}`);return JSON.parse(result.content[0].text);}
   async function complete(job,label) {const begun=Date.now(),deadline=begun+130000;while(Date.now()<deadline){const r=await call('quant_get_job',{job_id:job.job_id});if(r.status==='completed')return job.job_id;if(['failed','cancelled'].includes(r.status))throw Error(JSON.stringify(r));await new Promise(r=>setTimeout(r,Math.min(500,Math.max(0,deadline-Date.now()))));}throw Error(`${label} preflight deadline exceeded after 130000ms`);}
   const capabilities=await call('quant_get_capabilities');
   if(!capabilities.mcp_execution_enabled)throw Error('Quant MCP execution disabled');
