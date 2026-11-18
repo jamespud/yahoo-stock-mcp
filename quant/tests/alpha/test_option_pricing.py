@@ -74,7 +74,9 @@ def test_option_factors_include_atm_skew_term_structure_ratios_and_greeks(tmp_pa
     store = DatasetStore(tmp_path / "alpha")
     dataset = prepare_option_dataset(request, store=store, provider=Provider())
     prices = {"AAPL": [{"available_at": at - timedelta(days=1), "close": 200.0 + i * 0.1} for i in range(25)]}
-    factors = compute_option_factors(dataset, store=store, underlying_prices=prices)
+    progress = []
+    factors = compute_option_factors(dataset, store=store, underlying_prices=prices, checkpoint=progress.append)
+    assert progress
     factor_rows = store.read_rows(factors.dataset_id)
     assert all(row["feature_available_at"] <= row["decision_at"] for row in factor_rows)
     names = {row["factor_name"] for row in factor_rows}

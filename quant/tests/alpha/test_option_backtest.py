@@ -98,3 +98,46 @@ def test_option_fill_waits_for_quote_availability_and_requires_depth():
     no_depth = quote.model_copy(update={"ask_size": 0})
     assert next_ask([delayed], datetime(2026, 1, 2, 15, tzinfo=timezone.utc)) == delayed
     assert next_ask([no_depth], datetime(2026, 1, 2, 15, tzinfo=timezone.utc)) is None
+
+
+def test_overlapping_option_entry_cannot_use_future_exit_cash(tmp_path):
+    store = DatasetStore(tmp_path / "alpha")
+    decision_a = datetime(2026, 1, 2, 15, tzinfo=timezone.utc)
+    decision_b = datetime(2026, 1, 4, 15, tzinfo=timezone.utc)
+    contract_a = build_option_contract("CALL", 190.0)
+    contract_b = build_option_contract("CALL", 210.0)
+    rows = [
+        build_option_quote(contract_a, decision_a + timedelta(hours=1), 5.0, 5.2),
+        build_option_quote(contract_a, decision_a + timedelta(days=8, hours=1), 5.8, 6.0),
+        build_option_quote(contract_b, decision_b + timedelta(hours=1), 5.0, 5.2),
+        build_option_quote(contract_b, decision_b + timedelta(days=8, hours=1), 5.8, 6.0),
+    ]
+    request = OptionDatasetRequest(source="thetadata", underlyings=["AAPL"], start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                                   end=datetime(2026, 1, 20, tzinfo=timezone.utc), quote_policy="historical_bid_ask")
+    class Provider:
+        def read(self, request):
+            return OptionSnapshotBatch(rows=rows, source_version="fixture", quality={})
+    option_dataset = prepare_option_dataset(request, store=store, provider=Provider())
+    parent = store.publish_stock(
+        __import__("stock_quant.alpha.contracts", fromlist=["StockDatasetRequest"]).StockDatasetRequest(
+            source="fixture", symbols=["AAPL"], start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 20, tzinfo=timezone.utc)),
+        [{"instrument_id": "AAPL", "start_at": datetime(2026, 1, 1, 14, 30, tzinfo=timezone.utc),
+          "end_at": datetime(2026, 1, 1, 21, tzinfo=timezone.utc), "available_at": datetime(2026, 1, 1, 21, 1, tzinfo=timezone.utc),
+          "open": 200, "high": 201, "low": 199, "close": 200, "volume": 1, "adjustment": "raw",
+          "source": "fixture", "source_version": "v1", "currency": "USD"}],
+        calendar_version="fixture", source_version="v1", data_quality={},
+    )
+    prediction_set = store.publish_prediction_panel([
+        {"decision_at": decision_a, "instrument_id": contract_a.contract_id, "prediction_value": 2.0,
+         "model_id": "sha256:" + "a" * 64, "model_set_id": "sha256:" + "b" * 64, "fold": "test"},
+        {"decision_at": decision_b, "instrument_id": contract_b.contract_id, "prediction_value": 1.0,
+         "model_id": "sha256:" + "a" * 64, "model_set_id": "sha256:" + "b" * 64, "fold": "test"},
+    ], parent_feature_set_id=parent.dataset_id, model_id="sha256:" + "a" * 64, model_set_id="sha256:" + "b" * 64,
+       start_at=datetime(2026, 1, 1, tzinfo=timezone.utc), end_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+       price_basis="price_basis_unverified")
+    result = run_option_backtest(prediction_set, option_dataset, store=store,
+                                 config=OptionExecutionConfig(top_k=1, horizon_days=5, initial_cash=700.0))
+    buys = [fill for fill in result.fills if fill["side"] == "buy"]
+    assert len(buys) == 1 and buys[0]["contract_id"] == contract_a.contract_id
+    assert any(event["contract_id"] == contract_b.contract_id and event["code"] == "INSUFFICIENT_CASH_OR_DEPTH" for event in result.risk_events)
+    assert [row["time"] for row in result.cash_ledger] == sorted(row["time"] for row in result.cash_ledger)

@@ -146,3 +146,24 @@ def test_model_commit_failure_never_leaves_completed_job(tmp_path, monkeypatch):
         job = jobs.get_job(train_run["job_id"])
         assert job["status"] == "failed"
         assert job["error_code"] == "EXECUTION_FAILED"
+
+
+def test_publishing_heartbeat_and_expired_recovery(tmp_path):
+    registry_path = tmp_path / "registry.sqlite3"
+    with JobStore(registry_path) as jobs:
+        store = DatasetStore(registry_path.with_suffix(".alpha"))
+        dataset = _stock(store)
+        run = jobs.submit_alpha({"kind": "compute_factors", "dataset_id": dataset.dataset_id,
+                                 "factor_spec": {"schema_version": "1.0", "timeframe": "1d", "nodes": [{"id": "ret", "operator": "pct_change", "inputs": ["close"], "params": {"period": 1}}], "outputs": ["ret"]}})
+        claim = jobs.claim()
+        assert jobs.begin_publish(claim, {"summary": {"ok": True}}) is True
+        jobs.connection.execute("UPDATE jobs SET lease_until=unixepoch()-1 WHERE id=?", (run["job_id"],))
+        jobs.connection.commit()
+        recovered = jobs.claim()
+        assert recovered and recovered["id"] == run["job_id"]
+        assert recovered["owner"] != claim["owner"]
+        jobs.connection.execute("UPDATE jobs SET status='publishing',lease_until=unixepoch()+1 WHERE id=?", (run["job_id"],))
+        jobs.connection.commit()
+        assert jobs.heartbeat(recovered, .99) is True
+        lease = jobs.connection.execute("SELECT lease_until FROM jobs WHERE id=?", (run["job_id"],)).fetchone()[0]
+        assert lease > 1

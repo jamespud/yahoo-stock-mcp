@@ -140,7 +140,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 stock = datasets.load_manifest(request.underlying_price_dataset_id)
                 for row in datasets.read_rows(stock.dataset_id):
                     prices.setdefault(row["instrument_id"], []).append({"available_at": row["available_at"], "close": row["close"]})
-            config = OptionPricingConfig.model_validate(request.pricing_config) if request.pricing_config else None
+            pricing_payload = dict(request.pricing_config)
+            if pricing_payload and "valuation_at" not in pricing_payload:
+                pricing_payload["valuation_at"] = manifest.start_at
+            config = OptionPricingConfig.model_validate(pricing_payload) if pricing_payload else None
             selected_outputs = request.factor_spec.get("outputs") if request.factor_spec else None
             if selected_outputs is not None and (not isinstance(selected_outputs, list) or any(not isinstance(item, str) for item in selected_outputs)):
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Option factor_spec.outputs must be a string list")
@@ -195,10 +198,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         if not store.begin_publish(claim, result):
             return False
         try:
+            def publish_checkpoint():
+                if not store.heartbeat(claim, .99):
+                    raise RuntimeError("OWNERSHIP_LOST during publication")
             for manifest in pending:
-                datasets.register(manifest)
+                datasets.register(manifest, checkpoint=publish_checkpoint)
             if staged_model is not None:
-                final_registry.commit_from(staging_registry, staged_model.model_id)
+                final_registry.commit_from(staging_registry, staged_model.model_id, checkpoint=publish_checkpoint)
             return store.complete_publish(claim)
         except Exception as error:
             return store.fail_publish(claim, error, "EXECUTION_FAILED")

@@ -48,13 +48,17 @@ class AlphaModelRegistry:
         metadata_file.write_text(json.dumps(persisted, sort_keys=True, separators=(",", ":"), allow_nan=False))
         return persisted
 
-    def commit_from(self, staging: "AlphaModelRegistry", model_id: str) -> None:
+    def commit_from(self, staging: "AlphaModelRegistry", model_id: str, checkpoint=None) -> None:
+        if checkpoint:
+            checkpoint()
         source = staging.model_path(model_id)
         destination = self.model_path(model_id)
         if destination.exists():
             self.load(model_id)
-            return
-        os.rename(source, destination)
+        else:
+            os.rename(source, destination)
+        if checkpoint:
+            checkpoint()
 
     def load(self, model_id: str) -> LoadedModel:
         directory = self.model_path(model_id)

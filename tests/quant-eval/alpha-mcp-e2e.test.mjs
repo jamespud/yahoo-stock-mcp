@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -49,6 +50,18 @@ test("Alpha stock dataset and factor flow completes through stdio MCP", {timeout
       factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [{id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}}], outputs: ["ret"]}});
     await done(factors.job_id);
     assert.equal((await call("quant_get_result", {job_id: factors.job_id, section: "factors"})).total_count, 1);
+    const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
+    const seeded = JSON.parse(execFileSync(python, [resolve(root, "scripts/quant-eval/seed-alpha-options.py"), resolve(tmp, "quant.db")], {
+      cwd: root, env: {...process.env, PYTHONPATH: resolve(root, "quant/src")}, encoding: "utf8",
+    }));
+    const optionFactors = await call("quant_compute_option_factors", {
+      option_dataset_id: seeded.dataset_id,
+      underlying_price_dataset_id: dataset.dataset_id,
+      factor_spec: {outputs: ["atm_iv", "iv_term_structure", "realized_volatility"], quote_tolerance_seconds: 60},
+      pricing_config: {risk_free_rate: 0.04, dividend_yield: 0.0, model: "binomial_crr", steps: 32},
+    });
+    await done(optionFactors.job_id);
+    assert.ok((await call("quant_get_result", {job_id: optionFactors.job_id, section: "factors"})).total_count > 0);
   } finally {
     await client.close();
     rmSync(tmp, {recursive: true, force: true});

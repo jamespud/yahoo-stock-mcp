@@ -94,7 +94,7 @@ def compute_option_factors(
             latest[quote.contract.contract_id] = quote
         quotes = list(latest.values())
         if checkpoint:
-            checkpoint(index / max(1, len(groups)))
+            checkpoint(index / max(1, len(grouped)))
         prices = underlying_prices.get(underlying, [])
         spot = _spot_at(prices, decision)
         if spot is None:

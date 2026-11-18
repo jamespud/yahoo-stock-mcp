@@ -293,10 +293,12 @@ class DatasetStore:
             if stage.exists():
                 shutil.rmtree(stage, ignore_errors=True)
 
-    def register(self, manifest: DatasetManifest) -> None:
-        self._register(manifest)
+    def register(self, manifest: DatasetManifest, checkpoint=None) -> None:
+        self._register(manifest, checkpoint=checkpoint)
 
-    def _register(self, manifest: DatasetManifest) -> None:
+    def _register(self, manifest: DatasetManifest, checkpoint=None) -> None:
+        if checkpoint:
+            checkpoint()
         with self._connect() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO alpha_datasets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
@@ -317,6 +319,8 @@ class DatasetStore:
                 [(manifest.dataset_id, parent) for parent in manifest.parent_dataset_ids],
             )
             connection.commit()
+        if checkpoint:
+            checkpoint()
 
     def load_manifest(self, dataset_id: str) -> DatasetManifest:
         if not isinstance(dataset_id, str) or not _DATASET_ID.fullmatch(dataset_id):

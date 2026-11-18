@@ -281,7 +281,7 @@ class JobStore(Registry):
 
     def heartbeat(self, claim: dict, progress=0.) -> bool:
         with self.connection:
-            changed = self.connection.execute("UPDATE jobs SET lease_until=unixepoch()+15,progress=? WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (min(.99, max(0., progress)), claim["id"], claim["owner"]))
+            changed = self.connection.execute("UPDATE jobs SET lease_until=unixepoch()+15,progress=? WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()", (min(.99, max(0., progress)), claim["id"], claim["owner"]))
         return changed.rowcount == 1
 
     def _serialize_result(self, claim: dict, result: dict) -> tuple[dict, dict]:
