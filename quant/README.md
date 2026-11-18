@@ -45,7 +45,7 @@ Choose an existing, writable parent directory for the registry. Registry content
 persist independently of the market database. Leave `QUANT_ENABLED` unset to use
 the existing tool catalog. `QUANT_PYTHON` defaults to `python3` and must have the
 runtime dependencies installed. Requests are capped at 1 MiB, responses at 4 MiB,
-concurrency at four and elapsed time at 30 seconds. These are trusted compiler
+concurrency at four and elapsed time at 60 seconds. These are trusted compiler
 control processes; strategy source is loaded only in an explicitly configured Docker sandbox worker.
 
 ## Current MCP workflow

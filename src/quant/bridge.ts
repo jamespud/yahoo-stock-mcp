@@ -20,7 +20,7 @@ export async function quantRequest(request: Record<string, unknown>): Promise<un
     let size = 0;
     let stderr = "";
     let failed = false;
-    const timer = setTimeout(() => fail(new Error("RESOURCE_LIMIT_EXCEEDED: quant request timed out")), 30_000);
+    const timer = setTimeout(() => fail(new Error("RESOURCE_LIMIT_EXCEEDED: quant request timed out")), 60_000);
     function fail(error: Error) {
       if (failed) return;
       failed = true;
