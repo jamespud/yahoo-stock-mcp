@@ -20,11 +20,11 @@ Node: 22.22.0 for the authoritative regression run
 | Joint stock + option Alpha | PASS | PIT as-of feature join and `stock_return_with_option_features` training |
 | Top-K stock backtest | PASS | 100 stocks, constraints, next-open fills, accounting reconciliation |
 | Long-option backtest | PASS | Ask entry/Bid exit, multipliers, fees, cash ledger, missing-exit unresolved state |
-| Job publication consistency | PASS | Fenced two-phase publication; dataset/model commit failure leaves Job failed |
-| Nine MCP tools | PASS | TypeScript/Zod + Python schemas, stdio e2e stock dataset/factor flow |
+| Job publication consistency | PASS | Fenced two-phase publication, publishing heartbeat/expiry recovery, commit-failure injection |
+| Nine MCP tools | PASS | TypeScript/Zod + Python schemas, stdio stock dataset/factor and option-factor Job flow |
 | Skill and plugin | PASS | 10 skills, synchronized references, generated plugin |
 | Existing non-quant regression | PASS | `npm test` under Node 22.22.0 |
-| Existing Quant regression | PASS | 263 passed, 25 skipped |
+| Existing Quant regression | PASS | 265 passed, 25 skipped |
 | Real Yahoo option capture | SKIPPED | Requires live provider call; adapter path is implemented |
 | Real ThetaData acceptance | BLOCKED | No authenticated subscription/coverage supplied |
 | DSH AI acceptance | SKIPPED | `QUANT_EVAL_MODEL` is not configured |
@@ -37,8 +37,8 @@ Node: 22.22.0 for the authoritative regression run
 | `npm run typecheck` | PASS |
 | `npm run build` | PASS |
 | `npm test` (Node 22.22.0) | PASS |
-| `npm run test:quant` | PASS — 263 passed, 25 skipped |
-| `npm run test:quant-alpha` | PASS — 54 passed |
+| `npm run test:quant` | PASS — 265 passed, 25 skipped |
+| `npm run test:quant-alpha` | PASS — 56 passed |
 | `npm run test:quant-mcp` | PASS |
 | `npm run test:quant-regression` | PASS — 4 windows / 36 evaluations |
 | `npm run test:quant-alpha-mcp` | PASS — 2 tests |

@@ -25,8 +25,8 @@
     "typecheck": "PASS",
     "build": "PASS",
     "npm_test": "PASS",
-    "quant_tests": "263 passed, 25 skipped",
-    "quant_alpha_tests": "54 passed",
+    "quant_tests": "265 passed, 25 skipped",
+    "quant_alpha_tests": "56 passed",
     "quant_mcp": "PASS",
     "quant_regression": "PASS",
     "quant_alpha_mcp": "2 passed",
@@ -36,7 +36,7 @@
     "plugin": "PASS",
     "verify_pack": "183 files, 143 required paths"
   },
-  "review": {"critical_important_fixed": 16, "second_merge_review_fixed": 7, "deferred_minor": ["consolidate Alpha catalog runtime DDL with the canonical SQLite migration"]},
+  "review": {"critical_important_fixed": 16, "second_merge_review_fixed": 7, "third_merge_review_fixed": 3, "deferred_minor": ["consolidate Alpha catalog runtime DDL with the canonical SQLite migration"]},
   "limitations": [
     "Node 22 is required for the validated provider mock regression path.",
     "No authenticated ThetaData subscription was supplied.",
@@ -44,7 +44,7 @@
     "DSH was skipped because QUANT_EVAL_MODEL is not configured.",
     "No fixed-reference performance baseline was executed.",
     "v1 stock returns exclude corporate-action adjustment.",
-    "v1 option backtests use a long-option trade simulator, not a full broker portfolio.",
+    "v1 option backtests use a time-ordered long-option trade simulator, not a full broker portfolio.",
     "OOS metrics are report-only; is_alpha_certified remains false."
   ]
 }

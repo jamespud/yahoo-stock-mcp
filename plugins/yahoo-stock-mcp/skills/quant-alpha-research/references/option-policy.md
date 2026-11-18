@@ -13,6 +13,7 @@
 - Long-only execution: BUY at next valid Ask, SELL at next valid Bid. No Mid/Last/intrinsic close,
   automatic assignment, naked short, margin or broker-grade lifecycle.
 - `close_before_expiry` requires a valid exit quote. Missing exits remain unresolved and visible.
-  The v1 option engine tracks cash, premiums, commissions and unresolved cost basis, but is not a full
-  broker portfolio, margin, assignment or corporate-action model.
+  The v1 option engine processes decisions, entries and exits in timestamp order; cash from an exit is
+  unavailable to earlier entries. It tracks cash, premiums, commissions and unresolved cost basis, but
+  is not a full broker portfolio, margin, assignment or corporate-action model.
 - Greeks/IV are diagnostics when a quote, model or solver fails; never fabricate a number.
