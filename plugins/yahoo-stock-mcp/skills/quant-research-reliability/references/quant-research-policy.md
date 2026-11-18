@@ -57,3 +57,21 @@ Report total return, drawdown, costs and metric null conditions with their retur
 Daily sampling, elapsed-time CAGR and observation-based drawdown have different domains. Distinguish
 synthetic fixtures, historical simulation, hypotheses and live observations. Quant tools simulate
 orders; they do not place broker orders. Research output is not investment advice or a live strategy.
+
+
+## Alpha research extensions
+
+Read `quant_get_capabilities` and distinguish dataset, factor, current option snapshot, historical
+option, pricing and LightGBM availability. Provider coverage is valid only when actually verified.
+
+Keep FactorSpec, labels, models and predictions immutable. Require `label_available_at` before a split
+cutoff, purge overlapping label windows, fit preprocessing on train only, select on validation and read
+frozen test once. A noise fixture or favorable random OOS sample is not Alpha certification.
+
+Yahoo current option chains support current observation diagnostics only. Historical option training
+and quote-driven backtests require licensed historical contracts and valid Bid/Ask. BUY uses next valid
+Ask; SELL uses next valid Bid. Missing exit quotes leave a position unresolved rather than fabricating
+a close. Option cross-sections use a bounded observation-time tolerance and record that grid. Stock and
+option target weights must remain separate from actual positions, and all cash/fees/equity must reconcile.
+v1 stock returns exclude corporate-action adjustments and v1 option execution is not a full broker
+portfolio.

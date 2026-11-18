@@ -38,7 +38,7 @@ const pluginManifest = {
   author: { name: "jamespud" },
   repository: "https://github.com/jamespud/yahoo-stock-mcp",
   license: "MIT",
-  keywords: ["stocks", "research", "mcp", "yahoo-finance", "sqlite", "quant", "backtesting", "research-reliability"],
+  keywords: ["stocks", "research", "mcp", "yahoo-finance", "sqlite", "quant", "alpha", "lightgbm", "options", "backtesting", "research-reliability"],
   extensions: {
     "com.openai": {
       interface: {
@@ -52,7 +52,7 @@ const pluginManifest = {
         defaultPrompt: [
           "Research a company using the Yahoo Stock MCP workflows.",
           "Analyze a stock's technicals, earnings, dividends, options, or sector context.",
-          "Design a quantitative research experiment or audit backtest reliability using the opt-in quant tools."
+          "Design a quantitative research experiment, Alpha model, or audit backtest reliability using the opt-in quant tools."
         ]
       }
     }
@@ -83,13 +83,14 @@ Runtime requirements are Node.js >= 22.13 and a local SQLite database, which is 
 automatically in a per-user data directory. Keep proxy credentials in the local environment or host
 configuration; they are intentionally not stored in this plugin package.
 
-The bundle contains nine independently installable skills, including
-\`quant-strategy-research\` and \`quant-research-reliability\`. The default MCP command
+The bundle contains ten independently installable skills, including
+\`quant-strategy-research\`, \`quant-research-reliability\`, and \`quant-alpha-research\`. The default MCP command
 keeps quant disabled and does not require Python. To opt in, configure the host MCP environment
 with \`QUANT_ENABLED=1\`, \`QUANT_PYTHON\` pointing to the installed quant runtime, and
 \`QUANT_REGISTRY_PATH\` pointing to writable local storage. Reconnect and inspect the actual
 tools/list, then call \`quant_get_capabilities\`; provider coverage and sandbox availability
-remain separate checks. Python strategies additionally require an operator-approved immutable
+remain separate checks. Alpha research preserves immutable datasets, PIT factors, frozen models,
+Top-K portfolios and executable option-quote rules. Python strategies additionally require an operator-approved immutable
 sandbox image and successful isolation preflight. This plugin embeds no runtime paths, secrets
 or image credentials, and never places live broker orders.
 

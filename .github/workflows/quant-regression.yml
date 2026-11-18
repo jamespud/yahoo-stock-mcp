@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install ./quant pytest hypothesis
+      - run: python -m pip install './quant[alpha,options,theta]' pytest hypothesis
       - run: python scripts/run-quant-regression.py
       - run: npm ci
       - run: npm run build
@@ -57,6 +57,12 @@ jobs:
         env:
           QUANT_PYTHON: python
       - run: npm run test:quant-mcp
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-alpha-mcp
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
 
@@ -78,7 +84,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install ./quant pytest hypothesis
+      - run: python -m pip install './quant[alpha,options,theta]' pytest hypothesis
       - name: Provision trusted test image and resolve its immutable identity
         run: |
           docker pull python:3.12-alpine

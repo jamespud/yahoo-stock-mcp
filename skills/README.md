@@ -39,6 +39,7 @@ Screening and simulated backtesting do not place live broker orders.
 | --- | --- |
 | [`quant-strategy-research`](quant-strategy-research/SKILL.md) | Typed DSL, point-in-time signals, dated screening, bounded parameter search and walk-forward. |
 | [`quant-research-reliability`](quant-research-reliability/SKILL.md) | Historical simulation, fills/accounting, costs, reproducibility and research reliability. |
+| [`quant-alpha-research`](quant-alpha-research/SKILL.md) | Immutable datasets, FactorSpec DAGs, LightGBM model sets, frozen predictions, Top-K portfolios and historical option backtests. |
 
 Quant workflows share [quant policy](references/quant-research-policy.md), copied into each quant skill.
 Each quant skill includes validated DSL examples and all references needed for independent install.
@@ -77,6 +78,7 @@ skills/options-analysis
 skills/dividend-research
 skills/quant-strategy-research
 skills/quant-research-reliability
+skills/quant-alpha-research
 ```
 
 The installer copies each selected directory into `$CODEX_HOME/skills/<skill-name>` (normally

@@ -22,14 +22,14 @@ INSERT INTO intraday_bars(instrument_id,ts,bar_interval,open,high,low,close,volu
 (1,'2026-01-02 14:30:00','60m','10','12','9','11',1000,'yahoo');`);
 seed.close();
 const env = Object.fromEntries(Object.entries(process.env).filter((pair): pair is [string, string] => pair[1] !== undefined));
-const transportOptions = {command: process.execPath, args: [resolve(root, "dist/cli.js"), "server"], env: { ...env, QUANT_ENABLED: "1", QUANT_PYTHON: process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python"), QUANT_REGISTRY_PATH: resolve(tmp, "quant.db"), YAHOO_STOCK_MCP_SQLITE_PATH: resolve(tmp, "data.db") }, stderr: "pipe" as const};
+const transportOptions = {command: process.execPath, args: [resolve(root, "dist/cli.js"), "server"], env: { ...env, QUANT_ENABLED: "1", QUANT_PYTHON: process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python"), QUANT_REGISTRY_PATH: resolve(tmp, "quant.db"), STOCK_MCP_DB_PATH: resolve(tmp, "data.db"), YAHOO_STOCK_MCP_SQLITE_PATH: resolve(tmp, "data.db") }, stderr: "pipe" as const};
 let transport = new StdioClientTransport(transportOptions);
 let client = new Client({name: "quant-acceptance", version: "1.0"});
-const deadline = setTimeout(() => { void transport.close(); }, 60_000);
+const deadline = setTimeout(() => { void transport.close(); }, 120_000);
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  for (const name of ["quant_get_capabilities", "quant_validate_strategy", "quant_register_strategy", "quant_compile_strategy", "quant_get_calendar", "quant_get_data_quality", "quant_resample_snapshot", "get_bars"]) assert(tools.tools.some(t => t.name === name));
+  for (const name of ["quant_get_capabilities", "quant_validate_strategy", "quant_register_strategy", "quant_compile_strategy", "quant_get_calendar", "quant_get_data_quality", "quant_resample_snapshot", "quant_prepare_alpha_dataset", "quant_capture_options_snapshot", "quant_prepare_options_dataset", "quant_compute_factors", "quant_compute_option_factors", "quant_train_alpha_model", "quant_predict_alpha", "quant_backtest_alpha_portfolio", "quant_backtest_options", "get_bars"]) assert(tools.tools.some(t => t.name === name));
   async function call(name: string, args: Record<string, unknown> = {}) {
     const result = await client.callTool({name, arguments: args});
     assert(!result.isError, JSON.stringify(result));
@@ -39,6 +39,10 @@ try {
   const capabilities = await call("quant_get_capabilities");
   assert.equal(capabilities.python_sandbox, Boolean(process.env.QUANT_SANDBOX_IMAGE));
   assert.equal(capabilities.mcp_execution_enabled, true);
+  assert.equal(capabilities.stock_alpha_enabled, true);
+  assert.equal(capabilities.option_snapshot_enabled, true);
+  assert.equal(typeof capabilities.historical_options_enabled, "boolean");
+  assert(Array.isArray(capabilities.supported_factor_operators));
   const strategy = {schema_version: "1.0", name: "hold", decision_timeframe: "1d", entry: {kind: "const", value: true}, exit: {kind: "const", value: false}};
   const invalid = await call("quant_validate_strategy", {strategy: {...strategy, entry: {kind: "const", value: 1}}});
   assert.equal(invalid.valid, false);
@@ -169,6 +173,21 @@ try {
     return {...bars[0], symbol, start_time: `${date}T14:30:00Z`, end_time: `${date}T21:00:00Z`, available_at: `${date}T21:00:00Z`, open: price, high: price, low: price, close: price};
   }));
   const researchSnapshot = await call("quant_import_snapshot", {bars: researchBars, calendar_version: "research-fixture"});
+  const alphaDatasetJob = await call("quant_prepare_alpha_dataset", {
+    source: "yahoo", symbols: ["AAPL"], period: {start: "2026-01-02T00:00:00Z", end: "2026-01-07T00:00:00Z"},
+    price_basis: "price_basis_unverified",
+  });
+  await completed(alphaDatasetJob.job_id);
+  const alphaDataset = await call("quant_get_result", {job_id: alphaDatasetJob.job_id, section: "dataset"});
+  assert.equal(alphaDataset.section, "dataset");
+  assert.equal(alphaDataset.dataset_kind, "stock_bars");
+  const alphaFactorsJob = await call("quant_compute_factors", {
+    dataset_id: alphaDataset.dataset_id,
+    factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [{id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}}], outputs: ["ret"]},
+  });
+  await completed(alphaFactorsJob.job_id);
+  const alphaFactorResult = await call("quant_get_result", {job_id: alphaFactorsJob.job_id, section: "factors"});
+  assert.equal(alphaFactorResult.total_count, 1);
   async function completed(jobId: string) {
     for (let i = 0; i < 30; i++) {
       const status = await call("quant_get_job", {job_id: jobId});

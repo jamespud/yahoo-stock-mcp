@@ -4,6 +4,7 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { localSnapshot, type ExplicitCalendar } from "./local-data.js";
 import { isValidIsoDate } from "../validation.js";
 import { quantRequest } from "./bridge.js";
+import { registerAlphaTools } from "./alpha-tools.js";
 
 export function registerQuantTools(server: McpServer): void {
   async function invoke(request: Record<string, unknown>) {
@@ -17,7 +18,7 @@ export function registerQuantTools(server: McpServer): void {
   const strategy = z.record(z.unknown()).describe("Strict DSL definition or Python artifact (mode=python); obtain schemas and isolation status via quant_get_capabilities");
   const executionConfig = z.object({signal_backend: z.enum(["pit", "vector"]).optional().describe("PIT supports explicit multi-timeframe decision grids; vector uses NumPy for one monotone symbol/timeframe with the shared event broker"), initial_cash: z.number().positive().optional(), quantity: z.number().positive().optional(), commission_bps: z.number().min(0).max(10000).optional(), slippage_bps: z.number().min(0).lt(10000).optional(), fill_policy: z.literal("next_bar_open").optional(), currency: z.string().regex(/^[A-Z]{3}$/).optional(), max_positions: z.number().int().min(1).max(500).optional(), max_position_weight: z.number().positive().max(1).optional(), max_gross_exposure: z.number().positive().max(1).optional(), max_order_notional: z.number().positive().optional(), volume_participation: z.number().positive().max(1).optional()}).strict();
   const parameterValues = z.record(z.number()).optional();
-  server.tool("quant_get_capabilities", "Discover deployed quant capabilities and strict DSL JSON Schema. Does not imply provider data coverage.", {}, async () => invoke({ method: "capabilities" }));
+  server.tool("quant_get_capabilities", "Discover deployed quant and Alpha capabilities, dependency availability, stable errors and provider data coverage. Does not imply unavailable provider coverage.", {}, async () => invoke({ method: "capabilities" }));
   server.tool("quant_validate_strategy", "Validate DSL types/time semantics or Python artifact syntax without executing source. Python lifecycle is checked only in an isolated backtest.", { strategy, parameters: parameterValues, symbol: z.string().min(1).max(64).optional() }, async (args) => invoke({ method: "validate", ...args }));
   function registryPath() {
     const path = process.env.QUANT_REGISTRY_PATH;
@@ -35,6 +36,8 @@ export function registerQuantTools(server: McpServer): void {
     catch (error) { return { isError: true, content: [{ type: "text" as const, text: String(error) }] }; }
   }
   const jobId = z.string().min(1).max(128);
+  registerAlphaTools(server, { invoke, stored, registryPath });
+
   server.tool("quant_import_snapshot", "Import immutable explicit market observations with timezone-aware start_time/end_time/available_at. Does not infer provider timestamps or fill missing data.", {
     bars: z.array(z.record(z.unknown())).min(1).max(10000), calendar_version: z.string().min(1).max(128), actions: z.array(z.record(z.unknown())).max(5000).optional(), calendars: z.array(z.record(z.unknown())).max(50).optional().describe("Explicit exchange schedules; obtain calendar_schema via capabilities. Sessions and timezone participate in snapshot identity."),
   }, async (args) => stored({ method: "import_snapshot", ...args }));
@@ -60,7 +63,7 @@ export function registerQuantTools(server: McpServer): void {
   server.tool("quant_get_job", "Read durable job status and progress; restart consumers for queued/expired work with lease fencing.", {job_id: jobId}, async (args) => stored({method: "get_job", ...args}));
   server.tool("quant_cancel_job", "Cancel queued/running work. Terminal jobs remain terminal; cancelled workers cannot publish a result.", {job_id: jobId}, async (args) => stored({method: "cancel_job", ...args}));
   server.tool("quant_get_result", "Read a completed result section. List sections use bounded pagination with cursors tied to the job, section and result hash.", {
-    job_id: jobId, section: z.enum(["artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen"]).default("summary"), limit: z.number().int().min(1).max(1000).default(100), cursor: z.string().max(2048).optional(),
+    job_id: jobId, section: z.enum(["artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades"]).default("summary"), limit: z.number().int().min(1).max(1000).default(100), cursor: z.string().max(2048).optional(),
   }, async (args) => stored({method: "get_result", ...args}));
 
   server.tool("quant_snapshot_from_local", "Snapshot local Yahoo vendor OHLC using a versioned calendar or session schedule. Price basis defaults to unverified and is refused by the broker unless the caller explicitly attests raw historical prices. Availability is modeled as bar end plus declared delay; historical publication/revision timestamps are not known. Missing timeframes fail.", {

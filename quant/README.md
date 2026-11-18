@@ -6,6 +6,15 @@ shared-cash event backtests, isolated Python strategies and bounded research job
 Immutable SQLite registries and Parquet artifacts retain inputs and results.
 This is a single-user research runtime; supported models and limits are detailed below.
 
+## Quant Alpha Research v1
+
+The optional Alpha subsystem adds immutable stock/option datasets, FactorSpec DAGs, QuantLib option
+analytics, deterministic LightGBM model sets, frozen predictions, Top-K stock portfolios and long-only
+historical option backtests. It extends the existing MCP control plane with nine asynchronous Alpha
+tools. Yahoo current option snapshots are observation-only and cannot satisfy historical quote
+admission. See [`docs/QUANT_ALPHA_RESEARCH.md`](../docs/QUANT_ALPHA_RESEARCH.md) and the
+[`acceptance report`](../docs/QUANT_ALPHA_ACCEPTANCE.md).
+
 ## Local setup
 
 From the repository root:
@@ -36,7 +45,7 @@ Choose an existing, writable parent directory for the registry. Registry content
 persist independently of the market database. Leave `QUANT_ENABLED` unset to use
 the existing tool catalog. `QUANT_PYTHON` defaults to `python3` and must have the
 runtime dependencies installed. Requests are capped at 1 MiB, responses at 4 MiB,
-concurrency at four and elapsed time at 30 seconds. These are trusted compiler
+concurrency at four and elapsed time at 60 seconds. These are trusted compiler
 control processes; strategy source is loaded only in an explicitly configured Docker sandbox worker.
 
 ## Current MCP workflow

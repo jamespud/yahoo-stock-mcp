@@ -44,7 +44,8 @@ def test_python_plan_and_job_survive_registry_restart_and_use_pinned_image(tmp_p
         assert store.compile(strategy_id)["plan_id"] == plan["plan_id"]
         claim = store.claim()
         assert execute_job(store, claim)
-        assert store.get_job(job["job_id"])["status"] == "completed"
+        completed = store.get_job(job["job_id"])
+        assert completed["status"] == "completed", completed
         assert store.get_result(job["job_id"], "final_account")["positions"]["AAPL"]["quantity"] == 2.
         repro = store.get_result(job["job_id"], "reproducibility")
         assert repro["sandbox_image"] == image

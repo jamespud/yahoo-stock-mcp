@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const quantSkills = ['quant-strategy-research', 'quant-research-reliability'];
+const quantSkills = ['quant-strategy-research', 'quant-research-reliability', 'quant-alpha-research'];
+const strategyExampleSkills = ['quant-strategy-research'];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const skillNames = () => readdirSync(resolve(root, 'skills')).filter(name => name !== 'references' && statSync(resolve(root, 'skills', name)).isDirectory() && existsSync(resolve(root, 'skills', name, 'SKILL.md'))).sort();
 function files(dir) {
@@ -19,7 +20,7 @@ function treeHash(dir) {
   return sha256(JSON.stringify(files(dir).map(path => [relative(dir, path).split('\\').join('/'), sha256(readFileSync(path))])));
 }
 function referenceEntries() {
-  return skillNames().flatMap(name => ['data-policy.md', ...(quantSkills.includes(name) ? ['quant-research-policy.md', 'strategy-examples.json'] : [])].map(ref => {
+  return skillNames().flatMap(name => ['data-policy.md', ...(quantSkills.includes(name) ? ['quant-research-policy.md'] : []), ...(strategyExampleSkills.includes(name) ? ['strategy-examples.json'] : [])].map(ref => {
     const source = `skills/references/${ref}`;
     const path = `skills/${name}/references/${ref}`;
     const expected = sha256(readFileSync(resolve(root, source)));
@@ -73,7 +74,7 @@ export function refreshSkillReport(observations = {}) {
 function main() {
   const check = process.argv.includes('--check');
   const names = skillNames();
-  if (names.length !== 9) throw new Error(`expected nine skills, got ${names.length}`);
+  if (names.length !== 10) throw new Error(`expected ten skills, got ${names.length}`);
   for (const name of quantSkills) if (!names.includes(name)) throw new Error(`missing quant skill: ${name}`);
   if (!check) {
     for (const entry of referenceEntries()) {
