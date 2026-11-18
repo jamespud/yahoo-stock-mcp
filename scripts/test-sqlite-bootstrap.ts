@@ -18,8 +18,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsxBin = resolve(root, "node_modules/.bin/tsx" + (process.platform === "win32" ? ".cmd" : ""));
 const cliEntry = resolve(root, "src/cli.ts");
 
-/** The 24 data tables of the MySQL terminal state (0001..0009 applied), excluding bookkeeping. */
+/** Canonical market-data tables plus Alpha catalog tables, excluding bookkeeping. */
 const EXPECTED_TABLES = [
+  "alpha_backtests",
+  "alpha_dataset_parents",
+  "alpha_dataset_partitions",
+  "alpha_datasets",
+  "alpha_models",
+  "alpha_predictions",
+  "alpha_provider_coverage",
   "analyst_actions",
   "analyst_forecasts",
   "company_events",
@@ -92,14 +99,14 @@ try {
   const conn = openDatabase(dbPath);
   const applied = applySqliteMigrations(conn);
 
-  await check("baseline applies migration 0001 and reports it", () => {
-    assert.deepEqual(applied, ["0001_initial"]);
+  await check("baseline applies migrations 0001 and 0002", () => {
+    assert.deepEqual(applied, ["0001_initial", "0002_alpha_catalog"]);
   });
 
-  await check("terminal schema exposes the 24 canonical data tables", () => {
+  await check("terminal schema exposes 31 canonical market and Alpha tables", () => {
     const names = tableNames(conn).filter((n) => n !== "schema_migrations");
     assert.deepEqual(names, EXPECTED_TABLES, `table set mismatch: ${names.join(",")}`);
-    assert.equal(names.length, 24);
+    assert.equal(names.length, 31);
   });
 
   await check("schema_migrations records version, name, checksum", () => {
@@ -115,7 +122,7 @@ try {
     assert.deepEqual(again, []);
     const row: any = conn.db.prepare("SELECT name FROM sectors WHERE sector_code = 'XLE'").get();
     assert.equal(row.name, "Energy");
-    assert.equal(conn.db.prepare("SELECT COUNT(*) c FROM schema_migrations").get().c, 1);
+    assert.equal(conn.db.prepare("SELECT COUNT(*) c FROM schema_migrations").get().c, 2);
   });
 
   // ---------------------------------------------------------------- PRAGMA policy

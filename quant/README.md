@@ -6,6 +6,15 @@ shared-cash event backtests, isolated Python strategies and bounded research job
 Immutable SQLite registries and Parquet artifacts retain inputs and results.
 This is a single-user research runtime; supported models and limits are detailed below.
 
+## Quant Alpha Research v1
+
+The optional Alpha subsystem adds immutable stock/option datasets, FactorSpec DAGs, QuantLib option
+analytics, deterministic LightGBM model sets, frozen predictions, Top-K stock portfolios and long-only
+historical option backtests. It extends the existing MCP control plane with nine asynchronous Alpha
+tools. Yahoo current option snapshots are observation-only and cannot satisfy historical quote
+admission. See [`docs/QUANT_ALPHA_RESEARCH.md`](../docs/QUANT_ALPHA_RESEARCH.md) and the
+[`acceptance report`](../docs/QUANT_ALPHA_ACCEPTANCE.md).
+
 ## Local setup
 
 From the repository root:

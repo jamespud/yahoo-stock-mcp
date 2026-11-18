@@ -67,6 +67,7 @@ class OwnershipLost(RuntimeError):
 class JobStore(Registry):
     def __init__(self, path: str | Path):
         super().__init__(path)
+        self.path = str(path)
         self.artifacts = ArtifactStore(str(path) + ".artifacts")
         self.connection.executescript('''
             CREATE TABLE IF NOT EXISTS data_snapshots (
@@ -230,6 +231,37 @@ class JobStore(Registry):
             raise
         return self.get_job(job_id)
 
+    def submit_alpha(self, raw: dict) -> dict:
+        try:
+            from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
+        except ImportError as error:
+            raise ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed") from error
+        request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
+        payload = request.model_dump(mode="json")
+        job_id = "alpha_" + uuid4().hex
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            if request.idempotency_key:
+                previous = self.connection.execute("SELECT job_id,config_hash FROM job_requests WHERE request_key=?", (request.idempotency_key,)).fetchone()
+                if previous:
+                    if previous[1] != digest(payload):
+                        raise ValueError("IDEMPOTENCY_CONFLICT: key already identifies another configuration")
+                    self.connection.commit()
+                    job = self.get_job(previous[0])
+                    return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
+            count = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]
+            if count >= 32:
+                raise ValueError("RESOURCE_LIMIT_EXCEEDED: job queue is full")
+            self.connection.execute("INSERT INTO jobs(id,status,request,config_hash) VALUES (?, 'queued', ?, ?)", (job_id, json.dumps(payload, allow_nan=False), digest(payload)))
+            if request.idempotency_key:
+                self.connection.execute("INSERT INTO job_requests VALUES (?, ?, ?)", (request.idempotency_key, job_id, digest(payload)))
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        job = self.get_job(job_id)
+        return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
+
     def claim(self) -> dict | None:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
@@ -252,7 +284,7 @@ class JobStore(Registry):
             changed = self.connection.execute("UPDATE jobs SET lease_until=unixepoch()+15,progress=? WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (min(.99, max(0., progress)), claim["id"], claim["owner"]))
         return changed.rowcount == 1
 
-    def finish(self, claim: dict, result: dict | None = None, error: Exception | None = None) -> bool:
+    def finish(self, claim: dict, result: dict | None = None, error: Exception | None = None, error_code: str | None = None) -> bool:
         if not self.connection.execute("SELECT 1 FROM jobs WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (claim["id"], claim["owner"])).fetchone():
             return False
         references = {}
@@ -280,7 +312,7 @@ class JobStore(Registry):
         with self.connection:
             changed = self.connection.execute("UPDATE jobs SET status=?,progress=?,result=?,result_hash=?,error_code=?,error_message=?,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()",
                 (status, 1. if not error else 0., encoded, digest(result) if result is not None else None,
-                 "EXECUTION_FAILED" if error else None, str(error)[:4096] if error else None, claim["id"], claim["owner"]))
+                 (error_code or "EXECUTION_FAILED") if error else None, str(error)[:4096] if error else None, claim["id"], claim["owner"]))
             if changed.rowcount == 1 and not error:
                 for section, reference in references.items():
                     self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
@@ -298,7 +330,7 @@ class JobStore(Registry):
         return self.get_job(job_id)
 
     def get_result(self, job_id: str, section="summary", limit=100, cursor=None) -> dict:
-        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen")
+        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
         job = self.get_job(job_id)
@@ -353,6 +385,27 @@ class JobStore(Registry):
 
 def execute_job(store: JobStore, claim: dict) -> bool:
     try:
+        from .alpha.jobs.requests import ALPHA_KINDS
+        if claim["request"].get("kind") in ALPHA_KINDS:
+            try:
+                from .alpha.jobs.executor import execute_alpha_job
+            except ImportError as error:
+                return store.finish(claim, error=ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed"), error_code="DATA_UNAVAILABLE")
+            if not store.heartbeat(claim):
+                return False
+            began = time.monotonic()
+            last_check = 0.0
+            def alpha_checkpoint(progress):
+                nonlocal last_check
+                now = time.monotonic()
+                if now - last_check >= 0.25:
+                    if not store.heartbeat(claim, progress):
+                        raise OwnershipLost()
+                    last_check = now
+            try:
+                return execute_alpha_job(store, claim, alpha_checkpoint)
+            except OwnershipLost:
+                return False
         request = REQUEST_ADAPTER.validate_python(claim["request"])
         if digest(request.model_dump(mode="json")) != claim["config_hash"]:
             raise ValueError("Job configuration integrity check failed")

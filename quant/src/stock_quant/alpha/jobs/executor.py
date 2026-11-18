@@ -1,0 +1,215 @@
+"""Trusted Alpha job executor using the shared durable lease/fencing protocol."""
+from __future__ import annotations
+
+import os
+import hashlib
+import json
+from datetime import timedelta
+from pathlib import Path
+import time
+
+from pydantic import ValidationError
+
+from ...compiler import digest
+from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
+from ..data.catalog import DatasetStore
+from ..data.option_dataset import OptionSnapshotBatch, prepare_option_dataset
+from ..data.thetadata_adapter import ThetaDataHttpClient, ThetaDataV3Provider, ThetaDataV3ResponseError
+from ..data.stock_dataset import StockHistoryBatch, prepare_stock_dataset
+from ..data.yahoo_option_import import YahooOptionChainImport
+from ..data.yahoo_stock_adapter import YahooStockAdapter
+from ..errors import AlphaError, AlphaErrorCode
+from ..factors.ast import FactorSpec
+from ..factors.compiler import FactorCompileError, compile_factor_spec
+from ..factors.engine import combine_feature_panels, compute_stock_factors
+from ..factors.option_factors import compute_option_factors
+from ..models.inference import predict_alpha
+from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
+from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
+from ..options.pricing import OptionPricingConfig
+from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
+from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
+from .requests import (
+    ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
+    ComputeFactorsJob, ComputeOptionFactorsJob, PrepareOptionsDatasetJob, PrepareStockDatasetJob,
+    PredictAlphaJob, TrainAlphaModelJob,
+)
+
+
+class _ProviderRows:
+    def __init__(self, rows):
+        self.rows = rows
+    def read(self, request):
+        return self.rows
+
+
+def _store(root: Path) -> DatasetStore:
+    return DatasetStore(root)
+
+
+def _staged_rows(store, reference: str) -> list[dict]:
+    root = Path(store.path).with_suffix(".alpha-inbox")
+    path = root / (reference.removeprefix("sha256:") + ".json")
+    content = path.read_bytes()
+    actual = "sha256:" + hashlib.sha256(content).hexdigest()
+    if actual != reference:
+        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Staged artifact integrity check failed")
+    payload = json.loads(content)
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Staged artifact contains no rows")
+    return rows
+
+
+def _manifest_payload(manifest: DatasetManifest) -> dict:
+    return {"dataset_id": manifest.dataset_id, "dataset_kind": manifest.dataset_kind, "content_hash": manifest.content_hash,
+            "partition_manifest": [part.model_dump(mode="json") for part in manifest.partition_manifest],
+            "data_quality": manifest.data_quality, "dataset": manifest.model_dump(mode="json")}
+
+
+def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
+    began = time.monotonic()
+    try:
+        request = ALPHA_REQUEST_ADAPTER.validate_python(claim["request"])
+        if digest(request.model_dump(mode="json")) != claim["config_hash"]:
+            raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Job configuration integrity check failed")
+        root = Path(store.path).with_suffix(".alpha")
+        datasets = DatasetStore(root, defer_registration=True)
+        final_registry = AlphaModelRegistry(Path(store.path).with_suffix(".models"))
+        staging_registry = AlphaModelRegistry(Path(store.path).with_suffix(f".models-staging-{claim['id']}"))
+        pending = []
+        staged_model = None
+        def bounded(progress):
+            if time.monotonic() - began > request.max_seconds:
+                raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Alpha job exceeded max_seconds")
+            checkpoint(progress)
+        if isinstance(request, PrepareStockDatasetJob):
+            database = os.environ.get("STOCK_MCP_DB_PATH")
+            if not database:
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "STOCK_MCP_DB_PATH is not configured")
+            req = StockDatasetRequest(source=request.source, symbols=request.symbols, start=request.start, end=request.end,
+                                      price_basis=request.price_basis, calendar_version=request.calendar_version)
+            manifest = prepare_stock_dataset(req, store=datasets, provider=YahooStockAdapter(database), checkpoint=bounded)
+            pending.append(manifest)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(manifest)},
+                      "data_quality": [{"dataset_id": manifest.dataset_id, **manifest.data_quality}],
+                      "reproducibility": {"request_hash": claim["config_hash"], "manifest_hash": manifest.content_hash}}
+        elif isinstance(request, CaptureOptionChainJob):
+            captured_rows = request.rows if request.rows is not None else _staged_rows(store, request.rows_artifact)
+            quotes = YahooOptionChainImport(observed_at=request.observed_at).convert({
+                "symbol": request.underlying, "asOf": request.observed_at.isoformat(), "underlying": {"currency": "USD"}, "legs": captured_rows,
+            })
+            req = OptionDatasetRequest(source="yahoo", underlyings=[request.underlying], start=request.observed_at,
+                                       end=request.observed_at + timedelta(days=1), quote_policy="observed_snapshot",
+                                       expirations=request.expirations)
+            manifest = prepare_option_dataset(req, store=datasets, provider=_ProviderRows(OptionSnapshotBatch(rows=quotes, source_version="yahoo-capture-v1", quality={"capture": True})), checkpoint=bounded)
+            pending.append(manifest)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(manifest)},
+                      "data_quality": [{"dataset_id": manifest.dataset_id, **manifest.data_quality}]}
+        elif isinstance(request, PrepareOptionsDatasetJob):
+            staged = request.rows if request.rows is not None else (_staged_rows(store, request.rows_artifact) if request.rows_artifact else None)
+            req = OptionDatasetRequest(source=request.source, underlyings=request.underlyings, start=request.start, end=request.end, quote_policy=request.quote_policy, provider_dataset=request.provider_dataset)
+            if staged is None:
+                if request.source != "thetadata" or not os.environ.get("THETADATA_API_KEY"):
+                    raise AlphaError(AlphaErrorCode.OPTION_HISTORY_UNAVAILABLE, "Provider rows are unavailable; configure licensed ThetaData credentials or a trusted staged artifact")
+                provider = ThetaDataV3Provider(ThetaDataHttpClient.from_env())
+            else:
+                from ..options.quotes import OptionQuote
+                quotes = [OptionQuote.model_validate(row) for row in staged]
+                provider = _ProviderRows(OptionSnapshotBatch(rows=quotes, source_version="staged-provider-v1", quality={}))
+            manifest = prepare_option_dataset(req, store=datasets, provider=provider, checkpoint=bounded)
+            pending.append(manifest)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(manifest)}, "data_quality": [{"dataset_id": manifest.dataset_id, **manifest.data_quality}]}
+        elif isinstance(request, ComputeFactorsJob):
+            try:
+                manifest = datasets.load_manifest(request.dataset_id)
+            except KeyError as error:
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Dataset was not found", {"dataset_id": request.dataset_id}) from error
+            compiled = compile_factor_spec(FactorSpec.model_validate(request.factor_spec))
+            feature = compute_stock_factors(manifest, compiled, store=datasets, checkpoint=bounded)
+            if request.auxiliary_feature_set_ids:
+                feature = combine_feature_panels(feature, [datasets.load_manifest(item) for item in request.auxiliary_feature_set_ids], store=datasets)
+            pending.append(feature)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
+                      "factors": [{"dataset_id": feature.dataset_id, "factor_spec_hash": compiled.spec_hash}],
+                      "factor_diagnostics": [], "reproducibility": {"dataset_id": request.dataset_id, "factor_spec_hash": compiled.spec_hash}}
+        elif isinstance(request, ComputeOptionFactorsJob):
+            manifest = datasets.load_manifest(request.option_dataset_id)
+            prices = {}
+            if request.underlying_price_dataset_id:
+                stock = datasets.load_manifest(request.underlying_price_dataset_id)
+                for row in datasets.read_rows(stock.dataset_id):
+                    prices.setdefault(row["instrument_id"], []).append({"available_at": row["available_at"], "close": row["close"]})
+            config = OptionPricingConfig.model_validate(request.pricing_config) if request.pricing_config else None
+            selected_outputs = request.factor_spec.get("outputs") if request.factor_spec else None
+            if selected_outputs is not None and (not isinstance(selected_outputs, list) or any(not isinstance(item, str) for item in selected_outputs)):
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Option factor_spec.outputs must be a string list")
+            feature = compute_option_factors(manifest, store=datasets, underlying_prices=prices, pricing_config=config,
+                                             selected_outputs=selected_outputs, checkpoint=bounded)
+            pending.append(feature)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
+                      "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
+        elif isinstance(request, TrainAlphaModelJob):
+            labels = None
+            if request.stock_dataset_id:
+                labels = stock_forward_labels(datasets.read_rows(request.stock_dataset_id), horizon=request.horizon_days)
+            elif request.option_dataset_id:
+                manifest = datasets.load_manifest(request.option_dataset_id)
+                labels, _ = historical_option_labels(manifest, datasets, horizon_days=request.horizon_days)
+            if labels is None:
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "A label source dataset is required")
+            train_req = TrainAlphaRequest(feature_set_id=request.feature_set_id, label_name=request.label_name,
+                                          target_type=request.target_type, split=request.split,
+                                          hyperparameters={key: value for key, value in request.hyperparameters.items()},
+                                          random_seed=request.random_seed, resource_budget=request.resource_budget,
+                                          min_rank_ic=request.min_rank_ic)
+            model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
+            staged_model = model
+            result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
+                      "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
+                      "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+        elif isinstance(request, PredictAlphaJob):
+            prediction = predict_alpha(request.model_set_id, request.feature_set_id, request.start, request.end, store=datasets, registry=final_registry)
+            pending.append(prediction)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(prediction)},
+                      "predictions": [{"dataset_id": prediction.dataset_id}], "rank_ic": []}
+        elif isinstance(request, BacktestAlphaPortfolioJob):
+            prediction = datasets.load_manifest(request.prediction_set_id)
+            market = datasets.load_manifest(request.dataset_id)
+            config = TopKPortfolioConfig.model_validate(request.portfolio_config)
+            run = run_top_k_backtest(prediction, market, store=datasets, config=config)
+            result = {"summary": run.metrics, "portfolio_metrics": [run.metrics], "orders": run.orders,
+                      "target_weights": run.target_weights, "equity_curve": run.equity_curve,
+                      "positions": run.positions, "fills": run.fills, "risk_events": run.risk_events,
+                      "diagnostics": run.diagnostics, "final_account": run.final_account}
+        elif isinstance(request, BacktestOptionsJob):
+            prediction = datasets.load_manifest(request.prediction_set_id)
+            options = datasets.load_manifest(request.option_dataset_id)
+            config = OptionExecutionConfig.model_validate(request.execution_config)
+            run = run_option_backtest(prediction, options, store=datasets, config=config)
+            result = {"summary": run.metrics, "trades": run.trades, "fills": run.fills, "positions": run.positions,
+                      "risk_events": run.risk_events, "diagnostics": run.diagnostics}
+        else:
+            raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
+        success = store.finish(claim, result)
+        if success:
+            for manifest in pending:
+                datasets.register(manifest)
+            if staged_model is not None:
+                final_registry.commit_from(staging_registry, staged_model.model_id)
+        return success
+    except AlphaError as error:
+        return store.finish(claim, error=error, error_code=error.code.value)
+    except FactorCompileError as error:
+        wrapped = AlphaError(AlphaErrorCode.DATASET_MISMATCH, "FactorSpec compilation failed", error.diagnostic)
+        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+    except ValidationError as error:
+        wrapped = AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Alpha request or schema validation failed", {"reason": str(error)})
+        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+    except ThetaDataV3ResponseError as error:
+        wrapped = AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "ThetaData response contract failed", {"reason": str(error)})
+        return store.finish(claim, error=wrapped, error_code=wrapped.code.value)
+    except KeyError as error:
+        return store.finish(claim, error=AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, str(error)), error_code=AlphaErrorCode.DATA_UNAVAILABLE.value)
+    except Exception as error:
+        return store.finish(claim, error=error)

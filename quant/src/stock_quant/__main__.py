@@ -14,6 +14,7 @@ from .calendar import CalendarSchedule, generate_calendar, CALENDAR_PROVIDER_VER
 from .jobs import JobStore
 from .worker import wake_worker
 from .sandbox import PythonArtifact, SandboxSession, validate_python
+from .alpha.capabilities import AlphaCapabilities
 
 
 def capabilities():
@@ -26,7 +27,7 @@ def capabilities():
             sandbox.update(available=True, image=image, reason="operator image and required isolation controls passed preflight")
         except (ValueError, KeyError, IndexError) as error:
             sandbox["reason"] = str(error)[:1024]
-    return {
+    result = {
         "schema_version": "1.0", "strategy_modes": ["dsl", "python"] if sandbox["available"] else ["dsl"],
         "dsl_schema": Strategy.model_json_schema(),
         "calendar_schema": CalendarSchedule.model_json_schema(),
@@ -39,11 +40,18 @@ def capabilities():
         "signal_backends": {"pit": {"alignment": "frozen_target_publication_grid", "rolling_after_alignment": True},
                             "vector": {"implementation": "numpy", "scope": "one execution symbol/timeframe, monotone publication; no alignment or time-varying split adjustment", "broker": "shared_event_kernel", "max_cells": 2000000, "max_operations": 20000000}},
         "execution_models": ["single_asset_long_only_next_bar_open", "portfolio_long_only_next_bar_open"],
-        "result_sections": ["artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen"],
+        "result_sections": ["artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades"],
         "artifact_storage": {"format": "parquet-json-v1", "root": "registry_path + .artifacts", "max_rows_per_section": 1000000, "max_json_bytes_per_section": 268435456, "legacy_json_reads": True},
         "research": {"methods": ["grid_search", "walk_forward", "cross_sectional_screen"], "max_trials": 100, "max_evaluations": 1000, "max_windows": 10, "max_symbols": 500},
         "limits": {"max_expression_depth": 64, "max_expression_visits": 10000, "max_request_bytes": 1048576},
     }
+    result.update(AlphaCapabilities.detect().model_dump(mode="json"))
+    try:
+        from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
+        result["alpha_job_request_schema"] = ALPHA_REQUEST_ADAPTER.json_schema()
+    except ImportError:
+        result["alpha_job_request_schema"] = None
+    return result
 
 
 def main():
@@ -62,7 +70,7 @@ def main():
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))
-        elif method in ("register", "compile", "import_snapshot", "run_backtest", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
+        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
             with JobStore(request["registry_path"]) as registry:
                 if method == "register":
                     result = registry.register(request["strategy"])
@@ -83,6 +91,9 @@ def main():
                     wake_worker(request["registry_path"])
                 elif method == "run_backtest":
                     result = registry.submit(request["backtest"])
+                    wake_worker(request["registry_path"])
+                elif method == "submit_alpha":
+                    result = registry.submit_alpha(request["job"])
                     wake_worker(request["registry_path"])
                 elif method == "get_job":
                     result = registry.get_job(request["job_id"])
