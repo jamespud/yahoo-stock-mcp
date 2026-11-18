@@ -1,0 +1,74 @@
+---
+name: quant-alpha-research
+description: Run evidence-backed stock, option, and joint Alpha research through immutable datasets, FactorSpec DAGs, LightGBM model sets, frozen predictions, Top-K portfolios, and historical long-option backtests. Use for factor pipelines, ML Alpha research, model OOS evaluation, option volatility factors, and portfolio simulation; not for rule-DSL authoring or generic backtest auditing.
+---
+
+# Quant Alpha Research
+
+Build a reproducible research chain:
+
+`dataset -> factors -> matured labels -> frozen LightGBM model -> predictions -> portfolio/option simulation`
+
+Read [data policy](references/data-policy.md) and [quant research policy](references/quant-research-policy.md)
+first. For factor, option, model and reporting details read the local references:
+
+- [factor policy](references/factor-policy.md)
+- [option policy](references/option-policy.md)
+- [model validation](references/model-validation.md)
+- [report template](references/report-template.md)
+
+## MCP tools used
+
+- `quant_get_capabilities` - inspect dependency availability, supported operators/models/labels and verified provider coverage.
+- `quant_prepare_alpha_dataset` - create immutable stock datasets with explicit price basis and PIT availability.
+- `quant_capture_options_snapshot` - append an observed Yahoo option-chain snapshot; never historical option history.
+- `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
+- `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
+- `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
+- `quant_train_alpha_model` - train deterministic LightGBM with chronological train/validation/test separation.
+- `quant_predict_alpha` - predict with a frozen model set over a later period.
+- `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio.
+- `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
+- `quant_get_job` / `quant_cancel_job` / `quant_get_result` - poll, cancel and retrieve only terminal evidence.
+
+## Workflow
+
+1. Inspect the actual tool list, then call `quant_get_capabilities`. Treat every enabled flag as a
+   deployed feature check, not as proof of provider coverage. `historical_options_enabled` requires
+   both a licensed adapter and verified data; Yahoo current snapshots never qualify.
+2. Prepare an immutable dataset. Record source, source version, calendar version, universe, interval,
+   availability policy, price basis, quality, dataset ID and content hash. Do not auto-fill missing
+   bars or mix unlabelled price bases/providers.
+3. Compile a FactorSpec v1 DAG. Read [factor policy](references/factor-policy.md). Use only listed
+   operators, preserve missing values, and distinguish time-series from decision-time cross-sectional
+   scope. Poll the job; do not treat a queued feature set as evidence.
+4. For options, read [option policy](references/option-policy.md). Current-chain snapshots may support
+   current IV/skew/term diagnostics only. Historical option prices, returns or backtests require
+   historical contract identity and valid Bid/Ask. Missing quotes are unresolved, never filled at Mid,
+   Last or intrinsic value.
+5. Define labels and windows before training. Require `label_available_at <= split_end`, purge overlap,
+   apply any embargo, and keep stock-return, option-return and IV-change labels separate. Never place
+   immature labels in train, validation or test.
+6. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
+   Train-only preprocessing, validation-based selection and one frozen OOS read are mandatory. Inspect
+   coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics.
+7. Predict only after the training window. Verify feature names, order and types match the registry.
+   Reject missing/corrupt models and never let a future fold predict past decisions.
+8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
+   positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
+   use next valid Bid. Reconcile cash, positions, commissions and equity. Leave unresolved option
+   positions visible.
+9. Read only completed job sections. Page list sections with returned cursors. Report data source,
+   dataset/model/job IDs, window, price basis, costs, unresolved diagnostics and every `BLOCKED`,
+   `SKIPPED` or `NOT_TESTED` acceptance item. Use the [report template](references/report-template.md).
+
+## Claim boundaries
+
+- A successful simulation is not a live order, investment recommendation or guarantee of future profit.
+- A high backtest return does not establish Alpha without frozen OOS evidence and quality diagnostics.
+- Do not claim historical option Alpha from Yahoo current snapshots or synthetic fills.
+- Do not claim ThetaData acceptance without real authorized data. Offline fixture passes remain fixture evidence.
+- Do not infer provider coverage from an installed adapter or tool presence.
+
+Route rule-based DSL, parameter search and walk-forward to `quant-strategy-research`. Route independent
+leakage, benchmark, accounting and reproducibility audits to `quant-research-reliability`.

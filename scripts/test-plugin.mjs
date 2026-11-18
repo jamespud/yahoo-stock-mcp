@@ -48,8 +48,8 @@ const bundledSkills = readdirSync(resolve(pluginRoot, "skills"))
   .filter((name) => statSync(resolve(pluginRoot, "skills", name)).isDirectory())
   .sort();
 assert.deepEqual(bundledSkills, sourceSkills);
-assert.equal(sourceSkills.length, 9);
-for (const name of ["quant-strategy-research", "quant-research-reliability"]) {
+assert.equal(sourceSkills.length, 10);
+for (const name of ["quant-strategy-research", "quant-research-reliability", "quant-alpha-research"]) {
   assert.ok(bundledSkills.includes(name));
   assert.equal(readFileSync(resolve(pluginRoot, "skills", name, "references/quant-research-policy.md"), "utf8"),
     readFileSync(resolve(root, "skills/references/quant-research-policy.md"), "utf8"));
@@ -57,6 +57,8 @@ for (const name of ["quant-strategy-research", "quant-research-reliability"]) {
 assert.match(plugin.description, /opt-in quantitative/);
 assert.match(plugin.extensions["com.openai"].interface.longDescription, /leakage, benchmarks, costs/);
 assert.match(readFileSync(resolve(pluginRoot, "README.md"), "utf8"), /QUANT_ENABLED=1/);
+assert.match(readFileSync(resolve(pluginRoot, "README.md"), "utf8"), /quant-alpha-research/);
+assert.match(readFileSync(resolve(pluginRoot, "skills/quant-alpha-research/SKILL.md"), "utf8"), /Yahoo current snapshots never qualify/);
 for (const name of bundledSkills) {
   assert.ok(existsSync(resolve(pluginRoot, "skills", name, "SKILL.md")));
   assert.ok(existsSync(resolve(pluginRoot, "skills", name, "references", "data-policy.md")));

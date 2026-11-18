@@ -246,9 +246,10 @@ async function liveToolNames(enabled: boolean, skills: Skill[]): Promise<string[
       assert.ok(caps.research.methods.includes("walk_forward"));
       for (const section of ["reproducibility", "artifacts", "analytics", "trials", "walk_forward"])
         assert.ok(caps.result_sections.includes(section));
-      const registeredNames = [...readFileSync(resolve(root, "src/quant/tools.ts"), "utf8").matchAll(/server\.tool\("(quant_[a-z_]+)"/g)].map(m => m[1]).sort();
+      const quantToolSources = ["src/quant/tools.ts", "src/quant/alpha-tools.ts"].map(path => readFileSync(resolve(root, path), "utf8")).join("\n");
+      const registeredNames = [...quantToolSources.matchAll(/server\.tool\(\s*"(quant_[a-z_]+)"/g)].map(m => m[1]).sort();
       assert.deepEqual(names.filter(n => n.startsWith("quant_")), registeredNames);
-      for (const skill of skills.filter(s => s.name.startsWith("quant-"))) {
+      for (const skill of skills.filter(s => s.name === "quant-strategy-research")) {
         const examples = resolve(skill.dir, "references/strategy-examples.json");
         for (const example of JSON.parse(readFileSync(examples, "utf8"))) {
           const result = await call("quant_validate_strategy", example.request);
@@ -282,11 +283,12 @@ async function liveToolNames(enabled: boolean, skills: Skill[]): Promise<string[
 async function main() {
   const skills = loadSkills();
   const names = skills.map((s) => s.name);
-  for (const name of ["quant-strategy-research", "quant-research-reliability"]) assert.ok(names.includes(name), `missing ${name}`);
-  assert.equal(names.length, 9);
+  for (const name of ["quant-strategy-research", "quant-research-reliability", "quant-alpha-research"]) assert.ok(names.includes(name), `missing ${name}`);
+  assert.equal(names.length, 10);
   const requiredRefs: Record<string, string[]> = {
     "quant-strategy-research": ["data-policy", "quant-research-policy", "workflow", "dsl-examples", "result-interpretation"],
-    "quant-research-reliability": ["data-policy", "quant-research-policy", "reliability-checklist", "benchmark-policy", "report-template"]
+    "quant-research-reliability": ["data-policy", "quant-research-policy", "reliability-checklist", "benchmark-policy", "report-template"],
+    "quant-alpha-research": ["data-policy", "quant-research-policy", "factor-policy", "option-policy", "model-validation", "report-template"]
   };
   for (const [name, refs] of Object.entries(requiredRefs)) {
     const skill = skills.find(s => s.name === name)!;

@@ -15,6 +15,9 @@
     "yahoo-finance",
     "sqlite",
     "quant",
+    "alpha",
+    "lightgbm",
+    "options",
     "backtesting",
     "research-reliability"
   ],
@@ -33,7 +36,7 @@
         "defaultPrompt": [
           "Research a company using the Yahoo Stock MCP workflows.",
           "Analyze a stock's technicals, earnings, dividends, options, or sector context.",
-          "Design a quantitative research experiment or audit backtest reliability using the opt-in quant tools."
+          "Design a quantitative research experiment, Alpha model, or audit backtest reliability using the opt-in quant tools."
         ]
       }
     }

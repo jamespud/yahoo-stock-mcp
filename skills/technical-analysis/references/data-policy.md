@@ -120,3 +120,16 @@ agreement, not as a default repair for missing data:
   say why, name the symbol and the footprint, and wait for agreement before running it.
 - Never run `sync --all`, `sync --all --full`, or `sync --sectors` merely because a question could
   not be answered from the current snapshot.
+
+
+## 10. Alpha datasets and current option snapshots
+
+- Alpha datasets are immutable and content-addressed. Record source/version, calendar, universe,
+  interval, availability policy, price basis, quality, parent IDs and partition hashes. Never edit a
+  published partition in place; create a new dataset.
+- Yahoo daily history is exploratory/unverified unless the caller supplies valid raw-execution evidence.
+  A current Yahoo option chain records `observed_at`, while `quote_at` stays null when the provider
+  cannot prove quote-event time. It is not historical option data.
+- Historical option factors, return labels and backtests require licensed historical contract and
+  Bid/Ask data. Missing quotes remain missing; never substitute Mid, Last, intrinsic value or a current
+  snapshot. Provider denial and missing subscription coverage are findings, not obstacles to bypass.
