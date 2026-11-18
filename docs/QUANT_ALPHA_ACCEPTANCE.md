@@ -45,7 +45,7 @@ Node: 22.22.0 for the authoritative regression run
 | `npm run test:skills` | PASS |
 | `npm run test:skills:quant` | PASS — 48 referenced tools found |
 | `npm run test:plugin` | PASS — 10 skills |
-| `npm run verify:pack` | PASS — 182 files, 142 required paths |
+| `npm run verify:pack` | PASS — 183 files, 143 required paths |
 | `npm run test:quant-dsh` | SKIPPED — missing `QUANT_EVAL_MODEL` |
 
 ## Case status

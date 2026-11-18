@@ -34,7 +34,7 @@
     "skills": "PASS",
     "skills_quant": "PASS",
     "plugin": "PASS",
-    "verify_pack": "182 files, 142 required paths"
+    "verify_pack": "183 files, 143 required paths"
   },
   "review": {"critical_important_fixed": 16, "deferred_minor": ["consolidate Alpha catalog runtime DDL with the canonical SQLite migration"]},
   "limitations": [
