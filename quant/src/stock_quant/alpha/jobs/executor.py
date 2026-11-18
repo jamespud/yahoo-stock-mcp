@@ -192,7 +192,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             config = OptionExecutionConfig.model_validate(request.execution_config)
             run = run_option_backtest(prediction, options, store=datasets, config=config)
             result = {"summary": run.metrics, "trades": run.trades, "fills": run.fills, "positions": run.positions,
-                      "risk_events": run.risk_events, "diagnostics": run.diagnostics}
+                      "cash_ledger": run.cash_ledger, "risk_events": run.risk_events, "diagnostics": run.diagnostics}
         else:
             raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
         if not store.begin_publish(claim, result):

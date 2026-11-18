@@ -51,7 +51,7 @@ test("Alpha stock dataset and factor flow completes through stdio MCP", {timeout
     await done(factors.job_id);
     assert.equal((await call("quant_get_result", {job_id: factors.job_id, section: "factors"})).total_count, 1);
     const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
-    const seeded = JSON.parse(execFileSync(python, [resolve(root, "scripts/quant-eval/seed-alpha-options.py"), resolve(tmp, "quant.db")], {
+    const seeded = JSON.parse(execFileSync(python, [resolve(root, "scripts/quant-eval/seed-alpha-options.py"), resolve(tmp, "quant.db"), dataset.dataset_id], {
       cwd: root, env: {...process.env, PYTHONPATH: resolve(root, "quant/src")}, encoding: "utf8",
     }));
     const optionFactors = await call("quant_compute_option_factors", {
@@ -62,6 +62,13 @@ test("Alpha stock dataset and factor flow completes through stdio MCP", {timeout
     });
     await done(optionFactors.job_id);
     assert.ok((await call("quant_get_result", {job_id: optionFactors.job_id, section: "factors"})).total_count > 0);
+    const optionBacktest = await call("quant_backtest_options", {
+      prediction_set_id: seeded.prediction_set_id, option_dataset_id: seeded.dataset_id,
+      execution_config: {top_k: 1, horizon_days: 1, initial_cash: 100000},
+    });
+    await done(optionBacktest.job_id);
+    const cashLedger = await call("quant_get_result", {job_id: optionBacktest.job_id, section: "cash_ledger"});
+    assert.ok(cashLedger.total_count >= 2);
   } finally {
     await client.close();
     rmSync(tmp, {recursive: true, force: true});

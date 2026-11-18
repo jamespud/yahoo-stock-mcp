@@ -31,6 +31,7 @@ def contract(option_type: str, strike: float, expiration: date):
 
 def main():
     registry = Path(sys.argv[1])
+    parent_dataset_id = sys.argv[2]
     store = DatasetStore(registry.with_suffix(".alpha"))
     rows = []
     for day in range(4):
@@ -52,7 +53,17 @@ def main():
         quote_policy="historical_bid_ask",
     )
     manifest = prepare_option_dataset(request, store=store, provider=Provider(rows))
-    print(json.dumps({"dataset_id": manifest.dataset_id}))
+    prediction_contract = contract("CALL", 200.0, date(2026, 2, 20))
+    prediction_set = store.publish_prediction_panel(
+        [{"decision_at": datetime(2026, 1, 2, 15, tzinfo=timezone.utc),
+          "instrument_id": prediction_contract.contract_id, "prediction_value": 1.0,
+          "model_id": "sha256:" + "a" * 64, "model_set_id": "sha256:" + "b" * 64, "fold": "fixture"}],
+        parent_feature_set_id=parent_dataset_id, model_id="sha256:" + "a" * 64,
+        model_set_id="sha256:" + "b" * 64,
+        start_at=datetime(2026, 1, 1, tzinfo=timezone.utc), end_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        price_basis="price_basis_unverified",
+    )
+    print(json.dumps({"dataset_id": manifest.dataset_id, "prediction_set_id": prediction_set.dataset_id}))
 
 
 if __name__ == "__main__":

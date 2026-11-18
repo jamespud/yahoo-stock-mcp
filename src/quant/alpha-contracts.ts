@@ -23,6 +23,8 @@ export const optionExecutionConfig = z.object({
   commission_per_contract: z.number().nonnegative().optional(),
   close_before_expiry_days: z.number().int().min(0).max(30).optional(),
   contracts_per_trade: z.number().int().min(1).max(1000).optional(),
+  initial_cash: z.number().positive().optional(),
+  max_premium_fraction: z.number().positive().max(1).optional(),
 }).strict();
 export const temporalWindows = z.object({
   train_start: z.string().datetime({ offset: true }),
