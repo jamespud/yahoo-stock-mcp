@@ -13,6 +13,7 @@
     "joint_stock_option_alpha": "PASS",
     "top_k_portfolio": "PASS",
     "option_backtest_fixtures": "PASS",
+    "option_cash_ledger_mcp": "PASS",
     "mcp_tools": "PASS",
     "skill_and_plugin": "PASS",
     "existing_regression": "PASS",
@@ -30,13 +31,13 @@
     "quant_mcp": "PASS",
     "quant_regression": "PASS",
     "quant_alpha_mcp": "2 passed",
-    "quant_alpha_e2e": "1 passed",
+    "quant_alpha_e2e": "1 passed; stdio option factor Job and option cash_ledger result section",
     "skills": "PASS",
     "skills_quant": "PASS",
     "plugin": "PASS",
     "verify_pack": "183 files, 143 required paths"
   },
-  "review": {"critical_important_fixed": 16, "second_merge_review_fixed": 7, "third_merge_review_fixed": 3, "deferred_minor": ["consolidate Alpha catalog runtime DDL with the canonical SQLite migration"]},
+  "review": {"critical_important_fixed": 16, "second_merge_review_fixed": 7, "third_merge_review_fixed": 3, "fourth_merge_review_fixed": 1, "deferred_minor": ["consolidate Alpha catalog runtime DDL with the canonical SQLite migration"]},
   "limitations": [
     "Node 22 is required for the validated provider mock regression path.",
     "No authenticated ThetaData subscription was supplied.",

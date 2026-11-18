@@ -19,9 +19,9 @@ Node: 22.22.0 for the authoritative regression run
 | LightGBM model pipeline | PASS | Deterministic model hash/predictions, noise rejection, corrupt-model rejection |
 | Joint stock + option Alpha | PASS | PIT as-of feature join and `stock_return_with_option_features` training |
 | Top-K stock backtest | PASS | 100 stocks, constraints, next-open fills, accounting reconciliation |
-| Long-option backtest | PASS | Ask entry/Bid exit, multipliers, fees, cash ledger, missing-exit unresolved state |
+| Long-option backtest | PASS | Ask entry/Bid exit, multipliers, fees, time-ordered cash ledger, missing-exit unresolved state |
 | Job publication consistency | PASS | Fenced two-phase publication, publishing heartbeat/expiry recovery, commit-failure injection |
-| Nine MCP tools | PASS | TypeScript/Zod + Python schemas, stdio stock dataset/factor and option-factor Job flow |
+| Nine MCP tools | PASS | TypeScript/Zod + Python schemas, stdio stock/option factor Jobs and option `cash_ledger` result section |
 | Skill and plugin | PASS | 10 skills, synchronized references, generated plugin |
 | Existing non-quant regression | PASS | `npm test` under Node 22.22.0 |
 | Existing Quant regression | PASS | 265 passed, 25 skipped |
@@ -42,7 +42,7 @@ Node: 22.22.0 for the authoritative regression run
 | `npm run test:quant-mcp` | PASS |
 | `npm run test:quant-regression` | PASS — 4 windows / 36 evaluations |
 | `npm run test:quant-alpha-mcp` | PASS — 2 tests |
-| `npm run test:quant-alpha-e2e` | PASS — stdio dataset + factor flow |
+| `npm run test:quant-alpha-e2e` | PASS — stdio dataset/option-factor Jobs and option `cash_ledger` result section |
 | `npm run test:skills` | PASS |
 | `npm run test:skills:quant` | PASS — 48 referenced tools found |
 | `npm run test:plugin` | PASS — 10 skills |
@@ -94,6 +94,8 @@ A third merge review found the option-factor checkpoint path and future-cash acc
 pass adds a real stdio MCP option-factor Job test, heartbeat/fencing through publishing, expired-lease
 recovery, a time-ordered option event queue, and an overlapping-position test proving future exit cash
 cannot fund an earlier entry. All three findings are covered by the final matrix.
+
+A fourth merge review found that option backtests generated a cash ledger but the MCP Job did not expose it. The final pass adds the `cash_ledger` result section and verifies the complete stdio path from `quant_backtest_options` through Job completion to `quant_get_result(section="cash_ledger")`; the TypeScript execution contract now also mirrors the Python cash-budget fields.
 
 Deferred minor: the Alpha catalog runtime currently maintains its own SQLite DDL under the
 `<registry>.alpha` root while `0002_alpha_catalog.sql` supplies the canonical database migration;
