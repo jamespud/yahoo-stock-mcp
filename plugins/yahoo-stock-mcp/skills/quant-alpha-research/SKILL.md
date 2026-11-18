@@ -51,13 +51,15 @@ first. For factor, option, model and reporting details read the local references
    immature labels in train, validation or test.
 6. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
    Train-only preprocessing, validation-based selection and one frozen OOS read are mandatory. Inspect
-   coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics.
-7. Predict only after the training window. Verify feature names, order and types match the registry.
+   coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. OOS
+   measurements are report-only and never automatically certify or select a model.
+7. Predict only after the validation window. Verify feature names, order and types match the registry.
    Reject missing/corrupt models and never let a future fold predict past decisions.
 8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
    positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
-   use next valid Bid. Reconcile cash, positions, commissions and equity. Leave unresolved option
-   positions visible.
+   use next valid Bid. The first version reports raw-price returns without stock corporate-action
+   adjustment, and the option engine is a trade simulator rather than a full broker portfolio. Reconcile
+   cash, positions, commissions and equity. Leave unresolved option positions visible.
 9. Read only completed job sections. Page list sections with returned cursors. Report data source,
    dataset/model/job IDs, window, price basis, costs, unresolved diagnostics and every `BLOCKED`,
    `SKIPPED` or `NOT_TESTED` acceptance item. Use the [report template](references/report-template.md).

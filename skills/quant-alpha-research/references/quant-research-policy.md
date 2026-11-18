@@ -71,5 +71,7 @@ frozen test once. A noise fixture or favorable random OOS sample is not Alpha ce
 Yahoo current option chains support current observation diagnostics only. Historical option training
 and quote-driven backtests require licensed historical contracts and valid Bid/Ask. BUY uses next valid
 Ask; SELL uses next valid Bid. Missing exit quotes leave a position unresolved rather than fabricating
-a close. Stock and option portfolio target weights must remain separate from actual positions, and all
-cash/fees/equity must reconcile.
+a close. Option cross-sections use a bounded observation-time tolerance and record that grid. Stock and
+option target weights must remain separate from actual positions, and all cash/fees/equity must reconcile.
+v1 stock returns exclude corporate-action adjustments and v1 option execution is not a full broker
+portfolio.

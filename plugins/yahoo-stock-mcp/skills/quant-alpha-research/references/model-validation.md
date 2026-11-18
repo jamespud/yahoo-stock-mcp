@@ -10,7 +10,8 @@
   iteration, fold/model-set identity and artifact integrity.
 - Report Rank IC per decision time, mean, standard deviation, ICIR, prediction coverage, quantile
   returns, top-bottom spread, feature importance, sample counts and metric definitions.
-- Noise must not be certified merely because a favorable random OOS sample appeared. Require the
-  configured validation and OOS evidence together, plus coverage and non-flat spread checks.
-- Verify predictions reference the frozen model/fold and never let a future model predict an earlier
-  period. Corrupt or missing model artifacts fail closed.
+- Validation may gate selection. Test/OOS measurements are report-only and must not trigger automatic
+  model certification or later hyperparameter selection. `is_alpha_certified` stays false in v1;
+  `validation_gate_passed` is a separate pre-test signal.
+- Verify predictions use a frozen model/fold, start no earlier than the validation end, and never let a
+  future model predict an earlier period. Corrupt or missing model artifacts fail closed.

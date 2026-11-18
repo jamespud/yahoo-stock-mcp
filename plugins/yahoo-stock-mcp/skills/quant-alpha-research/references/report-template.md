@@ -33,8 +33,9 @@ declared quality gate; a high number alone is not certification.
 ## Portfolio/option diagnostics
 
 Report return, CAGR, volatility, Sharpe, drawdown, turnover, commissions, benchmark/excess/tracking
-error/information ratio with definitions. Reconcile cash + positions = equity. For options report
-ask-entry/bid-exit evidence, multipliers, fees, unresolved positions and missing/invalid quote events.
+error/information ratio with definitions. Reconcile cash + positions = equity. State that stock
+corporate-action adjustment is not modeled. For options report ask-entry/bid-exit evidence, multipliers,
+fees, unresolved positions, final cash/equity and that the simulator is not a full broker portfolio.
 
 ## Acceptance
 

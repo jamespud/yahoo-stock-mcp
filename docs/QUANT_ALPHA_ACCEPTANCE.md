@@ -19,11 +19,12 @@ Node: 22.22.0 for the authoritative regression run
 | LightGBM model pipeline | PASS | Deterministic model hash/predictions, noise rejection, corrupt-model rejection |
 | Joint stock + option Alpha | PASS | PIT as-of feature join and `stock_return_with_option_features` training |
 | Top-K stock backtest | PASS | 100 stocks, constraints, next-open fills, accounting reconciliation |
-| Long-option backtest | PASS | Ask entry/Bid exit, multipliers, fees, missing-exit unresolved state |
+| Long-option backtest | PASS | Ask entry/Bid exit, multipliers, fees, cash ledger, missing-exit unresolved state |
+| Job publication consistency | PASS | Fenced two-phase publication; dataset/model commit failure leaves Job failed |
 | Nine MCP tools | PASS | TypeScript/Zod + Python schemas, stdio e2e stock dataset/factor flow |
 | Skill and plugin | PASS | 10 skills, synchronized references, generated plugin |
 | Existing non-quant regression | PASS | `npm test` under Node 22.22.0 |
-| Existing Quant regression | PASS | 257 passed, 25 skipped |
+| Existing Quant regression | PASS | 263 passed, 25 skipped |
 | Real Yahoo option capture | SKIPPED | Requires live provider call; adapter path is implemented |
 | Real ThetaData acceptance | BLOCKED | No authenticated subscription/coverage supplied |
 | DSH AI acceptance | SKIPPED | `QUANT_EVAL_MODEL` is not configured |
@@ -36,8 +37,8 @@ Node: 22.22.0 for the authoritative regression run
 | `npm run typecheck` | PASS |
 | `npm run build` | PASS |
 | `npm test` (Node 22.22.0) | PASS |
-| `npm run test:quant` | PASS — 257 passed, 25 skipped |
-| `npm run test:quant-alpha` | PASS — 48 passed |
+| `npm run test:quant` | PASS — 263 passed, 25 skipped |
+| `npm run test:quant-alpha` | PASS — 54 passed |
 | `npm run test:quant-mcp` | PASS |
 | `npm run test:quant-regression` | PASS — 4 windows / 36 evaluations |
 | `npm run test:quant-alpha-mcp` | PASS — 2 tests |
@@ -61,6 +62,10 @@ Node: 22.22.0 for the authoritative regression run
 ## Known limitations
 
 - Node 26 is outside the validated provider-mock behavior; run regressions with Node 22.
+- v1 stock backtests report raw-price returns without corporate-action adjustment.
+- v1 option execution is a long-option trade simulator with cash, premium, commission and unresolved
+  position accounting, not a full broker portfolio or assignment engine.
+- OOS metrics are report-only. `is_alpha_certified` remains false; validation gating is separate.
 - Real provider coverage was not claimed and remains separately gated.
 - Yahoo cannot prove quote-event times and is never admitted as historical option quote data.
 - Full broker assignment, margin, naked short options and real trading are intentionally unsupported.
@@ -77,6 +82,13 @@ admission, embargo enforcement, option-identifier traversal, historical option-l
 manifest tamper detection, historical Bid/Ask completeness, quote availability/depth, raw-price
 admission, stable job error codes, deferred dataset/model publication, ThetaData HTTP wiring, and
 result-section completeness. The reviewed issues were then covered by the final matrix above.
+
+A second merge review identified two P0 contract issues and several P1 boundaries. The final fix pass
+adds a Theta-style option-factor → LightGBM training test, a fenced `publishing` job phase with dataset
+and model commit-failure injection, validation-window prediction gating, report-only OOS metrics,
+option observation-time tolerance, option cash/equity accounting, real prediction coverage, and explicit
+raw-price/corporate-action limitations. `is_alpha_certified` remains false by design; validation gating
+is reported separately.
 
 Deferred minor: the Alpha catalog runtime currently maintains its own SQLite DDL under the
 `<registry>.alpha` root while `0002_alpha_catalog.sql` supplies the canonical database migration;
