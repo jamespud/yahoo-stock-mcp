@@ -1,7 +1,9 @@
 # Quant Alpha Research v1 Acceptance
 
-Date: 2026-11-18  
-Runtime: Python 3.14.6 for local execution; `requires-python >=3.12`  
+Date: 2026-11-18
+
+Runtime: Python 3.14.6 for local execution; `requires-python >=3.12`
+
 Node: 22.22.0 for the authoritative regression run
 
 ## Status summary
