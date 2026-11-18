@@ -90,6 +90,11 @@ option observation-time tolerance, option cash/equity accounting, real predictio
 raw-price/corporate-action limitations. `is_alpha_certified` remains false by design; validation gating
 is reported separately.
 
+A third merge review found the option-factor checkpoint path and future-cash accounting bugs. The final
+pass adds a real stdio MCP option-factor Job test, heartbeat/fencing through publishing, expired-lease
+recovery, a time-ordered option event queue, and an overlapping-position test proving future exit cash
+cannot fund an earlier entry. All three findings are covered by the final matrix.
+
 Deferred minor: the Alpha catalog runtime currently maintains its own SQLite DDL under the
 `<registry>.alpha` root while `0002_alpha_catalog.sql` supplies the canonical database migration;
 future consolidation should use one schema source.
