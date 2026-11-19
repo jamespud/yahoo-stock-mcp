@@ -1,5 +1,5 @@
 {
-  "commit_sha": "d3e8cd57c8ea8cace1100b18f863e50f8d634189",
+  "commit_sha": "0e0025759f5c7b6854854bed34f3ef44022f9e31",
   "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
   "dataset_hashes": [
     "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
@@ -25,62 +25,62 @@
   "job_ids": [
     {
       "kind": "compute_factors",
-      "job_id": "alpha_9629b91cd2c841e3a557ff634b797e99",
+      "job_id": "alpha_0239218276954fadaddd247d8aced089",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_a793e16aa21048b1a2b5a79582214cb2",
+      "job_id": "alpha_99497b04e8654003abd671b23060e7c4",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_5dc64871bf7a4f8bad07a9ea65bb3771",
+      "job_id": "alpha_1e7645bb42c44a8f965b43ce74ee2581",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_d91165f90e3f439c980bc6ce4eaa0145",
+      "job_id": "alpha_b7fea0e06c8e4d35ac4a62d8a4c75de7",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_e63bc78387af41d18b25cca7b20d8c84",
+      "job_id": "alpha_fb23a709cd184e4b8adbc49f2b08a2ac",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_883ca2e49f1641539f775379bb1191c1",
+      "job_id": "alpha_97065e43e4b048f7beba64afd09c82ef",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_cfcbb21505784807a36adfcd95499558",
+      "job_id": "alpha_4c9cf00a8a67480495d23d443006e0b1",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_0a52364db12c4454ae68a11546c44589",
+      "job_id": "alpha_9bccb191e88f4b0cb0ea1c1e18c3f578",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_dde47738c3ee4baeb7f59edd95df8b75",
+      "job_id": "alpha_2c1771382f4649b98625311f394369e0",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_47e67fc0505744969f2e425ec37fe061",
+      "job_id": "alpha_7f55b7cab66249998670f8476789c0ba",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_69a9fa841fbb4517a4f2ca018ef72ccd",
+      "job_id": "alpha_834ec3ad7f924d72b8a275f43bc6cba6",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_8b00fb46cf29483b8da2cc3833c04cea",
+      "job_id": "alpha_dab78a5c8d7641dda112159822b53485",
       "attempts": 1
     },
     {
@@ -96,40 +96,40 @@
   ],
   "execution_attempts": [
     {
-      "alpha_9629b91cd2c841e3a557ff634b797e99": 1
+      "alpha_0239218276954fadaddd247d8aced089": 1
     },
     {
-      "alpha_a793e16aa21048b1a2b5a79582214cb2": 1
+      "alpha_99497b04e8654003abd671b23060e7c4": 1
     },
     {
-      "alpha_5dc64871bf7a4f8bad07a9ea65bb3771": 1
+      "alpha_1e7645bb42c44a8f965b43ce74ee2581": 1
     },
     {
-      "alpha_d91165f90e3f439c980bc6ce4eaa0145": 1
+      "alpha_b7fea0e06c8e4d35ac4a62d8a4c75de7": 1
     },
     {
-      "alpha_e63bc78387af41d18b25cca7b20d8c84": 1
+      "alpha_fb23a709cd184e4b8adbc49f2b08a2ac": 1
     },
     {
-      "alpha_883ca2e49f1641539f775379bb1191c1": 1
+      "alpha_97065e43e4b048f7beba64afd09c82ef": 1
     },
     {
-      "alpha_cfcbb21505784807a36adfcd95499558": 1
+      "alpha_4c9cf00a8a67480495d23d443006e0b1": 1
     },
     {
-      "alpha_0a52364db12c4454ae68a11546c44589": 1
+      "alpha_9bccb191e88f4b0cb0ea1c1e18c3f578": 1
     },
     {
-      "alpha_dde47738c3ee4baeb7f59edd95df8b75": 1
+      "alpha_2c1771382f4649b98625311f394369e0": 1
     },
     {
-      "alpha_47e67fc0505744969f2e425ec37fe061": 1
+      "alpha_7f55b7cab66249998670f8476789c0ba": 1
     },
     {
-      "alpha_69a9fa841fbb4517a4f2ca018ef72ccd": 1
+      "alpha_834ec3ad7f924d72b8a275f43bc6cba6": 1
     },
     {
-      "alpha_8b00fb46cf29483b8da2cc3833c04cea": 1
+      "alpha_dab78a5c8d7641dda112159822b53485": 1
     },
     {
       "alpha_ca16e96b8bb44195b38808872726a5bf": 1
@@ -159,24 +159,16 @@
   },
   "freeze_id": "sha256:7aac3da29593f053670b951f398537f7374cd7acbcbaad709035e104e9dd1eea",
   "freeze_record": {
-    "candidate_ledger_hash": "sha256:ae2fd899575af42c652e0f85c2f458193c32d846d8b861b7209a58f4b8879aac",
+    "schema_version": "1.0",
     "freeze_id": "sha256:7aac3da29593f053670b951f398537f7374cd7acbcbaad709035e104e9dd1eea",
-    "frozen_at": "2026-11-19T08:41:51.610817Z",
+    "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
+    "candidate_ledger_hash": "sha256:ae2fd899575af42c652e0f85c2f458193c32d846d8b861b7209a58f4b8879aac",
     "frozen_model_ids": [
       "sha256:12eca34fb0dddb8b603da01187c4fe8f6495eb3fd275edec21e1b1d2c775e31a"
     ],
-    "label_spec": {
-      "horizon_days": 5,
-      "label_name": "stock_forward_return",
-      "label_source_dataset_id": "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc",
-      "target_type": "stock_return"
-    },
     "model_hashes": {
       "sha256:12eca34fb0dddb8b603da01187c4fe8f6495eb3fd275edec21e1b1d2c775e31a": "sha256:a3e0201e56978b2c20a237a95bf435f4adbaaa5068eb1bab122efa5c8e6ef1dc"
     },
-    "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
-    "schema_version": "1.0",
-    "selection_reason": "highest validation rank_ic_mean with coverage >= 0.8",
     "test_dataset_hashes": {
       "test_feature_set_id": "sha256:91123a7120cb5046c821f2bdb033b7ca245d9b846628f4a0bbb3a6b332978646",
       "test_label_source_dataset_id": "sha256:ac315bb6d15c125a8fbea2ed5960c79e90cd0944077c8e390b15cb019d96fdf8"
@@ -186,8 +178,16 @@
       "test_label_source_dataset_id": "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
     },
     "test_window": {
-      "end": "2026-11-18T00:00:00+00:00",
-      "start": "2024-01-15T00:00:00+00:00"
-    }
+      "start": "2024-01-15T00:00:00+00:00",
+      "end": "2026-11-18T00:00:00+00:00"
+    },
+    "label_spec": {
+      "label_name": "stock_forward_return",
+      "target_type": "stock_return",
+      "horizon_days": 5,
+      "label_source_dataset_id": "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
+    },
+    "selection_reason": "highest validation rank_ic_mean with coverage >= 0.8",
+    "frozen_at": "2026-11-19T08:41:51.610817Z"
   }
 }
