@@ -127,8 +127,14 @@ agreement, not as a default repair for missing data:
 - Alpha datasets are immutable and content-addressed. Record source/version, calendar, universe,
   interval, availability policy, price basis, quality, parent IDs and partition hashes. Never edit a
   published partition in place; create a new dataset.
-- Yahoo daily history is exploratory/unverified unless the caller supplies valid raw-execution evidence.
-  A current Yahoo option chain records `observed_at`, while `quote_at` stays null when the provider
+- Yahoo daily history is exploratory/unverified unless independent raw-OHLC evidence covers the exact
+  symbol/date scope. A declared `raw_attested` option is not evidence. Session presence, symbol presence
+  and calendar coverage are separate checks. Preserve volume NULL separately from recorded zero and
+  reject negative source volume as invalid.
+- Corporate actions require an independent dataset with coverage evidence, source/version and explicit
+  split, dividend, symbol-change or terminal-event terms. Missing coverage is unknown, never proof that
+  no action occurred. Unsupported mergers or special distributions block total-return claims.
+- A current Yahoo option chain records `observed_at`, while `quote_at` stays null when the provider
   cannot prove quote-event time. It is not historical option data.
 - Historical option factors, return labels and backtests require licensed historical contract and
   Bid/Ask data. Missing quotes remain missing; never substitute Mid, Last, intrinsic value or a current

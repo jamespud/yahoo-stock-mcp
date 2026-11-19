@@ -56,6 +56,12 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       period: {start: "2024-01-02T00:00:00Z", end: "2024-06-28T00:00:00Z"}, price_basis: "price_basis_unverified"});
     await done(prepared.job_id);
     const dataset = await call("quant_get_result", {job_id: prepared.job_id, section: "dataset"});
+    const dataQuality = await call("quant_get_data_quality", {dataset_id: dataset.dataset_id});
+    assert.equal(dataQuality.data_quality.session_coverage_by_symbol.length, symbols.length);
+    assert.equal(dataQuality.data_quality.symbol_presence_coverage, 1);
+    assert.equal(dataQuality.data_quality.price_attestation_status, "BLOCKED");
+    assert.equal(dataQuality.data_quality.execution_validity_status, "BLOCKED");
+    assert.ok("volume_null_count" in dataQuality.data_quality);
     const factors = await call("quant_compute_factors", {dataset_id: dataset.dataset_id,
       factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [
         {id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}},
@@ -78,6 +84,9 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     });
     await done(train.job_id);
     const model = await call("quant_get_result", {job_id: train.job_id, section: "dataset"});
+    const modelDiagnostics = await call("quant_get_alpha_model_diagnostics", {model_id: model.model_id});
+    assert.deepEqual(Object.keys(modelDiagnostics.feature_importance_gain), ["ret", "vol"]);
+    assert.equal(modelDiagnostics.stability_status, "NOT_TESTED");
 
     const freezeArgs = {
       research_protocol_hash: "sha256:" + "0".repeat(64),
@@ -100,6 +109,9 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     await done(oos.job_id);
     const oosSummary = await call("quant_get_result", {job_id: oos.job_id, section: "summary"});
     assert.ok("rank_ic_mean" in oosSummary);
+    assert.equal(oosSummary.conservation_holds, true);
+    assert.equal(oosSummary.expected_opportunities, oosSummary.valid_matched_opportunities + oosSummary.excluded_opportunities);
+    assert.equal(oosSummary.valid_ic_date_count + oosSummary.invalid_ic_date_count, oosSummary.expected_ic_date_count);
     const repeatedOos = await call("quant_evaluate_alpha_oos", {freeze_id: frozen.freeze_id});
     assert.equal(repeatedOos.job_id, oos.job_id);
     const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");

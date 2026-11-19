@@ -46,10 +46,17 @@ export function registerQuantTools(server: McpServer): void {
     calendar_name: z.string().min(1).max(64), exchange: z.string().min(1).max(64),
     start_date: z.string().refine(isValidIsoDate), end_date: z.string().refine(isValidIsoDate),
   }, async (args) => invoke({method: "calendar", ...args}));
-  server.tool("quant_get_data_quality", "Inspect one immutable symbol/timeframe as of a clock. Compare only available observations against its explicit exchange schedule; missing observations do not imply suspension or provider outage.", {
-    data_snapshot_id: jobId, symbol: z.string().min(1).max(64), timeframe: quantTimeframe, as_of: z.string().datetime({offset: true}),
+  server.tool("quant_get_data_quality", "Inspect either a legacy immutable snapshot by symbol/timeframe/as_of OR an Alpha stock dataset by dataset_id. Alpha results include per-instrument session coverage, exchange/calendar mapping and volume NULL/zero/invalid counts.", {
+    data_snapshot_id: jobId.optional(), dataset_id: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+    symbol: z.string().min(1).max(64).optional(), timeframe: quantTimeframe.optional(), as_of: z.string().datetime({offset: true}).optional(),
     max_staleness_seconds: z.number().int().nonnegative().optional().describe("Optional wall-clock tolerance, including overnight/weekend elapsed time"),
-  }, async (args) => stored({method: "data_quality", ...args}));
+  }, async (args) => {
+    if (args.dataset_id) return stored({method: "alpha_data_quality", dataset_id: args.dataset_id});
+    if (!args.data_snapshot_id || !args.symbol || !args.timeframe || !args.as_of) {
+      return {isError: true, content: [{type: "text" as const, text: "data_snapshot_id, symbol, timeframe and as_of are required for snapshot quality"}]};
+    }
+    return stored({method: "data_quality", ...args});
+  });
   server.tool("quant_resample_snapshot", "Create an immutable snapshot retaining source bars plus explicit larger-timeframe raw OHLCV aggregates. Requires a versioned exchange schedule and every exact constituent; incomplete/internal-split buckets are omitted with diagnostics. Does not replace existing target data.", {
     data_snapshot_id: jobId, symbol: z.string().min(1).max(64), source_timeframe: quantTimeframe, target_timeframe: quantTimeframe,
     as_of: z.string().datetime({offset: true}).optional(),

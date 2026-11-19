@@ -75,6 +75,22 @@ def main():
                 request["model_id"],
                 registry=AlphaModelRegistry(Path(request["registry_path"]).with_suffix(".models")),
             )
+        elif method == "alpha_data_quality":
+            from .alpha.data.catalog import DatasetStore
+            datasets = DatasetStore(Path(request["registry_path"]).with_suffix(".alpha"))
+            manifest = datasets.load_manifest(request["dataset_id"])
+            validation = datasets.validate_dataset(request["dataset_id"])
+            result = {
+                "schema_version": "alpha-data-quality-v1",
+                "dataset_id": manifest.dataset_id,
+                "dataset_kind": manifest.dataset_kind,
+                "source": manifest.source,
+                "source_version": manifest.source_version,
+                "calendar_version": manifest.calendar_version,
+                "price_basis": manifest.price_basis,
+                "data_quality": manifest.data_quality,
+                "validation": validation.model_dump(mode="json"),
+            }
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))
