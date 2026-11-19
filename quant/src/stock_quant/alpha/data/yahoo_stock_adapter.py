@@ -145,7 +145,11 @@ class YahooStockAdapter:
                     (volume_zero_count + volume_positive_count)
                     / max(1, volume_null_count + volume_zero_count + volume_positive_count + volume_invalid_count)
                 ),
-                "price_basis_unverified": request.price_basis == "price_basis_unverified",
+                "price_basis_declared": request.price_basis,
+                "price_basis_unverified": True,
+                "price_attestation_status": "BLOCKED",
+                "execution_validity_status": "BLOCKED",
+                "corporate_action_coverage_status": "UNVERIFIED",
                 "calendar_provider": calendar.provider,
                 "calendar_provider_version": calendar.provider_version,
                 "calendar_mapping_status_by_symbol": {

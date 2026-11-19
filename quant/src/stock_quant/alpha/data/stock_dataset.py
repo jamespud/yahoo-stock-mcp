@@ -74,6 +74,10 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
             for symbol, mapping in sorted(batch.exchange_mappings.items())
         },
         "price_basis": request.price_basis,
+        "price_basis_declared": request.price_basis,
+        "price_attestation_status": "BLOCKED",
+        "execution_validity_status": "BLOCKED",
+        "corporate_action_coverage_status": "UNVERIFIED",
         "missing_rows_filled": False,
     }
 
