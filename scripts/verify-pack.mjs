@@ -44,6 +44,15 @@ const entry = Array.isArray(manifest) ? manifest[0] : manifest;
 const shipped = new Set((entry?.files ?? []).map((f) => f.path));
 if (shipped.size === 0) throw new Error("npm pack reported no files");
 
+const publicDocs = [
+  "docs/USAGE.md",
+  "docs/USAGE.zh-CN.md",
+  "docs/REFERENCE.md",
+  "docs/REFERENCE.zh-CN.md",
+  "docs/QUANT_ALPHA_RESEARCH.md",
+  "docs/QUANT_ALPHA_STATUS.md",
+];
+
 const required = new Set([
   "package.json",
   "dist/cli.js",
@@ -58,7 +67,7 @@ const required = new Set([
   "README.zh-CN.md",
   "LICENSE",
   ".env.example",
-  ...walk(resolve(root, "docs")),
+  ...publicDocs,
   ...walk(resolve(root, "skills")),
   ...walk(resolve(root, "db/sqlite/migrations")),
 ]);
@@ -75,6 +84,10 @@ const forbidden = [...shipped]
     (p) =>
       /^(src|scripts|deploy|node_modules)\//.test(p) ||
       p.includes("/__pycache__/") ||
+      p.startsWith("docs/superpowers/") ||
+      p === "docs/SQLITE_MIGRATION_SPEC.md" ||
+      p === "docs/QUANT_ALPHA_ACCEPTANCE.md" ||
+      p === "docs/quant-alpha-research-acceptance.json" ||
       p.endsWith(".pyc") ||
       /^quant\/(tests|\.venv|\.pytest_cache|\.hypothesis)\//.test(p) ||
       p === ".env" ||

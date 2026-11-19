@@ -13,7 +13,7 @@ analytics, deterministic LightGBM model sets, frozen predictions, Top-K stock po
 historical option backtests. It extends the existing MCP control plane with nine asynchronous Alpha
 tools. Yahoo current option snapshots are observation-only and cannot satisfy historical quote
 admission. See [`docs/QUANT_ALPHA_RESEARCH.md`](../docs/QUANT_ALPHA_RESEARCH.md) and the
-[`acceptance report`](../docs/QUANT_ALPHA_ACCEPTANCE.md).
+[`research status`](../docs/QUANT_ALPHA_STATUS.md).
 
 ## Local setup
 
