@@ -10,7 +10,12 @@
   "files": [
     "dist",
     "db",
-    "docs",
+    "docs/USAGE.md",
+    "docs/USAGE.zh-CN.md",
+    "docs/REFERENCE.md",
+    "docs/REFERENCE.zh-CN.md",
+    "docs/QUANT_ALPHA_RESEARCH.md",
+    "docs/QUANT_ALPHA_STATUS.md",
     "skills",
     "README.md",
     "README.zh-CN.md",

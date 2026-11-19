@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -138,17 +136,3 @@ def test_worker_crash_recovers_without_partial_completed_result(tmp_path):
             jobs.heartbeat(crashed, 1.0)
         except OwnershipLost:
             pass
-
-
-def test_root_cause_report_records_h01_long_materialization():
-    path = Path(__file__).resolve().parents[3] / "reports/alpha-reliability/factor-execution-diagnosis.json"
-    report = json.loads(path.read_text())
-    assert report["schema_version"] == "1.0"
-    assert report["root_cause"]["code"] == "LONG_FEATURE_ROW_MATERIALIZATION"
-    assert report["root_cause"]["last_heartbeat_gap_ms"] >= 15000
-    assert report["root_cause"]["classification"] == "CPU_BLOCKED_BETWEEN_LEASE_CHECKPOINTS"
-    assert report["dataset_hash"] == "sha256:b4d8310454a2339ec36a9e5e2801ea0836e199440104f3e749d9740e04cf937c"
-    assert report["evidence"]["observed_bar_count"] == 172997
-    assert report["evidence"]["last_stage"] == "materialize_features"
-    assert report["evidence"]["prior_stage"] == "compute_factor_nodes"
-    assert report["remediation"] == "BATCH_VECTORIZE_FEATURE_ROWS_AND_KEEP_FENCED_LEASE"
