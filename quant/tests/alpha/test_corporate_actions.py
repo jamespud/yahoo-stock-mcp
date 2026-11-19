@@ -71,18 +71,19 @@ def test_missing_action_coverage_blocks_total_return_claim():
     assert dataset.coverage_status == "BLOCKED"
     assert dataset.total_return_claim_allowed is False
 
-    attestation = PriceAttestation(
-        schema_version="price-attestation-v1",
-        attestation_id="sha256:" + "2" * 64,
-        price_dataset_id="sha256:" + "1" * 64,
-        price_basis="raw_attested",
-        source_and_source_version={"source": "yahoo", "source_version": "v1"},
-        verification_method="INDEPENDENT_RAW_OHLC_REFERENCE_V1",
-        reference_evidence_ids=["ref-1"],
-        calendar_identity={"calendar_name": "XNYS", "calendar_version": "v1"},
-        coverage_window={"start_at": "2024-01-01T00:00:00+00:00", "end_at": "2024-02-01T00:00:00+00:00"},
-        verified_symbols=["AAPL"], unverified_symbols=[], verified_scopes=[], attestation_status="VERIFIED",
-    )
+    from stock_quant.compiler import digest
+    attestation_payload = {
+        "schema_version": "price-attestation-v1",
+        "price_dataset_id": "sha256:" + "1" * 64,
+        "price_basis": "raw_attested",
+        "source_and_source_version": {"source": "yahoo", "source_version": "v1"},
+        "verification_method": "INDEPENDENT_RAW_OHLC_REFERENCE_V1",
+        "reference_evidence_ids": ["ref-1"],
+        "calendar_identity": {"calendar_name": "XNYS", "calendar_version": "v1"},
+        "coverage_window": {"start_at": "2024-01-01T00:00:00+00:00", "end_at": "2024-02-01T00:00:00+00:00"},
+        "verified_symbols": ["AAPL"], "unverified_symbols": [], "verified_scopes": [], "attestation_status": "VERIFIED",
+    }
+    attestation = PriceAttestation.model_validate({**attestation_payload, "attestation_id": digest(attestation_payload)})
     validity = validate_execution_inputs(
         attestation, dataset, instruments=["AAPL"],
         start_at=datetime(2024, 1, 1, tzinfo=timezone.utc), end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
@@ -122,3 +123,23 @@ def test_complete_action_coverage_allows_joint_validation():
     )
     assert dataset.coverage_status == "VERIFIED"
     assert dataset.total_return_claim_allowed is True
+
+
+def test_corporate_action_dataset_identity_rejects_mutation():
+    from pydantic import ValidationError
+    from stock_quant.alpha.data.corporate_actions import CorporateActionDataset
+
+    dataset = build_corporate_action_dataset(
+        [], expected_instruments=["AAPL"],
+        start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        coverage=[_coverage()],
+    )
+    payload = dataset.model_dump(mode="json")
+    payload["total_return_claim_allowed"] = False
+    try:
+        CorporateActionDataset.model_validate(payload)
+    except ValidationError as error:
+        assert "action dataset identity" in str(error)
+    else:
+        raise AssertionError("tampered corporate-action identity was accepted")

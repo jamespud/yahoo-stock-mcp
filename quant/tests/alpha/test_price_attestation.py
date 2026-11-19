@@ -103,3 +103,42 @@ def test_declared_raw_basis_does_not_attest_local_dataset(tmp_path):
     assert batch.quality["price_basis_declared"] == "raw_attested"
     assert batch.quality["price_basis_unverified"] is True
     assert batch.quality["price_attestation_status"] == "BLOCKED"
+
+
+def test_price_attestation_identity_rejects_mutation():
+    from pydantic import ValidationError
+    from stock_quant.alpha.data.price_attestation import PriceAttestation
+
+    attestation = attest_price_dataset(
+        "sha256:" + "1" * 64,
+        [_row(2, 100.0)],
+        [_reference(2, 100.0)],
+        start_at=START,
+        end_at=END,
+        source="yahoo",
+        source_version="fixture",
+        calendar_identity={"calendar_name": "XNYS", "calendar_version": "v1"},
+    )
+    payload = attestation.model_dump(mode="json")
+    payload["verified_symbols"] = []
+    try:
+        PriceAttestation.model_validate(payload)
+    except ValidationError as error:
+        assert "attestation identity" in str(error)
+    else:
+        raise AssertionError("tampered attestation identity was accepted")
+
+
+def test_same_source_reference_is_not_independent():
+    reference = PriceReference(
+        instrument_id="AAPL", start_at=datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc),
+        declared_basis="raw", reference_open=100.0, reference_high=101.0,
+        reference_low=99.0, reference_close=100.0, source="yahoo", source_version="fixture",
+        evidence_id="same-source",
+    )
+    attestation = attest_price_dataset(
+        "sha256:" + "1" * 64, [_row(2, 100.0)], [reference],
+        start_at=START, end_at=END, source="yahoo", source_version="fixture",
+        calendar_identity={"calendar_name": "XNYS", "calendar_version": "v1"},
+    )
+    assert attestation.attestation_status == "BLOCKED"

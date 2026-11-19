@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, model_validator
 
 from ...compiler import digest
 from ...contracts import StrictModel
@@ -23,6 +23,13 @@ class ExecutionValidityRecord(StrictModel):
     verified_symbols: list[str]
     blocking_reasons: list[dict]
     calendar_identity: dict
+
+    @model_validator(mode="after")
+    def identity(self):
+        payload = self.model_dump(mode="json", exclude={"validation_id"})
+        if digest(payload) != self.validation_id:
+            raise ValueError("Execution validity identity mismatch")
+        return self
 
 
 def _utc(value) -> datetime:

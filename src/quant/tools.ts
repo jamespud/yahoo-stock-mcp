@@ -51,6 +51,9 @@ export function registerQuantTools(server: McpServer): void {
     symbol: z.string().min(1).max(64).optional(), timeframe: quantTimeframe.optional(), as_of: z.string().datetime({offset: true}).optional(),
     max_staleness_seconds: z.number().int().nonnegative().optional().describe("Optional wall-clock tolerance, including overnight/weekend elapsed time"),
   }, async (args) => {
+    if (args.dataset_id && (args.data_snapshot_id || args.symbol || args.timeframe || args.as_of)) {
+      return {isError: true, content: [{type: "text" as const, text: "dataset_id cannot be combined with snapshot quality fields"}]};
+    }
     if (args.dataset_id) return stored({method: "alpha_data_quality", dataset_id: args.dataset_id});
     if (!args.data_snapshot_id || !args.symbol || !args.timeframe || !args.as_of) {
       return {isError: true, content: [{type: "text" as const, text: "data_snapshot_id, symbol, timeframe and as_of are required for snapshot quality"}]};

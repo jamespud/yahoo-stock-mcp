@@ -60,6 +60,13 @@ class CorporateActionDataset(StrictModel):
     total_return_claim_allowed: bool
     blockers: list[dict]
 
+    @model_validator(mode="after")
+    def identity(self):
+        payload = self.model_dump(mode="json", exclude={"action_dataset_id"})
+        if digest(payload) != self.action_dataset_id:
+            raise ValueError("Corporate action dataset identity mismatch")
+        return self
+
 
 def _utc(value) -> datetime:
     if isinstance(value, str):
@@ -109,8 +116,8 @@ def build_corporate_action_dataset(
     body = {
         "schema_version": "corporate-actions-v1",
         "instrument_ids": identifiers,
-        "start_at": start.isoformat(),
-        "end_at": end.isoformat(),
+        "start_at": start.isoformat().replace("+00:00", "Z"),
+        "end_at": end.isoformat().replace("+00:00", "Z"),
         "actions": [action.model_dump(mode="json") for action in normalized_actions],
         "coverage": [item.model_dump(mode="json") for item in normalized_coverage],
         "coverage_status": "VERIFIED" if not missing else "BLOCKED",

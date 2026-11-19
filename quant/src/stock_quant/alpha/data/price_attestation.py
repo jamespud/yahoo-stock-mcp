@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, model_validator
 
 from ...compiler import digest
 from ...contracts import StrictModel
@@ -39,6 +39,13 @@ class PriceAttestation(StrictModel):
     unverified_symbols: list[str]
     verified_scopes: list[dict]
     attestation_status: Literal["VERIFIED", "PARTIAL", "BLOCKED"]
+
+    @model_validator(mode="after")
+    def identity(self):
+        payload = self.model_dump(mode="json", exclude={"attestation_id"})
+        if digest(payload) != self.attestation_id:
+            raise ValueError("Price attestation identity mismatch")
+        return self
 
 
 def _utc(value) -> datetime:
@@ -82,6 +89,7 @@ def attest_price_dataset(
             matched = [
                 candidate for candidate in candidates
                 if candidate.declared_basis == "raw"
+                and candidate.source.strip().lower() != str(source).strip().lower()
                 and all(
                     abs(float(row[field]) - reference_value) <= candidate.absolute_tolerance
                     for field, reference_value in (
