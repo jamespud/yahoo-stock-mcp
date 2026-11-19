@@ -116,7 +116,7 @@ class Snapshot:
         self._lineage = SnapshotLineage.model_validate(lineage.model_dump() if hasattr(lineage, "model_dump") else lineage) if lineage is not None else None
         identity = {"bars": canonical, "actions": canonical_actions, "calendar_version": calendar_version}
         if self._calendars:
-            identity["calendars"] = [c.model_dump(mode="json") for c in self._calendars]
+            identity["calendars"] = [c.model_dump(mode="json", exclude={"long_calendar_shards", "calendar_validation_status"}) for c in self._calendars]
         if self._lineage:
             identity["lineage"] = self._lineage.model_dump(mode="json")
         self._id = digest(identity)

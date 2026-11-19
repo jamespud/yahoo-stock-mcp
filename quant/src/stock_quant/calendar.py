@@ -91,7 +91,7 @@ class CalendarSchedule(StrictModel):
 
     @property
     def id(self):
-        return digest(self.model_dump(mode="json"))
+        return digest(self.model_dump(mode="json", exclude={"long_calendar_shards", "calendar_validation_status"}))
 
 
 @dataclass(frozen=True)
