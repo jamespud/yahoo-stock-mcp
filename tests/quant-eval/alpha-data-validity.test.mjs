@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -49,6 +49,14 @@ test("Alpha data-validity tools are registered through stdio MCP", {timeout: 300
     }
     const quality = tools.tools.find(tool => tool.name === "quant_get_data_quality");
     assert.ok(quality.inputSchema.properties.dataset_id);
+    const evidenceDir = resolve(root, "reports/alpha-data-validity");
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(resolve(evidenceDir, "stdio-evidence.json"), JSON.stringify({
+      generated_at: new Date().toISOString(),
+      status: "PASS",
+      tools: tools.tools.map(tool => tool.name).sort(),
+      alpha_dataset_quality_schema: Boolean(quality.inputSchema.properties.dataset_id),
+    }, null, 2));
   } finally {
     await client.close();
     rmSync(tmp, {recursive: true, force: true});

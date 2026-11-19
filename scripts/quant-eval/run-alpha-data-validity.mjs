@@ -1,21 +1,93 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-
 const root = resolve(import.meta.dirname, "../..");
 const archive = resolve(process.env.ALPHA_VALIDITY_ARCHIVE || "/home/spud/proj/sg/research/alpha-restart-2026-11-19");
+const sourceDb = process.env.ALPHA_SOURCE_DB || "/home/spud/proj/sg/research/alpha-2026-11-19/sync-long-2026-11-19/stocks-final-long-history.db";
+const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
 const outputDir = resolve(root, "reports/alpha-data-validity");
 const output = resolve(outputDir, "acceptance.json");
+const stdioEvidencePath = resolve(outputDir, "stdio-evidence.json");
+const fixtureEvidencePath = resolve(outputDir, "fixture-evidence.json");
+const regressionEvidencePath = resolve(process.env.ALPHA_REGRESSION_EVIDENCE || resolve(outputDir, "regression-output.txt"));
 mkdirSync(outputDir, { recursive: true });
 
-if (!existsSync(resolve(archive, "registry.db")) || !existsSync(resolve(archive, "registry.alpha"))) {
-  writeFileSync(output, JSON.stringify({
-    schema_version: "alpha-data-validity-acceptance-v1",
+const fixtureFiles = [
+  "quant/tests/alpha/test_price_attestation.py",
+  "quant/tests/alpha/test_corporate_actions.py",
+  "quant/tests/alpha/test_topk_execution_validity.py",
+  "quant/tests/alpha/test_oos_label_consistency.py",
+];
+let fixtureEvidence;
+try {
+  const stdout = execFileSync(python, ["-m", "pytest", ...fixtureFiles, "-q"], {
+    cwd: root,
+    env: {...process.env, PYTHONPATH: resolve(root, "quant/src")},
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  fixtureEvidence = {
+    status: "PASS",
     generated_at: new Date().toISOString(),
-    archive,
+    command: `python -m pytest ${fixtureFiles.join(" ")} -q`,
+    summary: stdout.trim().split("\n").at(-1),
+  };
+} catch (error) {
+  fixtureEvidence = {
+    status: "FAIL",
+    generated_at: new Date().toISOString(),
+    command: `python -m pytest ${fixtureFiles.join(" ")} -q`,
+    summary: String(error.stdout || error.message).slice(-2000),
+  };
+}
+writeFileSync(fixtureEvidencePath, JSON.stringify(fixtureEvidence, null, 2));
+const stdioEvidence = existsSync(stdioEvidencePath) ? JSON.parse(readFileSync(stdioEvidencePath, "utf8")) : null;
+const requiredStdioTools = ["quant_get_alpha_model_diagnostics", "quant_get_data_quality", "quant_get_result", "quant_backtest_alpha_portfolio"];
+const stdioPass = stdioEvidence?.status === "PASS" && requiredStdioTools.every(name => stdioEvidence.tools?.includes(name));
+let regressionEvidence = null;
+if (existsSync(regressionEvidencePath)) {
+  const text = readFileSync(regressionEvidencePath, "utf8");
+  if (regressionEvidencePath.endsWith(".json")) {
+    regressionEvidence = JSON.parse(text);
+  } else {
+    const lines = text.trim().split("\n").filter(Boolean);
+    regressionEvidence = {
+      status: /"status"\s*:\s*"PASSED"/.test(text) ? "PASS" : "FAIL",
+      command: "npm run test:quant-regression",
+      summary: lines.at(-1),
+      output_sha256: createHash("sha256").update(text).digest("hex"),
+    };
+  }
+}
+
+if (!existsSync(resolve(archive, "registry.db")) || !existsSync(resolve(archive, "registry.alpha"))) {
+  const gates = {
+    G01: {status: "BLOCKED", evidence: "external 87-symbol archive unavailable"},
+    G02: {status: "BLOCKED", evidence: "external 87-symbol archive unavailable"},
+    G03: {status: "BLOCKED", evidence: "external archive source DB unavailable"},
+    G04: {status: fixtureEvidence.status, evidence: "session-label regression suite"},
+    G05: {status: "BLOCKED", evidence: "frozen model archive unavailable"},
+    G06: {status: "NOT_TESTED", evidence: "multi-window stability models not run"},
+    G07: {status: "BLOCKED", evidence: "frozen OOS archive unavailable"},
+    G08: {status: "BLOCKED", evidence: "frozen OOS archive unavailable"},
+    G09: {status: fixtureEvidence.status, evidence: "price-attestation fixture suite"},
+    G10: {status: fixtureEvidence.status, evidence: "corporate-action fixture suite"},
+    G11: {status: fixtureEvidence.status, evidence: "attested Top20 fixture suite; real data BLOCKED"},
+    G12: {status: "BLOCKED", evidence: "historical datasets unavailable"},
+    G13: {status: stdioPass ? "PASS" : "NOT_TESTED", evidence: "stdio tool-registration evidence"},
+    G14: {status: regressionEvidence?.status === "PASS" ? "PASS" : "NOT_TESTED", evidence: "external regression evidence"},
+  };
+  writeFileSync(output, JSON.stringify({
+    schema_version: "alpha-data-validity-acceptance-v2",
+    generated_at: new Date().toISOString(),
+    archive: archive.split("/").at(-1),
+    gates,
+    fixture_evidence: fixtureEvidence,
+    stdio_evidence: stdioEvidence,
     DATA_QUALITY_ENGINEERING: "BLOCKED",
     RESEARCH_DIAGNOSTICS_READINESS: "BLOCKED",
-    EXECUTION_ENGINEERING: "PASS",
+    EXECUTION_ENGINEERING: fixtureEvidence.status,
     EXECUTION_EVIDENCE_SCOPE: "FIXTURE_ONLY",
     REAL_MARKET_TRADING_VALIDITY: "BLOCKED",
     blocker: "ARCHIVE_NOT_FOUND",
@@ -24,8 +96,6 @@ if (!existsSync(resolve(archive, "registry.db")) || !existsSync(resolve(archive,
   process.exit(0);
 }
 
-const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
-const sourceDb = process.env.ALPHA_SOURCE_DB || "/home/spud/proj/sg/research/alpha-2026-11-19/sync-long-2026-11-19/stocks-final-long-history.db";
 const script = String.raw`
 import json, os, sqlite3, hashlib
 from collections import Counter
@@ -149,7 +219,10 @@ readiness = (
 result = {
     "schema_version": "alpha-data-validity-acceptance-v1",
     "generated_at": datetime.now(timezone.utc).isoformat(),
-    "archive": str(archive),
+    "archive": {"name": archive.name, "registry_db_present": (archive / "registry.db").is_file(), "source_db_present": source_db.is_file()},
+    "development_row_count": len(dev_rows),
+    "test_row_count": len(test_rows),
+    "prediction_row_count": len(prediction_rows),
     "session_coverage_summary": session_summary,
     "exchange_mapping_summary": dict(sorted(calendar_summary.items())),
     "volume_summary": volume,
@@ -158,11 +231,6 @@ result = {
     "model_diagnostics": diagnostics,
     "dataset_identity": manifest_hashes,
     "history_immutability": {"unchanged": history_unchanged, "before": before_hashes, "after": after_hashes},
-    "DATA_QUALITY_ENGINEERING": "PASS" if len(reports) == 87 and volume.get("volume_null_count") is not None else "FAIL",
-    "RESEARCH_DIAGNOSTICS_READINESS": "PASS" if readiness else "FAIL",
-    "EXECUTION_ENGINEERING": "PASS",
-    "EXECUTION_EVIDENCE_SCOPE": "FIXTURE_ONLY",
-    "REAL_MARKET_TRADING_VALIDITY": "BLOCKED",
     "real_market_blockers": [
         "Independent raw OHLC attestation for the archived 87-symbol history is not available",
         "Historical corporate-action coverage for the archived symbols is not available",
@@ -172,7 +240,7 @@ result = {
 print(json.dumps(result, allow_nan=False))
 `;
 
-const result = JSON.parse(execFileSync(python, ["-"], {
+const rawResult = JSON.parse(execFileSync(python, ["-"], {
   cwd: root,
   env: {
     ...process.env,
@@ -183,5 +251,43 @@ const result = JSON.parse(execFileSync(python, ["-"], {
   input: script,
   maxBuffer: 16 * 1024 * 1024,
 }).toString());
+const volumeCounts = rawResult.volume_summary || {};
+const volumeTotal = ["volume_null_count", "volume_zero_count", "volume_positive_count", "volume_invalid_count"].reduce((sum, key) => sum + Number(volumeCounts[key] || 0), 0);
+const labelCounts = rawResult.session_label_summary || {};
+const labelReasonTotal = Object.values(labelCounts.reason_counts || {}).reduce((sum, value) => sum + Number(value), 0);
+const diagnostics = rawResult.model_diagnostics || {};
+const oos = rawResult.ic_and_oos_summary || {};
+const gates = {
+  G01: {status: rawResult.session_coverage_summary?.instrument_count === 87 && rawResult.session_coverage_summary?.complete_count === 87 ? "PASS" : "FAIL", evidence: rawResult.session_coverage_summary},
+  G02: {status: Object.values(rawResult.exchange_mapping_summary || {}).reduce((sum, value) => sum + value, 0) === 87 && !rawResult.exchange_mapping_summary?.UNSUPPORTED ? "PASS" : "FAIL", evidence: rawResult.exchange_mapping_summary},
+  G03: {status: volumeTotal === rawResult.development_row_count ? "PASS" : "FAIL", evidence: {volume_total: volumeTotal, development_row_count: rawResult.development_row_count, counts: volumeCounts}},
+  G04: {status: labelCounts.label_version === "session-aligned-v2" && labelCounts.valid_count + labelReasonTotal === labelCounts.row_count && fixtureEvidence.status === "PASS" ? "PASS" : "FAIL", evidence: labelCounts},
+  G05: {status: Object.keys(diagnostics.feature_importance_gain || {}).length === 7 ? "PASS" : "FAIL", evidence: diagnostics.feature_importance_gain},
+  G06: {status: diagnostics.stability_status === "NOT_TESTED" ? "NOT_TESTED" : diagnostics.stability_status, evidence: diagnostics.stability_by_fold},
+  G07: {status: oos.valid_ic_date_count + oos.invalid_ic_date_count === oos.expected_date_count ? "PASS" : "FAIL", evidence: {valid: oos.valid_ic_date_count, invalid: oos.invalid_ic_date_count, expected: oos.expected_date_count}},
+  G08: {status: oos.conservation_holds && oos.sample_reason_conservation_holds && oos.date_reason_conservation_holds ? "PASS" : "FAIL", evidence: {expected: oos.expected_opportunities, valid: oos.valid_matched_opportunities, excluded: oos.excluded_opportunities}},
+  G09: {status: fixtureEvidence.status, evidence: "price attestation tests"},
+  G10: {status: fixtureEvidence.status, evidence: "corporate action tests"},
+  G11: {status: fixtureEvidence.status, evidence: "attested Top20 execution tests; real market BLOCKED"},
+  G12: {status: rawResult.history_immutability?.unchanged ? "PASS" : "FAIL", evidence: rawResult.dataset_identity},
+  G13: {status: stdioPass ? "PASS" : "NOT_TESTED", evidence: stdioEvidence},
+  G14: {status: regressionEvidence?.status === "PASS" ? "PASS" : "NOT_TESTED", evidence: regressionEvidence || "run npm run test:quant-regression"},
+};
+const gatePass = names => names.every(name => gates[name].status === "PASS");
+const result = {
+  ...rawResult,
+  schema_version: "alpha-data-validity-acceptance-v2",
+  gates,
+  fixture_evidence: fixtureEvidence,
+  stdio_evidence: stdioEvidence,
+  regression_evidence: regressionEvidence,
+  DATA_QUALITY_ENGINEERING: gatePass(["G01", "G02", "G03", "G04", "G12"]) ? "PASS" : "FAIL",
+  RESEARCH_DIAGNOSTICS_READINESS: gatePass(["G01", "G02", "G03", "G04", "G05", "G07", "G08", "G12", "G13"]) ? "PASS" : "FAIL",
+  EXECUTION_ENGINEERING: gatePass(["G09", "G10", "G11"]) ? "PASS" : "FAIL",
+  EXECUTION_EVIDENCE_SCOPE: "FIXTURE_ONLY",
+  REAL_MARKET_TRADING_VALIDITY: "BLOCKED",
+};
 writeFileSync(output, JSON.stringify(result, null, 2));
-console.log(`Alpha data validity: ${result.DATA_QUALITY_ENGINEERING} / ${result.RESEARCH_DIAGNOSTICS_READINESS}; report ${output}`);
+const evidenceHash = createHash("sha256").update(JSON.stringify(result)).digest("hex");
+writeFileSync(`${output}.sha256`, `${evidenceHash}  acceptance.json\n`);
+console.log(`Alpha data validity: ${result.DATA_QUALITY_ENGINEERING} / ${result.RESEARCH_DIAGNOSTICS_READINESS} / ${result.EXECUTION_ENGINEERING}; report ${output}`);
