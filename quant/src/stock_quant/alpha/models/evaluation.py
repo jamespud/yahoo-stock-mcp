@@ -34,9 +34,44 @@ def rank_ic(y_true: np.ndarray, y_pred: np.ndarray, decisions: list) -> dict:
     }
 
 
+def rank_ic_by_decision(y_true: np.ndarray, y_pred: np.ndarray, decisions: list) -> list[dict]:
+    groups = defaultdict(list)
+    for target, prediction, decision in zip(y_true, y_pred, decisions, strict=True):
+        if np.isfinite(target) and np.isfinite(prediction):
+            groups[decision].append((float(target), float(prediction)))
+    records = []
+    for decision, values in sorted(groups.items(), key=lambda item: item[0]):
+        reason = None
+        correlation = None
+        valid_pair_count = 0
+        if len(values) < 2:
+            reason = "INSUFFICIENT_VALID_PAIRS"
+        else:
+            targets, predictions = zip(*values)
+            if len(set(targets)) <= 1 or len(set(predictions)) <= 1:
+                reason = "CONSTANT_ARRAY"
+            else:
+                result = spearmanr(targets, predictions).statistic
+                if np.isfinite(result):
+                    correlation = float(result)
+                    valid_pair_count = len(values)
+                else:
+                    reason = "NONFINITE_CORRELATION"
+        records.append({
+            "decision_at": decision.isoformat() if hasattr(decision, "isoformat") else decision,
+            "rank_ic": correlation,
+            "eligible_count": len(values),
+            "valid_pair_count": valid_pair_count,
+            "excluded_count": 0 if correlation is not None else 1,
+            "reason": reason,
+        })
+    return records
+
+
 def metrics(y_true: np.ndarray, y_pred: np.ndarray, decisions: list) -> dict:
     rank = rank_ic(y_true, y_pred, decisions)
     valid = np.isfinite(y_true) & np.isfinite(y_pred)
+    rank["rank_ic_by_decision"] = rank_ic_by_decision(y_true, y_pred, decisions)
     return {
         **rank,
         "prediction_coverage": float(valid.mean()) if len(valid) else 0.0,

@@ -113,6 +113,37 @@ def _feature_table(frame: pd.DataFrame, compiled: CompiledFactorSpec, node_value
     return pa.concat_tables(tables)
 
 
+def stock_factor_diagnostics(frame: pd.DataFrame, compiled: CompiledFactorSpec, node_values: dict[str, pd.Series]) -> list[dict]:
+    """Per instrument/factor diagnostics; missingness is never treated as zero missingness."""
+    diagnostics = []
+    for instrument_id, group in frame.groupby("instrument_id", sort=True):
+        indexes = group.index
+        for output in compiled.spec.outputs:
+            values = node_values[output].reindex(indexes)
+            observed = int(group.index.size)
+            valid = int(values.notna().sum())
+            nonfinite = int(sum(1 for value in values.dropna() if not __import__("math").isfinite(float(value))))
+            warmup = compiled.lookback.get(output, 0)
+            warmup_missing = min(warmup, observed - valid - nonfinite if observed >= warmup else warmup)
+            unexpected_missing = max(0, observed - valid - nonfinite - warmup_missing)
+            valid_positions = [position for position, value in zip(group.index, values) if not pd.isna(value)]
+            diagnostics.append({
+                "instrument_id": instrument_id,
+                "factor_name": output,
+                "expected_observations": observed,
+                "observed_observations": observed,
+                "valid_values": valid,
+                "warmup_missing": warmup_missing,
+                "unexpected_missing": unexpected_missing,
+                "nonfinite_values": nonfinite,
+                "eligible_values": max(0, valid - nonfinite),
+                "coverage": valid / observed if observed else 0.0,
+                "first_valid_at": frame.at[valid_positions[0], "available_at"].isoformat() if valid_positions else None,
+                "last_valid_at": frame.at[valid_positions[-1], "available_at"].isoformat() if valid_positions else None,
+            })
+    return diagnostics
+
+
 def combine_feature_panels(
     primary: DatasetManifest,
     auxiliary: list[DatasetManifest],
