@@ -193,7 +193,7 @@ def train_validation_only(
         "model_type": MODEL_TYPE, "model_version": MODEL_VERSION, "feature_set_id": request.feature_set_id,
         "label_definition_hash": label_hash,
         "training_window": {"start": request.split.train_start.isoformat(), "end": request.split.train_end.isoformat()},
-        "validation_window": {"start": request.split.validation_start.isoformat(), "end": request.split.validation_end.isoformat()},
+        "validation_window": {"validation_start": request.split.validation_start.isoformat(), "validation_end": request.split.validation_end.isoformat()},
         "evaluation_mode": request.evaluation_mode,
         "research_protocol_hash": request.research_protocol_hash,
         "selected_iteration": int(selected_iteration), "hyperparameters": params, "feature_schema": schema,
