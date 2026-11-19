@@ -52,7 +52,7 @@ def compute_stock_factors(
         if checkpoint:
             checkpoint(0.75 * index / max(1, len(compiled.sorted_nodes)))
         node = compiled.node_map[node_id]
-        inputs = [frame[ref].astype(float) if ref in frame.columns else node_values[ref] for ref in node.inputs]
+        inputs = [pd.to_numeric(frame[ref], errors="coerce") if ref in frame.columns else node_values[ref] for ref in node.inputs]
         definition = OPERATORS[node.operator]
         if definition.scope == "cross_section":
             series = apply_cross_section(node.operator, inputs[0], frame["decision_at"], node.params)

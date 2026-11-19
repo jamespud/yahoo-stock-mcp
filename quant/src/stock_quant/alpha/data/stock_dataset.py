@@ -37,6 +37,17 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
     missing = sorted(symbol for symbol, count in counts.items() if count == 0)
     total = sum(counts.values())
     symbol_presence_coverage = (sum(1 for count in counts.values() if count) / len(counts)) if counts else 0.0
+    volume_null_count = sum(row.volume is None for row in batch.rows)
+    volume_zero_count = sum(row.volume == 0 for row in batch.rows)
+    volume_positive_count = sum(row.volume is not None and row.volume > 0 for row in batch.rows)
+    volume_total = volume_null_count + volume_zero_count + volume_positive_count
+    row_volume_quality = {
+        "volume_null_count": volume_null_count,
+        "volume_zero_count": volume_zero_count,
+        "volume_positive_count": volume_positive_count,
+        "volume_invalid_count": 0,
+        "volume_valid_coverage": ((volume_zero_count + volume_positive_count) / volume_total) if volume_total else 0.0,
+    }
     session_reports = audit_session_coverage(
         batch.rows,
         requested_symbols=request.symbols,
@@ -45,6 +56,7 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
         session_dates_by_symbol=batch.session_dates_by_symbol,
     )
     return {
+        **row_volume_quality,
         **batch.quality,
         "requested_symbols": len(request.symbols),
         "observed_symbols": sum(1 for count in counts.values() if count),

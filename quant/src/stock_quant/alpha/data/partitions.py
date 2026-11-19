@@ -71,7 +71,7 @@ class StockBarRow(StrictModel):
     high: float = Field(gt=0, strict=True)
     low: float = Field(gt=0, strict=True)
     close: float = Field(gt=0, strict=True)
-    volume: float = Field(ge=0, strict=True)
+    volume: float | None = Field(default=None, ge=0, strict=True)
     adjustment: str = Field(min_length=1, max_length=32)
     source: str = Field(min_length=1, max_length=128)
     source_version: str = Field(min_length=1, max_length=128)
