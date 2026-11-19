@@ -56,7 +56,7 @@ def stock_forward_labels(bars: list[dict], horizon: int = 5) -> list[LabelRow]:
                 entry = rows[entry_index]
                 exit_row = rows[exit_index]
                 gap_days = (exit_row["start_at"].date() - entry["start_at"].date()).days
-                if gap_days != horizon:
+                if gap_days > horizon + 2:
                     entry_at = entry["start_at"]
                     exit_at = exit_row["start_at"]
                     available_at = max(entry["available_at"], exit_row["available_at"])

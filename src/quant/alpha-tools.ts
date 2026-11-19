@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 import {
+  freezeAlphaSelectionInput,
+  evaluateAlphaOOSInput,
   backtestAlphaPortfolioInput,
   backtestOptionsInput,
   captureOptionsSnapshotInput,
@@ -89,6 +91,20 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     "Predict with a frozen model set over a non-overlapping feature period and publish an immutable prediction panel.",
     predictAlphaInput.shape,
     async (args) => submit({ kind: "predict_alpha", ...withoutPeriod(args) }),
+  );
+
+  server.tool(
+    "quant_freeze_alpha_selection",
+    "Freeze a Validation-selected model and Test identities into a content-addressed immutable record. This is the only gate that permits an OOS evaluation.",
+    freezeAlphaSelectionInput.shape,
+    async (args) => submit({ kind: "freeze_alpha_selection", ...args }),
+  );
+
+  server.tool(
+    "quant_evaluate_alpha_oos",
+    "Submit an independent OOS evaluation that reads only the frozen model and Test inputs.",
+    evaluateAlphaOOSInput.shape,
+    async (args) => submit({ kind: "evaluate_alpha_oos", ...args }),
   );
 
   server.tool(

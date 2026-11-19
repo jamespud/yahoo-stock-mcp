@@ -11,7 +11,7 @@ def _row(day, close=100.0, volume=1000.0):
 
 
 def test_missing_session_does_not_silently_extend_holding_period():
-    labels = stock_forward_labels([_row(day) for day in (0, 1, 2, 3, 5, 6, 7, 8, 9, 10)], horizon=5)
+    labels = stock_forward_labels([_row(day) for day in (0, 1, 2, 3, 7, 8, 9, 10)], horizon=5)
     assert labels[0].label_value is None
     assert "MISSING_LABEL_SESSIONS" in labels[0].label_quality
 

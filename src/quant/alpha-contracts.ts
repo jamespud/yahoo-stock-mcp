@@ -78,6 +78,24 @@ export const computeFactorsInput = z.object({
   auxiliary_feature_set_ids: z.array(alphaHash).max(8).optional(),
 }).strict();
 
+export const freezeAlphaSelectionInput = z.object({
+  research_protocol_hash: alphaHash,
+  candidate_ledger_hash: alphaHash,
+  selected_model_ids: z.array(alphaHash).min(1).max(20),
+  test_feature_set_id: alphaHash,
+  test_label_source_dataset_id: alphaHash,
+  test_start: z.string().datetime({ offset: true }),
+  test_end: z.string().datetime({ offset: true }),
+  selection_reason: z.string().min(1).max(1024),
+  label_name: z.string().min(1).max(128),
+  target_type: z.enum(["stock_return", "option_return", "option_iv_change", "stock_return_with_option_features"]).optional(),
+  horizon_days: z.number().int().min(1).max(252).optional(),
+}).strict();
+
+export const evaluateAlphaOOSInput = z.object({
+  freeze_id: alphaHash,
+}).strict();
+
 export const computeOptionFactorsInput = z.object({
   option_dataset_id: alphaHash,
   factor_spec: factorSpec,
