@@ -6,6 +6,7 @@ are syntax-checked and stored as data; isolated job workers load strategy code.
 import json
 import os
 import sys
+from pathlib import Path
 from importlib.metadata import version
 
 from .compiler import OPERATORS, CompileError, validate_strategy
@@ -67,6 +68,13 @@ def main():
             result = generate_calendar(calendar_name=request["calendar_name"], exchange=request["exchange"], start_date=request["start_date"], end_date=request["end_date"]).model_dump(mode="json")
         elif method == "validate_calendar":
             result = CalendarSchedule.model_validate(request["calendar"]).model_dump(mode="json")
+        elif method == "alpha_model_diagnostics":
+            from .alpha.models.feature_diagnostics import diagnose_alpha_model
+            from .alpha.models.registry import AlphaModelRegistry
+            result = diagnose_alpha_model(
+                request["model_id"],
+                registry=AlphaModelRegistry(Path(request["registry_path"]).with_suffix(".models")),
+            )
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))

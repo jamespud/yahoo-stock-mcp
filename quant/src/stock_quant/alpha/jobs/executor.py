@@ -24,6 +24,7 @@ from ..factors.ast import FactorSpec
 from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
+from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
@@ -225,8 +226,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             )
             model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
             staged_model = model
+            model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
+                      "diagnostics": [model_diagnostics],
                       "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))

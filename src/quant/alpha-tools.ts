@@ -4,6 +4,7 @@ import type { z } from "zod";
 import {
   freezeAlphaSelectionInput,
   evaluateAlphaOOSInput,
+  alphaModelDiagnosticsInput,
   backtestAlphaPortfolioInput,
   backtestOptionsInput,
   captureOptionsSnapshotInput,
@@ -103,6 +104,13 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
       kind: "freeze_alpha_selection", ...args,
       idempotency_key: `alpha_freeze:${createHash("sha256").update(JSON.stringify(args)).digest("hex")}`,
     }),
+  );
+
+  server.tool(
+    "quant_get_alpha_model_diagnostics",
+    "Read a verified frozen Alpha model and recompute feature gain/split importance. Stability remains NOT_TESTED unless independently trained development-window folds are present.",
+    alphaModelDiagnosticsInput.shape,
+    async (args) => runtime.stored({ method: "alpha_model_diagnostics", ...args }),
   );
 
   server.tool(

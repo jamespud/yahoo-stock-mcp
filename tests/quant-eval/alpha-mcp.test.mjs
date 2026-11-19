@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   backtestAlphaPortfolioInput,
+  alphaModelDiagnosticsInput,
   backtestOptionsInput,
   captureOptionsSnapshotInput,
   computeFactorsInput,
@@ -35,7 +36,7 @@ test("Alpha capabilities are explicit and dependency-aware", () => {
   assert.equal(capabilities.provider_coverage.yahoo_options.status !== "AVAILABLE" || capabilities.provider_coverage.yahoo_options.coverage, true);
 });
 
-test("Zod contracts are strict and cover the nine public inputs", () => {
+test("Zod contracts are strict and cover the public Alpha inputs", () => {
   assert.throws(() => prepareAlphaDatasetInput.parse({source: "yahoo", symbols: ["AAPL"], period: {start: "2026-01-01T00:00:00Z", end: "2026-01-02T00:00:00Z"}, price_basis: "raw_attested", extra: true}));
   assert.throws(() => captureOptionsSnapshotInput.parse({source: "thetadata", underlying: "AAPL", expirations: ["2026-12-18"]}));
   assert.ok(prepareOptionsDatasetInput.parse({source: "thetadata", underlyings: ["AAPL"], period: {start: "2026-01-01T00:00:00Z", end: "2026-01-02T00:00:00Z"}, quote_policy: "historical_bid_ask"}));
@@ -52,6 +53,8 @@ test("Zod contracts are strict and cover the nine public inputs", () => {
     selection_reason: "validation winner", label_name: "stock_forward_return",
   }));
   assert.ok(predictAlphaInput.shape.period);
+  assert.ok(alphaModelDiagnosticsInput.parse({model_id: "sha256:" + "6".repeat(64)}));
+  assert.throws(() => alphaModelDiagnosticsInput.parse({model_id: "sha256:" + "6".repeat(64), section: "test"}));
   assert.ok(backtestAlphaPortfolioInput.shape.portfolio_config);
   assert.ok(backtestOptionsInput.shape.execution_config);
 });

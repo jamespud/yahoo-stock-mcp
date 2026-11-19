@@ -96,6 +96,10 @@ export const evaluateAlphaOOSInput = z.object({
   freeze_id: alphaHash,
 }).strict();
 
+export const alphaModelDiagnosticsInput = z.object({
+  model_id: alphaHash,
+}).strict();
+
 export const computeOptionFactorsInput = z.object({
   option_dataset_id: alphaHash,
   factor_spec: factorSpec,
