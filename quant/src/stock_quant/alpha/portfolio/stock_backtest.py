@@ -86,7 +86,9 @@ def run_top_k_backtest(
         start_at=dataset.start_at,
         end_at=dataset.end_at,
     )
-    if validity.execution_status != "ELIGIBLE":
+    execution_eligible = validity.execution_status == "ELIGIBLE"
+    total_return_supported = execution_eligible and validity.total_return_claim_allowed
+    if not execution_eligible or not total_return_supported:
         if any(item["reason"].startswith("PRICE_") for item in validity.blocking_reasons):
             raise AlphaError(AlphaErrorCode.PRICE_BASIS_UNVERIFIED, "Price attestation is incomplete", {"blocking_reasons": validity.blocking_reasons})
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Corporate-action admission is incomplete", {"blocking_reasons": validity.blocking_reasons})
@@ -294,9 +296,9 @@ def run_top_k_backtest(
         "price_attestation_id": price_attestation.attestation_id,
         "corporate_action_dataset_id": corporate_action_dataset.action_dataset_id,
         "execution_validation_id": validity.validation_id,
-        "return_semantics": "total_return_with_corporate_actions",
-        "corporate_actions_modeled": True,
-        "total_return_claim_supported": True,
+        "return_semantics": "total_return_with_corporate_actions" if total_return_supported else "raw_price_return_excluding_corporate_actions",
+        "corporate_actions_modeled": total_return_supported,
+        "total_return_claim_supported": total_return_supported,
         "definition": "daily UTC close marks; next-session open fills; cash, commission, slippage, split and dividend accounting reconciled daily",
     }
     return PortfolioBacktestResult(
@@ -307,8 +309,8 @@ def run_top_k_backtest(
         diagnostics={
             "same_bar_signal_fill": False,
             "target_weights_separate_from_positions": True,
-            "corporate_actions_modeled": True,
-            "full_total_return_claim_supported": True,
+            "corporate_actions_modeled": total_return_supported,
+            "full_total_return_claim_supported": total_return_supported,
             "cash_never_negative": all(row["cash"] >= -1e-9 for row in equity_rows),
             "max_reconciliation_error": max_reconciliation_error,
             "cost_stress_multiplier": stress_cost_multiplier,

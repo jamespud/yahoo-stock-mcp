@@ -62,9 +62,33 @@ def validate_execution_inputs(
         blockers.append({"reason": "PRICE_COVERAGE_WINDOW_INCOMPLETE"})
     if action_dataset.coverage_status != "VERIFIED":
         blockers.append({"reason": "CORPORATE_ACTION_COVERAGE_NOT_VERIFIED"})
+    if not action_dataset.total_return_claim_allowed or action_dataset.blockers:
+        blockers.append({
+            "reason": "CORPORATE_ACTION_TOTAL_RETURN_NOT_ALLOWED",
+            "dataset_blockers": action_dataset.blockers,
+        })
+    action_start = _utc(action_dataset.start_at)
+    action_end = _utc(action_dataset.end_at)
+    if action_start > start or action_end < end:
+        blockers.append({
+            "reason": "CORPORATE_ACTION_WINDOW_MISMATCH",
+            "requested": {"start_at": start.isoformat(), "end_at": end.isoformat()},
+            "dataset": {"start_at": action_start.isoformat(), "end_at": action_end.isoformat()},
+        })
     missing_actions = sorted(set(symbols) - set(action_dataset.instrument_ids))
     if missing_actions:
         blockers.append({"reason": "CORPORATE_ACTION_SYMBOLS_UNVERIFIED", "instruments": missing_actions})
+    coverage_by_symbol = {item.instrument_id.upper(): item for item in action_dataset.coverage}
+    incomplete_coverage = []
+    for symbol in symbols:
+        coverage = coverage_by_symbol.get(symbol)
+        if coverage is None or coverage.status != "VERIFIED" or _utc(coverage.start_at) > start or _utc(coverage.end_at) < end:
+            incomplete_coverage.append(symbol)
+    if incomplete_coverage:
+        blockers.append({
+            "reason": "CORPORATE_ACTION_COVERAGE_INTERVAL_INCOMPLETE",
+            "instruments": incomplete_coverage,
+        })
     body = {
         "schema_version": "execution-validity-v1",
         "price_dataset_id": price_attestation.price_dataset_id,

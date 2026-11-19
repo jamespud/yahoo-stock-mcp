@@ -17,7 +17,7 @@ from stock_quant.alpha.errors import AlphaError
 AS_OF = datetime(2024, 1, 10, tzinfo=timezone.utc)
 
 
-def _action(action_type, *, action_id, terms, ex_date="2024-01-05", payment_date=None):
+def _action(action_type, *, action_id, terms, ex_date="2024-01-05", payment_date=None, quality="VERIFIED"):
     return CorporateAction(
         action_id=action_id,
         instrument_id="AAPL",
@@ -27,9 +27,26 @@ def _action(action_type, *, action_id, terms, ex_date="2024-01-05", payment_date
         effective_at=datetime.fromisoformat(ex_date).replace(tzinfo=timezone.utc),
         source="fixture-actions",
         source_version="v1",
-        quality_status="VERIFIED",
+        quality_status=quality,
         terms=terms,
     )
+
+
+def _attestation():
+    from stock_quant.alpha.data.price_attestation import PriceAttestation
+    from stock_quant.compiler import digest
+    payload = {
+        "schema_version": "price-attestation-v1",
+        "price_dataset_id": "sha256:" + "1" * 64,
+        "price_basis": "raw_attested",
+        "source_and_source_version": {"source": "yahoo", "source_version": "v1"},
+        "verification_method": "INDEPENDENT_RAW_OHLC_REFERENCE_V1",
+        "reference_evidence_ids": ["ref-1"],
+        "calendar_identity": {"calendar_name": "XNYS", "calendar_version": "v1"},
+        "coverage_window": {"start_at": "2024-01-01T00:00:00+00:00", "end_at": "2024-03-01T00:00:00+00:00"},
+        "verified_symbols": ["AAPL"], "unverified_symbols": [], "verified_scopes": [], "attestation_status": "VERIFIED",
+    }
+    return PriceAttestation.model_validate({**payload, "attestation_id": digest(payload)})
 
 
 def _coverage(start="2024-01-01", end="2024-02-01"):
@@ -71,19 +88,7 @@ def test_missing_action_coverage_blocks_total_return_claim():
     assert dataset.coverage_status == "BLOCKED"
     assert dataset.total_return_claim_allowed is False
 
-    from stock_quant.compiler import digest
-    attestation_payload = {
-        "schema_version": "price-attestation-v1",
-        "price_dataset_id": "sha256:" + "1" * 64,
-        "price_basis": "raw_attested",
-        "source_and_source_version": {"source": "yahoo", "source_version": "v1"},
-        "verification_method": "INDEPENDENT_RAW_OHLC_REFERENCE_V1",
-        "reference_evidence_ids": ["ref-1"],
-        "calendar_identity": {"calendar_name": "XNYS", "calendar_version": "v1"},
-        "coverage_window": {"start_at": "2024-01-01T00:00:00+00:00", "end_at": "2024-02-01T00:00:00+00:00"},
-        "verified_symbols": ["AAPL"], "unverified_symbols": [], "verified_scopes": [], "attestation_status": "VERIFIED",
-    }
-    attestation = PriceAttestation.model_validate({**attestation_payload, "attestation_id": digest(attestation_payload)})
+    attestation = _attestation()
     validity = validate_execution_inputs(
         attestation, dataset, instruments=["AAPL"],
         start_at=datetime(2024, 1, 1, tzinfo=timezone.utc), end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
@@ -143,3 +148,45 @@ def test_corporate_action_dataset_identity_rejects_mutation():
         assert "action dataset identity" in str(error)
     else:
         raise AssertionError("tampered corporate-action identity was accepted")
+
+
+def test_unverified_action_blocks_joint_execution():
+    dataset = build_corporate_action_dataset(
+        [_action("cash_dividend", action_id="div-unverified", terms={"cash_per_share": 0.5}, payment_date="2024-01-10", quality="UNVERIFIED")],
+        expected_instruments=["AAPL"], start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 2, 1, tzinfo=timezone.utc), coverage=[_coverage()],
+    )
+    assert dataset.coverage_status == "VERIFIED"
+    assert dataset.total_return_claim_allowed is False
+    validity = validate_execution_inputs(
+        _attestation(), dataset, instruments=["AAPL"],
+        start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+    )
+    assert validity.execution_status == "BLOCKED"
+    assert validity.total_return_claim_allowed is False
+    assert any(item["reason"] == "CORPORATE_ACTION_TOTAL_RETURN_NOT_ALLOWED" for item in validity.blocking_reasons)
+
+
+def test_action_coverage_interval_and_dataset_window_must_match_request():
+    dataset = build_corporate_action_dataset(
+        [], expected_instruments=["AAPL"],
+        start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        coverage=[_coverage(start="2024-01-01", end="2024-01-15")],
+    )
+    validity = validate_execution_inputs(
+        _attestation(), dataset, instruments=["AAPL"],
+        start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+    )
+    assert validity.execution_status == "BLOCKED"
+    assert any(item["reason"] == "CORPORATE_ACTION_COVERAGE_INTERVAL_INCOMPLETE" for item in validity.blocking_reasons)
+
+    wider = validate_execution_inputs(
+        _attestation(), dataset, instruments=["AAPL"],
+        start_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        end_at=datetime(2024, 3, 1, tzinfo=timezone.utc),
+    )
+    assert wider.execution_status == "BLOCKED"
+    assert any(item["reason"] == "CORPORATE_ACTION_WINDOW_MISMATCH" for item in wider.blocking_reasons)

@@ -89,13 +89,13 @@ def _fixture(tmp_path, *, actions=(), split_prices=False):
     return store, dataset, prediction_set, attestation, action_dataset
 
 
-def _action(action_type, terms, *, action_id, ex_date, payment_date=None):
+def _action(action_type, terms, *, action_id, ex_date, payment_date=None, quality="VERIFIED"):
     ex = datetime.fromisoformat(ex_date).replace(tzinfo=timezone.utc)
     return CorporateAction(
         action_id=action_id, instrument_id="S00", action_type=action_type,
         ex_date=ex, payment_date=datetime.fromisoformat(payment_date).replace(tzinfo=timezone.utc) if payment_date else None,
         effective_at=ex, source="fixture-actions", source_version="v1",
-        quality_status="VERIFIED", terms=terms,
+        quality_status=quality, terms=terms,
     )
 
 
@@ -189,3 +189,17 @@ def test_double_cost_stress_is_reproducible(tmp_path):
     assert first.equity_curve == second.equity_curve
     assert first.metrics["cost_stress_multiplier"] == 2.0
     assert first.metrics["commission_paid"] > first.metrics["baseline_commission_paid_estimate"]
+
+
+def test_unverified_corporate_action_rejects_backtest(tmp_path):
+    dividend = _action(
+        "cash_dividend", {"cash_per_share": 1.0}, action_id="div-unverified",
+        ex_date="2024-01-03", payment_date="2024-01-08", quality="UNVERIFIED",
+    )
+    with pytest.raises(AlphaError) as error:
+        _run(tmp_path, actions=[dividend])
+    assert error.value.code == AlphaErrorCode.DATA_UNAVAILABLE
+    assert any(
+        item["reason"] == "CORPORATE_ACTION_TOTAL_RETURN_NOT_ALLOWED"
+        for item in error.value.context["blocking_reasons"]
+    )
