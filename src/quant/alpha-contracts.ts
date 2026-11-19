@@ -103,7 +103,7 @@ export const computeOptionFactorsInput = z.object({
   underlying_price_dataset_id: alphaHash.optional(),
 }).strict();
 
-export const trainAlphaModelInput = z.object({
+export const trainAlphaModelInputFields = z.object({
   evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
   research_protocol_hash: alphaHash.optional(),
   feature_set_id: alphaHash,
@@ -117,6 +117,24 @@ export const trainAlphaModelInput = z.object({
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
 }).strict();
+
+export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
+  if (value.evaluation_mode !== "validation_only") return;
+  if (!value.research_protocol_hash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["research_protocol_hash"],
+      message: "validation_only training requires research_protocol_hash",
+    });
+  }
+  if (!value.label_spec.stock_dataset_id && !value.label_spec.option_dataset_id) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["label_spec"],
+      message: "validation_only training requires a label source dataset",
+    });
+  }
+});
 
 export const predictAlphaInput = z.object({
   model_set_id: alphaHash,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -12,7 +12,6 @@ const datasetHash = process.env.ALPHA_RESEARCH_DATASET_HASH || "sha256:ded14a7ae
 const protocolHash = process.env.ALPHA_RESEARCH_PROTOCOL_HASH || "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804";
 const outputDir = process.env.ALPHA_RESEARCH_REPORT_DIR || join(root, "reports/alpha-reliability");
 const alphaRoot = registryPath.replace(/\.(sqlite3?|db)$/, ".alpha");
-const freezeRoot = registryPath.replace(/\.(sqlite3?|db)$/, ".freezes");
 const datasetManifest = join(alphaRoot, "datasets", datasetHash.replace(/^sha256:/, ""), "manifest.json");
 
 if (!existsSync(resolve(root, "dist/cli.js"))) {
@@ -53,7 +52,10 @@ async function call(name, args) {
 async function wait(jobId) {
   for (let i = 0; i < 600; i++) {
     const job = await call("quant_get_job", {job_id: jobId});
-    if (job.status === "completed") return job;
+    if (job.status === "completed") {
+      if (job.attempts !== 1) throw new Error(`job ${jobId} required ${job.attempts} attempts`);
+      return job;
+    }
     if (!["queued", "running"].includes(job.status)) throw new Error(`job ${jobId} failed: ${JSON.stringify(job)}`);
     await new Promise(resolve => setTimeout(resolve, 250));
   }
@@ -138,13 +140,13 @@ try {
   const freezeTerminal = await wait(freezeJob.job_id);
   jobIds.push({kind: "freeze_alpha_selection", job_id: freezeJob.job_id, attempts: freezeTerminal.attempts});
   const frozen = await call("quant_get_result", {job_id: freezeJob.job_id, section: "summary"});
-  const freezeSource = join(freezeRoot, frozen.freeze_id.replace(/^sha256:/, "") + ".json");
   mkdirSync(join(outputDir, "freezes"), {recursive: true});
-  copyFileSync(freezeSource, join(outputDir, "freezes", frozen.freeze_id.replace(/^sha256:/, "") + ".json"));
+  writeFileSync(join(outputDir, "freezes", frozen.freeze_id.replace(/^sha256:/, "") + ".json"), JSON.stringify(frozen, null, 2) + "\n");
   const oosJob = await call("quant_evaluate_alpha_oos", {freeze_id: frozen.freeze_id});
   const oosTerminal = await wait(oosJob.job_id);
   jobIds.push({kind: "evaluate_alpha_oos", job_id: oosJob.job_id, attempts: oosTerminal.attempts});
   const oosSummary = await call("quant_get_result", {job_id: oosJob.job_id, section: "summary"});
+  if (jobIds.length !== 14) throw new Error(`expected 14 MCP jobs, observed ${jobIds.length}`);
   const summary = {
     status: "PASS", dataset_hash: datasetHash, protocol_hash: protocolHash,
     feature_set_ids: featureIds, factor_spec_hashes: factorHashes, model_ids: modelIds, model_hashes: modelHashes,

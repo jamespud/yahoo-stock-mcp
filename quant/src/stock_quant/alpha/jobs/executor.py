@@ -26,7 +26,7 @@ from ..factors.option_factors import compute_option_factors
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
-from ..models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
+from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
@@ -231,8 +231,16 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "OOS evaluation requires a completed Alpha freeze job",
                     {"freeze_id": request.freeze_id},
                 )
+            try:
+                completed_record = FrozenResearchRecord.model_validate(completed_freeze["record"])
+            except Exception as error:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Completed freeze job contains an invalid freeze record",
+                    {"freeze_id": request.freeze_id, "reason": str(error)},
+                ) from error
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
-            record = freeze_store.load(request.freeze_id)
+            record = freeze_store.materialize(completed_record)
             evaluation = evaluate_alpha_oos(
                 record, store=datasets, model_registry=final_registry, checkpoint=bounded,
             )
@@ -272,6 +280,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
         if not store.begin_publish(claim, result):
             return False
+        staged_freeze_path = None
         try:
             def publish_checkpoint():
                 if not store.heartbeat(claim, .99):
@@ -282,10 +291,24 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 final_registry.commit_from(staging_registry, staged_model.model_id, checkpoint=publish_checkpoint)
             if staged_freeze is not None:
                 freeze_store, freeze_record = staged_freeze
-                freeze_store.save(freeze_record, checkpoint=publish_checkpoint)
-            return store.complete_publish(claim)
+                staged_freeze_path = freeze_store.stage(freeze_record, checkpoint=publish_checkpoint)
+            completed = store.complete_publish(claim)
         except Exception as error:
+            if staged_freeze_path is not None and staged_freeze_path.exists():
+                staged_freeze_path.unlink()
             return store.fail_publish(claim, error, "EXECUTION_FAILED")
+        if not completed:
+            if staged_freeze_path is not None and staged_freeze_path.exists():
+                staged_freeze_path.unlink()
+            return False
+        if staged_freeze is not None:
+            freeze_store, freeze_record = staged_freeze
+            try:
+                freeze_store.finalize(freeze_record, staged_freeze_path)
+            except Exception:
+                # The completed job result is authoritative; OOS materializes from it if needed.
+                pass
+        return True
     except AlphaError as error:
         return store.fail_publish(claim, error, error.code.value)
     except FactorCompileError as error:

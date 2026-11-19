@@ -13,6 +13,7 @@ import {
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
+  trainAlphaModelInputFields,
 } from "./alpha-contracts.js";
 import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
@@ -77,9 +78,9 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
   server.tool(
     "quant_train_alpha_model",
     "Train a deterministic CPU LightGBM regressor with chronological train/validation/test windows, label purging and frozen OOS evaluation.",
-    trainAlphaModelInput.shape,
+    trainAlphaModelInputFields.shape,
     async (args) => {
-      const { label_spec, windows, ...rest } = args;
+      const { label_spec, windows, ...rest } = trainAlphaModelInput.parse(args);
       const split = developmentWindows.safeParse(windows).success ? windows : temporalWindows.parse(windows);
       return submit({
         kind: "train_alpha_model", ...rest, ...label_spec, split,

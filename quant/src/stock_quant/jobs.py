@@ -299,7 +299,7 @@ class JobStore(Registry):
             except ValueError:
                 continue
             if isinstance(summary, dict) and summary.get("freeze_id") == freeze_id:
-                return {"job_id": job_id, "freeze_id": freeze_id}
+                return {"job_id": job_id, "freeze_id": freeze_id, "record": summary}
         return None
 
     def submit_alpha(self, raw: dict) -> dict:
@@ -326,6 +326,23 @@ class JobStore(Registry):
                         )
                     self.connection.commit()
                     job = self.get_job(previous[0])
+                    return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
+            if is_oos:
+                existing_oos = None
+                for existing_id, encoded_request, existing_hash in self.connection.execute(
+                    "SELECT id,request,config_hash FROM jobs ORDER BY created_at,id"
+                ):
+                    existing_request = json.loads(encoded_request)
+                    if existing_request.get("kind") == "evaluate_alpha_oos" and existing_request.get("freeze_id") == freeze_id:
+                        existing_oos = (existing_id, existing_hash)
+                        break
+                if existing_oos is not None:
+                    self._record_alpha_research_audit(
+                        event_type="OOS_REPEAT_REQUEST", freeze_id=freeze_id, job_id=existing_oos[0],
+                        idempotency_key=request.idempotency_key, detail={"config_hash": existing_oos[1]},
+                    )
+                    self.connection.commit()
+                    job = self.get_job(existing_oos[0])
                     return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
             count = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]
             if count >= 32:
@@ -488,6 +505,15 @@ class JobStore(Registry):
             if changed.rowcount == 1 and not error:
                 for section, reference in references.items():
                     self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
+            if changed.rowcount == 1 and claim["request"].get("kind") == "evaluate_alpha_oos":
+                row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self._record_alpha_research_audit(
+                    event_type="OOS_FAILED" if error else "OOS_COMPLETED",
+                    freeze_id=claim["request"]["freeze_id"], job_id=claim["id"],
+                    idempotency_key=claim["request"].get("idempotency_key"),
+                    attempt=row[0] if row else None,
+                    detail={"status": "failed" if error else "completed", "error_code": error_code} if error else {"status": "completed"},
+                )
         return changed.rowcount == 1
 
     def get_job(self, job_id: str) -> dict:

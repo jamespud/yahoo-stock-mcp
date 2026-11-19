@@ -88,7 +88,21 @@ class FrozenResearchStore:
             raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze record is immutable", {"freeze_id": freeze_id})
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Unknown freeze record", {"freeze_id": freeze_id})
 
-    def save(self, record: FrozenResearchRecord, *, checkpoint: Callable[[], None] | None = None) -> FrozenResearchRecord:
+    @staticmethod
+    def _write_stage(record: FrozenResearchRecord, root: Path) -> Path:
+        stage = Path(tempfile.mkstemp(prefix=".freeze-", suffix=".tmp", dir=root)[1])
+        try:
+            stage.write_text(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False))
+            with stage.open("rb") as stream:
+                os.fsync(stream.fileno())
+            return stage
+        except Exception:
+            if stage.exists():
+                stage.unlink()
+            raise
+
+    def stage(self, record: FrozenResearchRecord, *, checkpoint: Callable[[], None] | None = None) -> Path | None:
+        """Write a non-authoritative staging file while the job still owns its lease."""
         if checkpoint:
             checkpoint()
         path = self.path(record.freeze_id)
@@ -96,20 +110,66 @@ class FrozenResearchStore:
             existing = self.load(record.freeze_id)
             if freeze_identity(existing) != freeze_identity(record):
                 raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze record is immutable", {"freeze_id": record.freeze_id})
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stage = self._write_stage(record, self.root)
+        if checkpoint:
+            try:
+                checkpoint()
+            except Exception:
+                if stage.exists():
+                    stage.unlink()
+                raise
+        return stage
+
+    def finalize(self, record: FrozenResearchRecord, stage: Path | None) -> FrozenResearchRecord:
+        """Promote a staged record only after its owning job is terminally completed."""
+        path = self.path(record.freeze_id)
+        if path.exists():
+            existing = self.load(record.freeze_id)
+            if freeze_identity(existing) != freeze_identity(record):
+                raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze record is immutable", {"freeze_id": record.freeze_id})
+            if stage is not None and stage.exists():
+                stage.unlink()
+            return existing
+        if stage is None or not stage.exists():
+            raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze staging file is missing", {"freeze_id": record.freeze_id})
+        os.replace(stage, path)
+        self._fsync_directory()
+        return record
+
+    def materialize(self, record: FrozenResearchRecord) -> FrozenResearchRecord:
+        """Recover a completed job's freeze record if post-commit materialization did not finish."""
+        path = self.path(record.freeze_id)
+        if path.exists():
+            existing = self.load(record.freeze_id)
+            if freeze_identity(existing) != freeze_identity(record):
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Completed freeze job and freeze artifact disagree",
+                    {"freeze_id": record.freeze_id},
+                )
             return existing
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        stage = Path(tempfile.mkstemp(prefix=".freeze-", suffix=".tmp", dir=self.root)[1])
+        stage = self._write_stage(record, self.root)
         try:
-            stage.write_text(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False))
-            with stage.open("rb") as stream:
-                os.fsync(stream.fileno())
-            if checkpoint:
-                checkpoint()
             os.replace(stage, path)
+            self._fsync_directory()
         finally:
             if stage.exists():
                 stage.unlink()
         return record
+
+    def _fsync_directory(self) -> None:
+        descriptor = os.open(self.root, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def save(self, record: FrozenResearchRecord, *, checkpoint: Callable[[], None] | None = None) -> FrozenResearchRecord:
+        stage = self.stage(record, checkpoint=checkpoint)
+        return self.finalize(record, stage)
 
 
 def freeze_identity(record: FrozenResearchRecord) -> str:
