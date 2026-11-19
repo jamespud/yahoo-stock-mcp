@@ -289,3 +289,19 @@ def test_oos_finish_failure_path_is_audited(tmp_path):
         "OOS_SUBMISSION", "OOS_EXECUTION_ATTEMPT", "OOS_FAILED",
     ]
     assert audit[-1]["detail"] == {"status": "failed", "error_code": "DATA_UNAVAILABLE"}
+
+
+def test_validation_only_job_rejects_option_only_label_source(tmp_path):
+    registry_path, _, _, feature_set = _fixture(tmp_path)
+    with JobStore(registry_path) as jobs:
+        with pytest.raises(Exception):
+            jobs.submit_alpha({
+                "kind": "train_alpha_model", "feature_set_id": feature_set.dataset_id,
+                "label_name": "option_forward_return", "target_type": "option_return",
+                "option_dataset_id": "sha256:" + "f" * 64, "horizon_days": 5,
+                "evaluation_mode": "validation_only", "research_protocol_hash": "sha256:" + "0" * 64,
+                "split": {
+                    "train_start": "2024-01-01T00:00:00Z", "train_end": "2024-02-15T00:00:00Z",
+                    "validation_start": "2024-02-15T00:00:00Z", "validation_end": "2024-03-15T00:00:00Z",
+                },
+            })

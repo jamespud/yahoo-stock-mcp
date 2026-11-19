@@ -81,5 +81,12 @@ test("Validation-only training contract is explicit and rejects Test windows", (
     ...input,
     label_spec: {label_name: "stock_forward_return", target_type: "stock_return"},
   }));
+  assert.throws(() => trainAlphaModelInput.parse({
+    ...input,
+    label_spec: {
+      label_name: "stock_forward_return", target_type: "stock_return",
+      option_dataset_id: "sha256:" + "3".repeat(64),
+    },
+  }));
   assert.throws(() => developmentWindows.parse({...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"}));
 });

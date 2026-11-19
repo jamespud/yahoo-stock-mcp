@@ -127,11 +127,11 @@ export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((valu
       message: "validation_only training requires research_protocol_hash",
     });
   }
-  if (!value.label_spec.stock_dataset_id && !value.label_spec.option_dataset_id) {
+  if (!value.label_spec.stock_dataset_id) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["label_spec"],
-      message: "validation_only training requires a label source dataset",
+      path: ["label_spec", "stock_dataset_id"],
+      message: "validation_only training currently requires stock_dataset_id",
     });
   }
 });

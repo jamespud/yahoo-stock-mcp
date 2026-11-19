@@ -90,14 +90,18 @@ class FrozenResearchStore:
 
     @staticmethod
     def _write_stage(record: FrozenResearchRecord, root: Path) -> Path:
-        stage = Path(tempfile.mkstemp(prefix=".freeze-", suffix=".tmp", dir=root)[1])
+        stage = None
         try:
-            stage.write_text(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False))
-            with stage.open("rb") as stream:
+            with tempfile.NamedTemporaryFile(
+                mode="w", prefix=".freeze-", suffix=".tmp", dir=root, delete=False,
+            ) as stream:
+                stage = Path(stream.name)
+                stream.write(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False))
+                stream.flush()
                 os.fsync(stream.fileno())
             return stage
         except Exception:
-            if stage.exists():
+            if stage is not None and stage.exists():
                 stage.unlink()
             raise
 

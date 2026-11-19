@@ -94,6 +94,8 @@ class TrainAlphaModelJob(AlphaJobBase):
     def split_mode(self):
         if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
             raise ValueError("validation_only training requires ModelDevelopmentSplit")
+        if self.evaluation_mode == "validation_only" and not self.stock_dataset_id:
+            raise ValueError("validation_only training currently requires stock_dataset_id")
         if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
             raise ValueError("legacy_inline_test training requires TemporalSplit")
         return self
