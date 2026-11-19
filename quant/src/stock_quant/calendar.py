@@ -54,6 +54,8 @@ class CalendarSchedule(StrictModel):
     start_date: date
     end_date: date
     sessions: tuple[TradingSession, ...] = Field(max_length=5000)
+    long_calendar_shards: tuple[dict, ...] = ()
+    calendar_validation_status: str | None = None
 
     @model_validator(mode="after")
     def coherent(self):
@@ -173,3 +175,41 @@ def generate_calendar(*, calendar_name: str, exchange: str, start_date: str | da
                             version=f"exchange_calendars:{version('exchange-calendars')}|pandas:{version('pandas')}|tzdata:{version('tzdata')}",
                             provider="exchange_calendars", provider_version=version("exchange-calendars"), calendar_name=calendar.name,
                             start_date=begin, end_date=finish, sessions=tuple(sessions))
+
+
+def generate_long_calendar(*, calendar_name: str, exchange: str, start_date: str | date, end_date: str | date) -> CalendarSchedule:
+    """Prepare >10-year research ranges as deterministic, non-overlapping calendar shards."""
+    begin = date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+    finish = date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+    if not begin <= finish:
+        raise ValueError("Calendar coverage must be ordered")
+    if (finish - begin).days <= 3660:
+        calendar = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=begin, end_date=finish)
+        shards = ({"calendar_name": calendar_name, "exchange": exchange, "start": begin.isoformat(), "end": finish.isoformat(), "provider_version": calendar.provider_version},)
+        return calendar.model_copy(update={"long_calendar_shards": shards, "calendar_validation_status": "SINGLE_SHARD_VERIFIED"})
+    shards: list[dict] = []
+    sessions: list[TradingSession] = []
+    current = begin
+    provider_version = None
+    while current <= finish:
+        # Deterministic natural-year chunks avoid rolling provider state and
+        # keep later inspections independently reproducible.
+        chunk_end = min(date(current.year, 12, 31), finish)
+        shard = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=current, end_date=chunk_end)
+        provider_version = shard.provider_version
+        sessions.extend(shard.sessions)
+        shards.append({"calendar_name": calendar_name, "exchange": exchange,
+                       "start": shard.start_date.isoformat(), "end": shard.end_date.isoformat(),
+                       "provider_version": shard.provider_version})
+        current = date(current.year + 1, 1, 1)
+    sorted_sessions = tuple(sorted(sessions, key=lambda s: s.date))
+    if len({session.date for session in sorted_sessions}) != len(sorted_sessions):
+        raise ValueError("Long calendar merge created duplicate trading sessions")
+    first = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=begin, end_date=begin)
+    return first.model_copy(update={
+        "start_date": begin,
+        "end_date": finish,
+        "sessions": sorted_sessions,
+        "long_calendar_shards": tuple(shards),
+        "calendar_validation_status": "MULTI_SHARD_MERGED",
+    })
