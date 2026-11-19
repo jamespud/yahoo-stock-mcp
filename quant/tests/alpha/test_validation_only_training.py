@@ -123,6 +123,7 @@ def test_validation_only_model_has_frozen_feature_schema(tmp_path):
         "target_type": "stock_return",
         "horizon_days": 5,
         "label_source_dataset_id": request.label_source_dataset_id,
+        "label_version": "observed-record-v1",
     }
     assert loaded.metadata["factor_spec_hash"] == "sha256:" + "b" * 64
     assert loaded.metadata["calendar_version"] == "fixture"

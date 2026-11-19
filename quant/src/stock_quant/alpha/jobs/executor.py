@@ -10,6 +10,7 @@ import time
 
 from pydantic import ValidationError
 
+from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
 from ...compiler import digest
 from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
 from ..data.catalog import DatasetStore
@@ -48,6 +49,30 @@ class _ProviderRows:
 def _store(root: Path) -> DatasetStore:
     return DatasetStore(root)
 
+
+def _stock_label_calendar(manifest: DatasetManifest):
+    """Reconstruct the exact mapped calendar for a stock dataset, if evidenced."""
+    mappings = manifest.data_quality.get("exchange_mappings") if isinstance(manifest.data_quality, dict) else None
+    if not mappings:
+        return None
+    identities = {(item.get("calendar_name"), item.get("calendar_version")) for item in mappings.values()}
+    statuses = {item.get("calendar_mapping_status") for item in mappings.values()}
+    if len(identities) != 1 or not statuses <= {"VERIFIED", "PROXY_ONLY"}:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar mappings are inconsistent or unverified")
+    calendar_name, calendar_version = next(iter(identities))
+    mapping = next(iter(mappings.values()))
+    evidence = mapping.get("mapping_evidence") or {}
+    if not calendar_name or evidence.get("provider_version") != CALENDAR_PROVIDER_VERSION:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar provider version is not executable")
+    calendar = generate_long_calendar(
+        calendar_name=calendar_name,
+        exchange=calendar_name,
+        start_date=manifest.start_at.date(),
+        end_date=manifest.end_at.date(),
+    )
+    if calendar.version != calendar_version:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar version does not match its mapping")
+    return calendar
 
 def _staged_rows(store, reference: str) -> list[dict]:
     root = Path(store.path).with_suffix(".alpha-inbox")
@@ -170,12 +195,19 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             if request.evaluation_mode == "validation_only":
                 if not request.stock_dataset_id:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                stock_manifest = datasets.load_manifest(request.stock_dataset_id)
                 labels = stock_forward_labels(
                     datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                     horizon=request.horizon_days,
+                    calendar=_stock_label_calendar(stock_manifest),
                 )
             elif request.stock_dataset_id:
-                labels = stock_forward_labels(datasets.read_rows(request.stock_dataset_id), horizon=request.horizon_days)
+                stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+                labels = stock_forward_labels(
+                    datasets.read_rows(request.stock_dataset_id),
+                    horizon=request.horizon_days,
+                    calendar=_stock_label_calendar(stock_manifest),
+                )
             elif request.option_dataset_id:
                 manifest = datasets.load_manifest(request.option_dataset_id)
                 labels, _ = historical_option_labels(manifest, datasets, horizon_days=request.horizon_days)

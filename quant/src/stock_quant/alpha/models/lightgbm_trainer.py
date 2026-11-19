@@ -190,11 +190,13 @@ def train_validation_only(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
+    label_versions = sorted({row.label_version for row in label_rows})
     label_spec = {
         "label_name": request.label_name,
         "target_type": request.target_type,
         "horizon_days": request.horizon_days,
         "label_source_dataset_id": request.label_source_dataset_id,
+        "label_version": label_versions[0] if len(label_versions) == 1 else "mixed",
     }
     label_hash = digest({
         "label_spec": label_spec,
@@ -289,11 +291,13 @@ def train_alpha(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
+    label_versions = sorted({row.label_version for row in label_rows})
     label_spec = {
         "label_name": request.label_name,
         "target_type": request.target_type,
         "horizon_days": request.horizon_days,
         "label_source_dataset_id": request.label_source_dataset_id,
+        "label_version": label_versions[0] if len(label_versions) == 1 else "mixed",
     }
     label_hash = digest({
         "label_spec": label_spec,
