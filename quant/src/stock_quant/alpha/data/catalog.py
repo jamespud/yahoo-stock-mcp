@@ -359,6 +359,17 @@ class DatasetStore:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Manifest identity mismatch")
         return manifest
 
+    def load_published_manifest(self, dataset_id: str) -> DatasetManifest:
+        """Load a manifest that was atomically published by a deferred job before catalog registration."""
+        if not isinstance(dataset_id, str) or not _DATASET_ID.fullmatch(dataset_id):
+            raise ValueError("Invalid dataset ID")
+        path = self.datasets / dataset_id.removeprefix("sha256:") / "manifest.json"
+        manifest = DatasetManifest.model_validate_json(path.read_text())
+        expected = dataset_identity(manifest.model_dump(mode="json"), manifest.partition_manifest)
+        if manifest.dataset_id != dataset_id or expected != dataset_id:
+            raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Published manifest identity mismatch")
+        return manifest
+
     def validate_dataset(self, dataset_id: str) -> DataQualityReport:
         issues: list[dict] = []
         row_count = partition_count = 0

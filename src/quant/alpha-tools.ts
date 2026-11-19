@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 import {
@@ -97,14 +98,17 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     "quant_freeze_alpha_selection",
     "Freeze a Validation-selected model and Test identities into a content-addressed immutable record. This is the only gate that permits an OOS evaluation.",
     freezeAlphaSelectionInput.shape,
-    async (args) => submit({ kind: "freeze_alpha_selection", ...args }),
+    async (args) => submit({
+      kind: "freeze_alpha_selection", ...args,
+      idempotency_key: `alpha_freeze:${createHash("sha256").update(JSON.stringify(args)).digest("hex")}`,
+    }),
   );
 
   server.tool(
     "quant_evaluate_alpha_oos",
     "Submit an independent OOS evaluation that reads only the frozen model and Test inputs.",
     evaluateAlphaOOSInput.shape,
-    async (args) => submit({ kind: "evaluate_alpha_oos", ...args }),
+    async (args) => submit({ kind: "evaluate_alpha_oos", ...args, idempotency_key: `alpha_oos:${args.freeze_id}` }),
   );
 
   server.tool(

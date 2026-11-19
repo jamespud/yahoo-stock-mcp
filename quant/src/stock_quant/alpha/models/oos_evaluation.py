@@ -13,6 +13,7 @@ from scipy.stats import spearmanr
 from ...compiler import digest
 from ..contracts import Hash
 from ..data.catalog import DatasetStore
+from ..data.partitions import read_partition
 from ..errors import AlphaError, AlphaErrorCode
 from .evaluation import metrics, quantile_returns
 from .inference import predict_alpha
@@ -105,7 +106,10 @@ def evaluate_alpha_oos(
         loaded.metadata["model_set_id"], record.test_dataset_ids["test_feature_set_id"], start, end,
         store=store, registry=model_registry,
     )
-    prediction_rows = store.read_rows(prediction_manifest.dataset_id)
+    prediction_root = store.datasets / prediction_manifest.dataset_id.removeprefix("sha256:")
+    prediction_rows = []
+    for partition in prediction_manifest.partition_manifest:
+        prediction_rows.extend(read_partition(prediction_root / partition.logical_path))
     label_rows = stock_forward_labels(
         store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end),
         horizon=int(record.label_spec.get("horizon_days", 5)),

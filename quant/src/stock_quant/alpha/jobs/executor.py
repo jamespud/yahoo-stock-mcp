@@ -25,14 +25,16 @@ from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
+from ..models.oos_evaluation import evaluate_alpha_oos
+from ..models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
-    ComputeFactorsJob, ComputeOptionFactorsJob, PrepareOptionsDatasetJob, PrepareStockDatasetJob,
-    PredictAlphaJob, TrainAlphaModelJob,
+    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, FreezeAlphaSelectionJob,
+    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
 )
 
 
@@ -164,23 +166,76 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
-            if request.stock_dataset_id:
+            if request.evaluation_mode == "validation_only":
+                if not request.stock_dataset_id:
+                    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                labels = stock_forward_labels(
+                    datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
+                    horizon=request.horizon_days,
+                )
+            elif request.stock_dataset_id:
                 labels = stock_forward_labels(datasets.read_rows(request.stock_dataset_id), horizon=request.horizon_days)
             elif request.option_dataset_id:
                 manifest = datasets.load_manifest(request.option_dataset_id)
                 labels, _ = historical_option_labels(manifest, datasets, horizon_days=request.horizon_days)
             if labels is None:
                 raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "A label source dataset is required")
-            train_req = TrainAlphaRequest(feature_set_id=request.feature_set_id, label_name=request.label_name,
-                                          target_type=request.target_type, split=request.split,
-                                          hyperparameters={key: value for key, value in request.hyperparameters.items()},
-                                          random_seed=request.random_seed, resource_budget=request.resource_budget,
-                                          min_rank_ic=request.min_rank_ic)
+            train_req = TrainAlphaRequest(
+                feature_set_id=request.feature_set_id, label_name=request.label_name,
+                target_type=request.target_type, evaluation_mode=request.evaluation_mode,
+                research_protocol_hash=request.research_protocol_hash, split=request.split,
+                hyperparameters={key: value for key, value in request.hyperparameters.items()},
+                random_seed=request.random_seed, resource_budget=request.resource_budget,
+                min_rank_ic=request.min_rank_ic,
+            )
             model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
             staged_model = model
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
                       "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+        elif isinstance(request, FreezeAlphaSelectionJob):
+            freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
+            freeze_request = FreezeRequest(
+                research_protocol_hash=request.research_protocol_hash,
+                candidate_ledger_hash=request.candidate_ledger_hash,
+                selected_model_ids=request.selected_model_ids,
+                test_feature_set_id=request.test_feature_set_id,
+                test_label_source_dataset_id=request.test_label_source_dataset_id,
+                test_start=request.test_start,
+                test_end=request.test_end,
+                selection_reason=request.selection_reason,
+                label_name=request.label_name,
+                target_type=request.target_type,
+                horizon_days=request.horizon_days,
+            )
+            record = freeze_alpha_selection(
+                freeze_request, store=datasets, model_registry=final_registry, freeze_store=freeze_store,
+            )
+            result = {
+                "summary": record.model_dump(mode="json"),
+                "reproducibility": {
+                    "freeze_id": record.freeze_id,
+                    "research_protocol_hash": record.research_protocol_hash,
+                    "candidate_ledger_hash": record.candidate_ledger_hash,
+                },
+            }
+        elif isinstance(request, EvaluateAlphaOOSJob):
+            freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
+            record = freeze_store.load(request.freeze_id)
+            evaluation = evaluate_alpha_oos(
+                record, store=datasets, model_registry=final_registry, checkpoint=bounded,
+            )
+            prediction = datasets.load_published_manifest(evaluation["prediction_dataset_id"])
+            pending.append(prediction)
+            result = {
+                "summary": evaluation["summary"],
+                "rank_ic": evaluation["rank_ic"],
+                "reproducibility": {
+                    "freeze_id": record.freeze_id,
+                    "prediction_dataset_id": prediction.dataset_id,
+                    "model_ids": record.frozen_model_ids,
+                },
+            }
         elif isinstance(request, PredictAlphaJob):
             prediction = predict_alpha(request.model_set_id, request.feature_set_id, request.start, request.end, store=datasets, registry=final_registry)
             pending.append(prediction)
