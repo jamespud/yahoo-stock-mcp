@@ -93,10 +93,6 @@ def evaluate_alpha_oos(
             raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Frozen model artifact is unreadable", {"model_id": model_id, "reason": str(error)}) from error
         if loaded.metadata.get("model_hash") != record.model_hashes.get(model_id):
             raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Frozen model hash changed after freeze", {"model_id": model_id})
-    for dataset_id in (record.test_dataset_ids.get("test_feature_set_id"), record.test_dataset_ids.get("test_label_source_dataset_id")):
-        if dataset_id is None:
-            continue
-        store.load_manifest(dataset_id)
     start = datetime.fromisoformat(record.test_window["start"])
     end = datetime.fromisoformat(record.test_window["end"])
     if record.test_dataset_hashes.get("test_feature_set_id") != store.load_manifest(record.test_dataset_ids["test_feature_set_id"]).content_hash:
@@ -120,13 +116,13 @@ def evaluate_alpha_oos(
     mean = float(np.mean(correlations)) if correlations else None
     std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
     icir = mean / std if mean is not None and std not in (None, 0.0) else None
-    target_values = np.array([row.label_value for row in label_rows if row.label_value is not None], dtype=float)
+    # Always align predictions and labels by PIT key so equal lengths cannot hide a mispairing.
+    label_lookup = {(row.feature_decision_at, row.instrument_id): row.label_value for row in label_rows}
+    target_values = np.array([
+        label_lookup.get((row["decision_at"], row["instrument_id"])) if label_lookup.get((row["decision_at"], row["instrument_id"])) is not None else np.nan
+        for row in prediction_rows
+    ], dtype=float)
     prediction_values = np.array([row["prediction_value"] for row in prediction_rows], dtype=float)
-    if len(prediction_values) != len(target_values):
-        # Predictions are aligned to feature decisions; labels may include decisions outside the Test window.
-        label_lookup = {(row.feature_decision_at, row.instrument_id): row.label_value for row in label_rows}
-        aligned = [label_lookup.get((row["decision_at"], row["instrument_id"])) for row in prediction_rows]
-        target_values = np.array([value if value is not None else np.nan for value in aligned], dtype=float)
     quantiles = quantile_returns(target_values, prediction_values, [row["decision_at"] for row in prediction_rows])
     summary = {
         "rank_ic_mean": mean,

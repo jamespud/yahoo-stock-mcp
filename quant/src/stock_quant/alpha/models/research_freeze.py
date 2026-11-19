@@ -25,7 +25,7 @@ from .registry import AlphaModelRegistry
 class FreezeRequest(StrictModel):
     research_protocol_hash: Hash
     candidate_ledger_hash: Hash
-    selected_model_ids: list[Hash] = Field(min_length=1, max_length=20)
+    selected_model_ids: list[Hash] = Field(min_length=1, max_length=1)
     test_feature_set_id: Hash
     test_label_source_dataset_id: Hash
     test_start: AwareDatetime
