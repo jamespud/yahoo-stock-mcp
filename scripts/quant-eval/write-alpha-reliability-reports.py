@@ -29,6 +29,9 @@ def main() -> None:
         "factor_spec_hashes": summary["factor_spec_hashes"],
         "tool_catalog_hash": sha256_file(ROOT / "package.json"),
         "status": summary["status"],
+        "job_ids": summary.get("job_ids", []),
+        "execution_attempts": [{item["job_id"]: item["attempts"]} for item in summary.get("job_ids", [])],
+        "research_parameters": summary.get("research_parameters", {}),
     }
     (REPORTS / "factor-regression.json").write_text(json.dumps({
         **common,

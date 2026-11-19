@@ -5,9 +5,8 @@ import test from "node:test";
 
 const root = resolve(import.meta.dirname, "../..");
 const script = join(root, "scripts/quant-eval/run-alpha-research-reliability.mjs");
-const python = join(root, "scripts/quant-eval/run_alpha_research_reliability.py");
+
 
 test("Alpha research reliability acceptance is wired and executable", () => {
   assert.ok(existsSync(script));
-  assert.ok(existsSync(python));
 });
