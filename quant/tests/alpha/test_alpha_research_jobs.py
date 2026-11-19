@@ -7,6 +7,9 @@ import pytest
 
 from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
+from stock_quant.alpha.errors import AlphaErrorCode
+from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry
+from stock_quant.alpha.models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
 from stock_quant.jobs import JobStore, execute_job
 
 
@@ -105,3 +108,109 @@ def test_validation_freeze_and_oos_execute_through_alpha_jobs(tmp_path, monkeypa
         repeated = jobs.submit_alpha({"kind": "evaluate_alpha_oos", "freeze_id": freeze_id,
                                       "idempotency_key": f"alpha_oos:{freeze_id}"})
         assert repeated["job_id"] == oos["job_id"]
+        audit = jobs.list_alpha_research_audit(freeze_id=freeze_id)
+        assert [item["event_type"] for item in audit] == [
+            "OOS_SUBMISSION", "OOS_EXECUTION_ATTEMPT", "OOS_COMPLETED", "OOS_REPEAT_REQUEST",
+        ]
+        assert {item["job_id"] for item in audit} == {oos["job_id"]}
+
+
+def test_freeze_is_not_published_when_job_cannot_begin_publication(tmp_path, monkeypatch):
+    registry_path, _, dataset, feature_set = _fixture(tmp_path)
+    with JobStore(registry_path) as jobs:
+        train = jobs.submit_alpha({
+            "kind": "train_alpha_model", "feature_set_id": feature_set.dataset_id,
+            "label_name": "stock_forward_return", "target_type": "stock_return",
+            "stock_dataset_id": dataset.dataset_id, "horizon_days": 5,
+            "evaluation_mode": "validation_only", "research_protocol_hash": "sha256:" + "0" * 64,
+            "split": {
+                "train_start": "2024-01-01T00:00:00Z", "train_end": "2024-02-15T00:00:00Z",
+                "validation_start": "2024-02-15T00:00:00Z", "validation_end": "2024-03-15T00:00:00Z",
+            },
+            "hyperparameters": {"n_estimators": 20, "min_child_samples": 2},
+            "min_rank_ic": -1, "resource_budget": {"max_seconds": 60, "max_rows": 10000},
+        })
+        assert execute_job(jobs, jobs.claim()) is True
+        model_id = jobs.get_result(train["job_id"], "dataset")["model_id"]
+        freeze_job = jobs.submit_alpha({
+            "kind": "freeze_alpha_selection", "research_protocol_hash": "sha256:" + "0" * 64,
+            "candidate_ledger_hash": "sha256:" + "1" * 64,
+            "selected_model_ids": [model_id], "test_feature_set_id": feature_set.dataset_id,
+            "test_label_source_dataset_id": dataset.dataset_id,
+            "test_start": "2024-03-15T00:00:00Z", "test_end": "2024-04-20T00:00:00Z",
+            "selection_reason": "validation winner", "label_name": "stock_forward_return",
+            "target_type": "stock_return", "horizon_days": 5,
+        })
+        monkeypatch.setattr(jobs, "begin_publish", lambda claim, result: False)
+        assert execute_job(jobs, jobs.claim()) is False
+        assert jobs.get_job(freeze_job["job_id"])["status"] == "running"
+        freeze_root = registry_path.with_suffix(".freezes")
+        assert list(freeze_root.glob("*.json")) == []
+
+
+def test_oos_rejects_freeze_without_completed_freeze_job(tmp_path, monkeypatch):
+    registry_path, alpha_store, dataset, feature_set = _fixture(tmp_path)
+    with JobStore(registry_path) as jobs:
+        train = jobs.submit_alpha({
+            "kind": "train_alpha_model", "feature_set_id": feature_set.dataset_id,
+            "label_name": "stock_forward_return", "target_type": "stock_return",
+            "stock_dataset_id": dataset.dataset_id, "horizon_days": 5,
+            "evaluation_mode": "validation_only", "research_protocol_hash": "sha256:" + "0" * 64,
+            "split": {
+                "train_start": "2024-01-01T00:00:00Z", "train_end": "2024-02-15T00:00:00Z",
+                "validation_start": "2024-02-15T00:00:00Z", "validation_end": "2024-03-15T00:00:00Z",
+            },
+            "hyperparameters": {"n_estimators": 20, "min_child_samples": 2},
+            "min_rank_ic": -1, "resource_budget": {"max_seconds": 60, "max_rows": 10000},
+        })
+        assert execute_job(jobs, jobs.claim()) is True
+        model_id = jobs.get_result(train["job_id"], "dataset")["model_id"]
+        record = freeze_alpha_selection(
+            FreezeRequest(
+                research_protocol_hash="sha256:" + "0" * 64,
+                candidate_ledger_hash="sha256:" + "1" * 64,
+                selected_model_ids=[model_id], test_feature_set_id=feature_set.dataset_id,
+                test_label_source_dataset_id=dataset.dataset_id,
+                test_start=datetime(2024, 3, 15, tzinfo=timezone.utc),
+                test_end=datetime(2024, 4, 20, tzinfo=timezone.utc),
+                selection_reason="validation winner", label_name="stock_forward_return",
+                target_type="stock_return", horizon_days=5,
+            ),
+            store=alpha_store,
+            model_registry=AlphaModelRegistry(registry_path.with_suffix(".models")),
+            freeze_store=FrozenResearchStore(registry_path.with_suffix(".freezes")),
+        )
+        observed_reads = []
+        original_read_rows = DatasetStore.read_rows
+        def spy(self, dataset_id, columns=None, start_at=None, end_at=None):
+            observed_reads.append(dataset_id)
+            return original_read_rows(self, dataset_id, columns, start_at, end_at)
+        monkeypatch.setattr(DatasetStore, "read_rows", spy)
+        oos = jobs.submit_alpha({
+            "kind": "evaluate_alpha_oos", "freeze_id": record.freeze_id,
+            "idempotency_key": f"alpha_oos:{record.freeze_id}",
+        })
+        assert execute_job(jobs, jobs.claim()) is True
+        failed = jobs.get_job(oos["job_id"])
+        assert failed["status"] == "failed"
+        assert failed["error_code"] == AlphaErrorCode.DATASET_MISMATCH.value
+        assert observed_reads == []
+
+
+def test_oos_submission_and_repeat_audit_persist_across_store_reopen(tmp_path):
+    registry_path, _, _, _ = _fixture(tmp_path)
+    freeze_id = "sha256:" + "a" * 64
+    with JobStore(registry_path) as jobs:
+        submitted = jobs.submit_alpha({
+            "kind": "evaluate_alpha_oos", "freeze_id": freeze_id,
+            "idempotency_key": f"alpha_oos:{freeze_id}",
+        })
+        repeated = jobs.submit_alpha({
+            "kind": "evaluate_alpha_oos", "freeze_id": freeze_id,
+            "idempotency_key": f"alpha_oos:{freeze_id}",
+        })
+        assert repeated["job_id"] == submitted["job_id"]
+    with JobStore(registry_path) as jobs:
+        audit = jobs.list_alpha_research_audit(freeze_id=freeze_id)
+    assert [item["event_type"] for item in audit] == ["OOS_SUBMISSION", "OOS_REPEAT_REQUEST"]
+    assert {item["job_id"] for item in audit} == {submitted["job_id"]}

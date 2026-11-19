@@ -26,7 +26,9 @@ MODEL_VERSION = "lightgbm-cpu-deterministic-v1"
 
 class TrainAlphaRequest(StrictModel):
     feature_set_id: Hash
+    label_source_dataset_id: Hash | None = None
     label_name: str = Field(min_length=1, max_length=128)
+    horizon_days: int = Field(default=5, ge=1, le=252, strict=True)
     target_type: str = Field(pattern=r"^(stock_return|option_return|option_iv_change|stock_return_with_option_features)$")
     evaluation_mode: str = Field(default="legacy_inline_test", pattern=r"^(validation_only|legacy_inline_test)$")
     research_protocol_hash: str | None = None
@@ -40,6 +42,10 @@ class TrainAlphaRequest(StrictModel):
     def split_mode(self):
         if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
             raise ValueError("validation_only training requires ModelDevelopmentSplit")
+        if self.evaluation_mode == "validation_only" and not self.research_protocol_hash:
+            raise ValueError("validation_only training requires research_protocol_hash")
+        if self.evaluation_mode == "validation_only" and not self.label_source_dataset_id:
+            raise ValueError("validation_only training requires label_source_dataset_id")
         if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
             raise ValueError("legacy_inline_test training requires TemporalSplit")
         return self
@@ -184,14 +190,25 @@ def train_validation_only(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
+    label_spec = {
+        "label_name": request.label_name,
+        "target_type": request.target_type,
+        "horizon_days": request.horizon_days,
+        "label_source_dataset_id": request.label_source_dataset_id,
+    }
     label_hash = digest({
-        "label_name": request.label_name, "target_type": request.target_type,
+        "label_spec": label_spec,
         "split": request.split.model_dump(mode="json"),
         "research_protocol_hash": request.research_protocol_hash,
     })
+    feature_manifest = store.load_manifest(request.feature_set_id)
     trained = registry.save(model_text=model_text, metadata={
         "model_type": MODEL_TYPE, "model_version": MODEL_VERSION, "feature_set_id": request.feature_set_id,
         "label_definition_hash": label_hash,
+        "label_spec": label_spec,
+        "label_source_dataset_id": request.label_source_dataset_id,
+        "factor_spec_hash": feature_manifest.source_version,
+        "calendar_version": feature_manifest.calendar_version,
         "training_window": {"start": request.split.train_start.isoformat(), "end": request.split.train_end.isoformat()},
         "validation_window": {"validation_start": request.split.validation_start.isoformat(), "validation_end": request.split.validation_end.isoformat()},
         "evaluation_mode": request.evaluation_mode,
@@ -272,10 +289,25 @@ def train_alpha(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
-    label_hash = digest({"label_name": request.label_name, "target_type": request.target_type, "split": request.split.model_dump(mode="json")})
+    label_spec = {
+        "label_name": request.label_name,
+        "target_type": request.target_type,
+        "horizon_days": request.horizon_days,
+        "label_source_dataset_id": request.label_source_dataset_id,
+    }
+    label_hash = digest({
+        "label_spec": label_spec,
+        "split": request.split.model_dump(mode="json"),
+        "research_protocol_hash": request.research_protocol_hash,
+    })
+    feature_manifest = store.load_manifest(request.feature_set_id)
     trained = registry.save(model_text=model_text, metadata={
         "model_type": MODEL_TYPE, "model_version": MODEL_VERSION, "feature_set_id": request.feature_set_id,
-        "label_definition_hash": label_hash, "training_window": request.split.model_dump(mode="json"),
+        "label_definition_hash": label_hash, "label_spec": label_spec,
+        "label_source_dataset_id": request.label_source_dataset_id,
+        "factor_spec_hash": feature_manifest.source_version,
+        "calendar_version": feature_manifest.calendar_version,
+        "training_window": request.split.model_dump(mode="json"),
         "validation_window": request.split.model_dump(mode="json"), "test_window": request.split.model_dump(mode="json"),
         "selected_iteration": int(selected_iteration), "hyperparameters": params, "feature_schema": schema,
         "feature_schema_hash": digest(schema), "environment_hash": environment_hash,

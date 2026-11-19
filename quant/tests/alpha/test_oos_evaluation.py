@@ -75,13 +75,3 @@ def test_oos_evaluation_uses_only_frozen_model(tmp_path, monkeypatch):
     assert observed[0][0] == registry.load(record.frozen_model_ids[0]).metadata["model_set_id"]
     assert observed[0][1] == record.test_dataset_ids["test_feature_set_id"]
     assert result["summary"]["evaluation_window"] == record.test_window
-
-
-def test_repeated_oos_evaluation_is_audited(tmp_path):
-    store, registry, record = _frozen(tmp_path)
-    first = evaluate_alpha_oos(record, store=store, model_registry=registry)
-    second = evaluate_alpha_oos(record, store=store, model_registry=registry)
-    audit_path = tmp_path / "freezes" / "oos-audit.jsonl"
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-    audit_path.write_text("\n".join([str(first["freeze_id"]), str(second["freeze_id"])]) + "\n")
-    assert len(audit_path.read_text().strip().splitlines()) == 2

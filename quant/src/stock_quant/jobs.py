@@ -88,7 +88,18 @@ class JobStore(Registry):
             CREATE TABLE IF NOT EXISTS job_requests (
                 request_key TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id),
                 config_hash TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS alpha_research_audit (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                freeze_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                idempotency_key TEXT,
+                attempt INTEGER,
+                detail TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()));
             CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(status, lease_until, created_at);
+            CREATE INDEX IF NOT EXISTS alpha_research_audit_freeze
+                ON alpha_research_audit(freeze_id, event_id);
         ''')
 
     def import_snapshot(self, bars: list[dict], calendar_version: str, actions: list[dict] | None = None, calendars: list[dict] | None = None) -> dict:
@@ -233,6 +244,64 @@ class JobStore(Registry):
             raise
         return self.get_job(job_id)
 
+    def _record_alpha_research_audit(
+        self,
+        *,
+        event_type: str,
+        freeze_id: str,
+        job_id: str,
+        idempotency_key: str | None = None,
+        attempt: int | None = None,
+        detail: dict | None = None,
+    ) -> None:
+        self.connection.execute(
+            "INSERT INTO alpha_research_audit(event_type,freeze_id,job_id,idempotency_key,attempt,detail) VALUES (?,?,?,?,?,?)",
+            (
+                event_type,
+                freeze_id,
+                job_id,
+                idempotency_key,
+                attempt,
+                json.dumps(detail or {}, sort_keys=True, allow_nan=False),
+            ),
+        )
+
+    def list_alpha_research_audit(self, *, freeze_id: str | None = None) -> list[dict]:
+        if freeze_id is None:
+            rows = self.connection.execute(
+                "SELECT event_id,event_type,freeze_id,job_id,idempotency_key,attempt,detail,created_at "
+                "FROM alpha_research_audit ORDER BY event_id"
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                "SELECT event_id,event_type,freeze_id,job_id,idempotency_key,attempt,detail,created_at "
+                "FROM alpha_research_audit WHERE freeze_id=? ORDER BY event_id",
+                (freeze_id,),
+            ).fetchall()
+        return [
+            {
+                "event_id": row[0], "event_type": row[1], "freeze_id": row[2], "job_id": row[3],
+                "idempotency_key": row[4], "attempt": row[5], "detail": json.loads(row[6]), "created_at": row[7],
+            }
+            for row in rows
+        ]
+
+    def completed_freeze_job(self, freeze_id: str) -> dict | None:
+        rows = self.connection.execute(
+            "SELECT id,request FROM jobs WHERE status='completed' ORDER BY finished_at,id"
+        ).fetchall()
+        for job_id, encoded_request in rows:
+            request_payload = json.loads(encoded_request)
+            if request_payload.get("kind") != "freeze_alpha_selection":
+                continue
+            try:
+                summary = self.get_result(job_id, "summary")
+            except ValueError:
+                continue
+            if isinstance(summary, dict) and summary.get("freeze_id") == freeze_id:
+                return {"job_id": job_id, "freeze_id": freeze_id}
+        return None
+
     def submit_alpha(self, raw: dict) -> dict:
         try:
             from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
@@ -241,6 +310,8 @@ class JobStore(Registry):
         request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
+        is_oos = request.kind == "evaluate_alpha_oos"
+        freeze_id = getattr(request, "freeze_id", None)
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             if request.idempotency_key:
@@ -248,6 +319,11 @@ class JobStore(Registry):
                 if previous:
                     if previous[1] != digest(payload):
                         raise ValueError("IDEMPOTENCY_CONFLICT: key already identifies another configuration")
+                    if is_oos:
+                        self._record_alpha_research_audit(
+                            event_type="OOS_REPEAT_REQUEST", freeze_id=freeze_id, job_id=previous[0],
+                            idempotency_key=request.idempotency_key, detail={"config_hash": previous[1]},
+                        )
                     self.connection.commit()
                     job = self.get_job(previous[0])
                     return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
@@ -257,6 +333,11 @@ class JobStore(Registry):
             self.connection.execute("INSERT INTO jobs(id,status,request,config_hash) VALUES (?, 'queued', ?, ?)", (job_id, json.dumps(payload, allow_nan=False), digest(payload)))
             if request.idempotency_key:
                 self.connection.execute("INSERT INTO job_requests VALUES (?, ?, ?)", (request.idempotency_key, job_id, digest(payload)))
+            if is_oos:
+                self._record_alpha_research_audit(
+                    event_type="OOS_SUBMISSION", freeze_id=freeze_id, job_id=job_id,
+                    idempotency_key=request.idempotency_key, detail={"config_hash": digest(payload)},
+                )
             self.connection.commit()
         except BaseException:
             self.connection.rollback()
@@ -267,6 +348,18 @@ class JobStore(Registry):
     def claim(self) -> dict | None:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
+            exhausted = self.connection.execute(
+                "SELECT id,request,attempts FROM jobs "
+                "WHERE status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts>=3"
+            ).fetchall()
+            for exhausted_id, encoded_request, attempt in exhausted:
+                request_payload = json.loads(encoded_request)
+                if request_payload.get("kind") == "evaluate_alpha_oos":
+                    self._record_alpha_research_audit(
+                        event_type="OOS_FAILED", freeze_id=request_payload["freeze_id"],
+                        job_id=exhausted_id, idempotency_key=request_payload.get("idempotency_key"),
+                        attempt=attempt, detail={"status": "failed", "error_code": "WORKER_LOST"},
+                    )
             self.connection.execute("UPDATE jobs SET status='failed',error_code='WORKER_LOST',finished_at=unixepoch() WHERE status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts>=3")
             active = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('running','publishing') AND lease_until>unixepoch()").fetchone()[0]
             row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash FROM jobs WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
@@ -275,8 +368,16 @@ class JobStore(Registry):
                 return None
             owner = uuid4().hex
             self.connection.execute("UPDATE jobs SET status='running',owner=?,lease_until=unixepoch()+15,attempts=attempts+1,started_at=coalesce(started_at,unixepoch()),progress=0 WHERE id=?", (owner, row[0]))
+            request_payload = json.loads(row[1])
+            if request_payload.get("kind") == "evaluate_alpha_oos":
+                attempt = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (row[0],)).fetchone()[0]
+                self._record_alpha_research_audit(
+                    event_type="OOS_EXECUTION_ATTEMPT", freeze_id=request_payload["freeze_id"],
+                    job_id=row[0], idempotency_key=request_payload.get("idempotency_key"),
+                    attempt=attempt, detail={"owner": owner, "config_hash": row[2]},
+                )
             self.connection.commit()
-            return {"id": row[0], "owner": owner, "request": json.loads(row[1]), "config_hash": row[2]}
+            return {"id": row[0], "owner": owner, "request": request_payload, "config_hash": row[2]}
         except BaseException:
             self.connection.rollback()
             raise
@@ -330,6 +431,13 @@ class JobStore(Registry):
                 "UPDATE jobs SET status='completed',progress=1.,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status='publishing' AND lease_until>unixepoch()",
                 (claim["id"], claim["owner"]),
             )
+            if changed.rowcount == 1 and claim["request"].get("kind") == "evaluate_alpha_oos":
+                row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self._record_alpha_research_audit(
+                    event_type="OOS_COMPLETED", freeze_id=claim["request"]["freeze_id"],
+                    job_id=claim["id"], idempotency_key=claim["request"].get("idempotency_key"),
+                    attempt=row[0] if row else None, detail={"status": "completed"},
+                )
         return changed.rowcount == 1
 
     def fail_publish(self, claim: dict, error: Exception, error_code: str | None = None) -> bool:
@@ -338,6 +446,14 @@ class JobStore(Registry):
                 "UPDATE jobs SET status='failed',progress=0.,error_code=?,error_message=?,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()",
                 (error_code or "EXECUTION_FAILED", str(error)[:4096], claim["id"], claim["owner"]),
             )
+            if changed.rowcount == 1 and claim["request"].get("kind") == "evaluate_alpha_oos":
+                row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self._record_alpha_research_audit(
+                    event_type="OOS_FAILED", freeze_id=claim["request"]["freeze_id"],
+                    job_id=claim["id"], idempotency_key=claim["request"].get("idempotency_key"),
+                    attempt=row[0] if row else None,
+                    detail={"status": "failed", "error_code": error_code or "EXECUTION_FAILED"},
+                )
         return changed.rowcount == 1
 
     def finish(self, claim: dict, result: dict | None = None, error: Exception | None = None, error_code: str | None = None) -> bool:
@@ -386,7 +502,20 @@ class JobStore(Registry):
 
     def cancel(self, job_id: str) -> dict:
         with self.connection:
-            self.connection.execute("UPDATE jobs SET status='cancelled',finished_at=unixepoch(),lease_until=NULL WHERE id=? AND status IN ('queued','running','publishing')", (job_id,))
+            row = self.connection.execute("SELECT request FROM jobs WHERE id=?", (job_id,)).fetchone()
+            changed = self.connection.execute(
+                "UPDATE jobs SET status='cancelled',finished_at=unixepoch(),lease_until=NULL "
+                "WHERE id=? AND status IN ('queued','running','publishing')",
+                (job_id,),
+            )
+            if changed.rowcount == 1 and row is not None:
+                request_payload = json.loads(row[0])
+                if request_payload.get("kind") == "evaluate_alpha_oos":
+                    self._record_alpha_research_audit(
+                        event_type="OOS_CANCELLED", freeze_id=request_payload["freeze_id"],
+                        job_id=job_id, idempotency_key=request_payload.get("idempotency_key"),
+                        detail={"status": "cancelled"},
+                    )
         return self.get_job(job_id)
 
     def get_result(self, job_id: str, section="summary", limit=100, cursor=None) -> dict:

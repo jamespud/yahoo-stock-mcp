@@ -124,6 +124,15 @@ class EvaluateAlphaOOSJob(AlphaJobBase):
     kind: Literal["evaluate_alpha_oos"]
     freeze_id: Hash
 
+    @model_validator(mode="after")
+    def canonical_idempotency(self):
+        expected = f"alpha_oos:{self.freeze_id}"
+        if self.idempotency_key is None:
+            self.idempotency_key = expected
+        elif self.idempotency_key != expected:
+            raise ValueError("evaluate_alpha_oos must use the canonical freeze idempotency key")
+        return self
+
 
 class PredictAlphaJob(AlphaJobBase):
     kind: Literal["predict_alpha"]

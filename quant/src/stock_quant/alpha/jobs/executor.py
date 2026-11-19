@@ -88,6 +88,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         staging_registry = AlphaModelRegistry(Path(store.path).with_suffix(f".models-staging-{claim['id']}"))
         pending = []
         staged_model = None
+        staged_freeze = None
         def bounded(progress):
             if time.monotonic() - began > request.max_seconds:
                 raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Alpha job exceeded max_seconds")
@@ -181,7 +182,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             if labels is None:
                 raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "A label source dataset is required")
             train_req = TrainAlphaRequest(
-                feature_set_id=request.feature_set_id, label_name=request.label_name,
+                feature_set_id=request.feature_set_id,
+                label_source_dataset_id=request.stock_dataset_id or request.option_dataset_id,
+                label_name=request.label_name, horizon_days=request.horizon_days,
                 target_type=request.target_type, evaluation_mode=request.evaluation_mode,
                 research_protocol_hash=request.research_protocol_hash, split=request.split,
                 hyperparameters={key: value for key, value in request.hyperparameters.items()},
@@ -209,8 +212,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 horizon_days=request.horizon_days,
             )
             record = freeze_alpha_selection(
-                freeze_request, store=datasets, model_registry=final_registry, freeze_store=freeze_store,
+                freeze_request, store=datasets, model_registry=final_registry,
             )
+            staged_freeze = (freeze_store, record)
             result = {
                 "summary": record.model_dump(mode="json"),
                 "reproducibility": {
@@ -220,6 +224,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 },
             }
         elif isinstance(request, EvaluateAlphaOOSJob):
+            completed_freeze = store.completed_freeze_job(request.freeze_id)
+            if completed_freeze is None:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "OOS evaluation requires a completed Alpha freeze job",
+                    {"freeze_id": request.freeze_id},
+                )
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             record = freeze_store.load(request.freeze_id)
             evaluation = evaluate_alpha_oos(
@@ -269,6 +280,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 datasets.register(manifest, checkpoint=publish_checkpoint)
             if staged_model is not None:
                 final_registry.commit_from(staging_registry, staged_model.model_id, checkpoint=publish_checkpoint)
+            if staged_freeze is not None:
+                freeze_store, freeze_record = staged_freeze
+                freeze_store.save(freeze_record, checkpoint=publish_checkpoint)
             return store.complete_publish(claim)
         except Exception as error:
             return store.fail_publish(claim, error, "EXECUTION_FAILED")

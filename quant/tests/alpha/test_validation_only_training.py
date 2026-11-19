@@ -50,8 +50,9 @@ def _fixture(tmp_path, *, noise=False):
         embargo_days=0,
     )
     request = TrainAlphaRequest(
-        feature_set_id=feature_set.dataset_id, label_name="stock_forward_return", target_type="stock_return",
-        evaluation_mode="validation_only", split=split,
+        feature_set_id=feature_set.dataset_id, label_source_dataset_id=parent.dataset_id,
+        label_name="stock_forward_return", target_type="stock_return",
+        evaluation_mode="validation_only", research_protocol_hash="sha256:" + "0" * 64, split=split,
         hyperparameters={"learning_rate": 0.08, "num_leaves": 15, "min_child_samples": 5, "n_estimators": 80},
         random_seed=7, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=5000), min_rank_ic=0.03,
     )
@@ -117,6 +118,14 @@ def test_validation_only_model_has_frozen_feature_schema(tmp_path):
     manifest = train_alpha(request, store=store, registry=registry, label_rows=labels)
     loaded = registry.load(manifest.model_id)
     assert loaded.metadata["feature_schema"] == manifest.feature_schema
+    assert loaded.metadata["label_spec"] == {
+        "label_name": "stock_forward_return",
+        "target_type": "stock_return",
+        "horizon_days": 5,
+        "label_source_dataset_id": request.label_source_dataset_id,
+    }
+    assert loaded.metadata["factor_spec_hash"] == "sha256:" + "b" * 64
+    assert loaded.metadata["calendar_version"] == "fixture"
     assert manifest.feature_schema == ["f1", "f2", "f3", "f4"]
 
 

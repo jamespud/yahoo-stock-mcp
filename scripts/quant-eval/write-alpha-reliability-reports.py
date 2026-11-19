@@ -27,6 +27,7 @@ def main() -> None:
         "research_protocol_hash": protocol_hash,
         "dataset_hashes": [dataset_hash],
         "factor_spec_hashes": summary["factor_spec_hashes"],
+        "model_hashes": summary.get("model_hashes", {}),
         "tool_catalog_hash": sha256_file(ROOT / "package.json"),
         "status": summary["status"],
         "job_ids": summary.get("job_ids", []),
@@ -36,7 +37,10 @@ def main() -> None:
     (REPORTS / "factor-regression.json").write_text(json.dumps({
         **common,
         "feature_set_ids": summary["feature_set_ids"],
-        "verification_commands": ["ALPHA_RESEARCH_REGISTRY_ROOT=/home/spud/service/yahoo-stock-mcp/quant-runtime/registry.alpha npm run test:quant-alpha-research"],
+        "verification_commands": [
+            "ALPHA_RESEARCH_REGISTRY_PATH=/home/spud/service/yahoo-stock-mcp/quant-runtime/registry.db "
+            "STOCK_MCP_DB_PATH=/home/spud/service/yahoo-stock-mcp/stocks.db npm run test:quant-alpha-research"
+        ],
     }, indent=2) + "\n")
     (REPORTS / "validation-only-results.json").write_text(json.dumps({
         **common,
@@ -44,7 +48,7 @@ def main() -> None:
     }, indent=2) + "\n")
     (REPORTS / "model-selection-ledger.json").write_text(json.dumps({
         **common,
-        "candidate_ledger_hash": summary["diagnostics"],
+        "candidate_ledger_hash": summary["candidate_ledger_hash"],
         "selected_model_id": summary["selected_model_id"],
     }, indent=2) + "\n")
     freeze_id = summary["freeze_id"]

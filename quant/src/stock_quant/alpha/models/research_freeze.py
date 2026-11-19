@@ -10,7 +10,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -88,7 +88,9 @@ class FrozenResearchStore:
             raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze record is immutable", {"freeze_id": freeze_id})
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Unknown freeze record", {"freeze_id": freeze_id})
 
-    def save(self, record: FrozenResearchRecord) -> FrozenResearchRecord:
+    def save(self, record: FrozenResearchRecord, *, checkpoint: Callable[[], None] | None = None) -> FrozenResearchRecord:
+        if checkpoint:
+            checkpoint()
         path = self.path(record.freeze_id)
         if path.exists():
             existing = self.load(record.freeze_id)
@@ -101,6 +103,8 @@ class FrozenResearchStore:
             stage.write_text(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False))
             with stage.open("rb") as stream:
                 os.fsync(stream.fileno())
+            if checkpoint:
+                checkpoint()
             os.replace(stage, path)
         finally:
             if stage.exists():
@@ -113,7 +117,33 @@ def freeze_identity(record: FrozenResearchRecord) -> str:
     return digest(body)
 
 
-def _model_hash(registry: AlphaModelRegistry, model_id: str) -> str:
+def _parse_window_time(value, field: str, model_id: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as error:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Selected model has an invalid validation window",
+            {"model_id": model_id, "field": field},
+        ) from error
+    if parsed.tzinfo is None:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Selected model has a timezone-naive validation window",
+            {"model_id": model_id, "field": field},
+        )
+    return parsed
+
+
+def _model_hash(
+    registry: AlphaModelRegistry,
+    model_id: str,
+    *,
+    request: FreezeRequest,
+    store: DatasetStore,
+    test_feature,
+    test_label,
+) -> str:
     try:
         loaded = registry.load(model_id)
     except AlphaError as error:
@@ -126,6 +156,77 @@ def _model_hash(registry: AlphaModelRegistry, model_id: str) -> str:
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only model contains OOS metrics", {"model_id": model_id})
     if not isinstance(metadata.get("feature_schema"), list) or not metadata["feature_schema"]:
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model has no frozen feature schema", {"model_id": model_id})
+
+    expected_label_definition = {
+        "label_name": request.label_name,
+        "target_type": request.target_type,
+        "horizon_days": request.horizon_days,
+    }
+    metadata_label_spec = metadata.get("label_spec") if isinstance(metadata.get("label_spec"), dict) else {}
+    actual_label_definition = {key: metadata_label_spec.get(key) for key in expected_label_definition}
+    training_label_source_id = metadata.get("label_source_dataset_id")
+
+    mismatches = []
+    def mismatch(field, expected, actual):
+        if expected != actual:
+            mismatches.append({"field": field, "expected": expected, "actual": actual})
+
+    mismatch("research_protocol_hash", request.research_protocol_hash, metadata.get("research_protocol_hash"))
+    mismatch("label_spec", expected_label_definition, actual_label_definition)
+    mismatch("label_spec.label_source_dataset_id", training_label_source_id, metadata_label_spec.get("label_source_dataset_id"))
+    mismatch("factor_spec_hash", test_feature.source_version, metadata.get("factor_spec_hash"))
+    mismatch("calendar_version", test_feature.calendar_version, metadata.get("calendar_version"))
+
+    if isinstance(training_label_source_id, str):
+        try:
+            training_labels = store.load_manifest(training_label_source_id)
+        except Exception:
+            training_labels = None
+        if training_labels is None:
+            mismatches.append({
+                "field": "label_source_dataset_id", "expected": "loadable dataset", "actual": training_label_source_id,
+            })
+        else:
+            for field in ("dataset_kind", "source", "source_version", "calendar_version"):
+                mismatch(f"label_source.{field}", getattr(test_label, field), getattr(training_labels, field))
+    else:
+        mismatches.append({
+            "field": "label_source_dataset_id", "expected": "sha256:...", "actual": training_label_source_id,
+        })
+
+    training_feature_set_id = metadata.get("feature_set_id")
+    if isinstance(training_feature_set_id, str):
+        try:
+            training_feature = store.load_manifest(training_feature_set_id)
+        except Exception:
+            training_feature = None
+        if training_feature is None:
+            mismatches.append({
+                "field": "feature_set_id", "expected": "loadable dataset", "actual": training_feature_set_id,
+            })
+        else:
+            mismatch("training_factor_spec_hash", training_feature.source_version, metadata.get("factor_spec_hash"))
+    else:
+        mismatches.append({"field": "feature_set_id", "expected": "sha256:...", "actual": training_feature_set_id})
+
+    validation_window = metadata.get("validation_window")
+    validation_end = validation_window.get("validation_end") if isinstance(validation_window, dict) else None
+    parsed_validation_end = _parse_window_time(validation_end, "validation_end", model_id)
+    if request.test_start < parsed_validation_end:
+        mismatches.append({
+            "field": "test_start",
+            "expected": f">={parsed_validation_end.isoformat()}",
+            "actual": request.test_start.isoformat(),
+        })
+    mismatch("test_feature_kind", "feature_panel", test_feature.dataset_kind)
+    mismatch("test_label_kind", "stock_bars", test_label.dataset_kind)
+
+    if mismatches:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Freeze request does not match the validation-selected model",
+            {"model_id": model_id, "mismatches": mismatches},
+        )
     return metadata["model_hash"]
 
 
@@ -134,11 +235,18 @@ def freeze_alpha_selection(
     *,
     store: DatasetStore,
     model_registry: AlphaModelRegistry,
-    freeze_store: FrozenResearchStore,
+    freeze_store: FrozenResearchStore | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> FrozenResearchRecord:
-    model_hashes = {model_id: _model_hash(model_registry, model_id) for model_id in request.selected_model_ids}
     test_feature = store.load_manifest(request.test_feature_set_id)
     test_label = store.load_manifest(request.test_label_source_dataset_id)
+    model_hashes = {
+        model_id: _model_hash(
+            model_registry, model_id, request=request, store=store,
+            test_feature=test_feature, test_label=test_label,
+        )
+        for model_id in request.selected_model_ids
+    }
     test_dataset_hashes = {
         "test_feature_set_id": test_feature.content_hash,
         "test_label_source_dataset_id": test_label.content_hash,
@@ -152,7 +260,11 @@ def freeze_alpha_selection(
         "test_dataset_hashes": test_dataset_hashes,
         "test_dataset_ids": {"test_feature_set_id": request.test_feature_set_id, "test_label_source_dataset_id": request.test_label_source_dataset_id},
         "test_window": {"start": request.test_start.isoformat(), "end": request.test_end.isoformat()},
-        "label_spec": {"label_name": request.label_name, "target_type": request.target_type, "horizon_days": request.horizon_days},
+        "label_spec": {
+            "label_name": request.label_name, "target_type": request.target_type,
+            "horizon_days": request.horizon_days,
+            "label_source_dataset_id": request.test_label_source_dataset_id,
+        },
         "selection_reason": request.selection_reason,
     }
     freeze_id = digest(body)
@@ -165,8 +277,12 @@ def freeze_alpha_selection(
         test_dataset_hashes=test_dataset_hashes,
         test_dataset_ids={"test_feature_set_id": request.test_feature_set_id, "test_label_source_dataset_id": request.test_label_source_dataset_id},
         test_window={"start": request.test_start.isoformat(), "end": request.test_end.isoformat()},
-        label_spec={"label_name": request.label_name, "target_type": request.target_type, "horizon_days": request.horizon_days},
+        label_spec={
+            "label_name": request.label_name, "target_type": request.target_type,
+            "horizon_days": request.horizon_days,
+            "label_source_dataset_id": request.test_label_source_dataset_id,
+        },
         selection_reason=request.selection_reason,
         frozen_at=datetime.now(timezone.utc),
     )
-    return freeze_store.save(record)
+    return freeze_store.save(record, checkpoint=checkpoint) if freeze_store is not None else record

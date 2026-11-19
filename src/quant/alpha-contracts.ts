@@ -81,7 +81,7 @@ export const computeFactorsInput = z.object({
 export const freezeAlphaSelectionInput = z.object({
   research_protocol_hash: alphaHash,
   candidate_ledger_hash: alphaHash,
-  selected_model_ids: z.array(alphaHash).min(1).max(20),
+  selected_model_ids: z.array(alphaHash).min(1).max(1),
   test_feature_set_id: alphaHash,
   test_label_source_dataset_id: alphaHash,
   test_start: z.string().datetime({ offset: true }),

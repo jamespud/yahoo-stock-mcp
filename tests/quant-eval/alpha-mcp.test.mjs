@@ -9,6 +9,7 @@ import {
   captureOptionsSnapshotInput,
   computeFactorsInput,
   computeOptionFactorsInput,
+  freezeAlphaSelectionInput,
   predictAlphaInput,
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
@@ -40,6 +41,15 @@ test("Zod contracts are strict and cover the nine public inputs", () => {
   assert.ok(computeFactorsInput.shape.factor_spec);
   assert.ok(computeOptionFactorsInput.shape.pricing_config);
   assert.ok(trainAlphaModelInput.shape.windows);
+  assert.throws(() => freezeAlphaSelectionInput.parse({
+    research_protocol_hash: "sha256:" + "0".repeat(64),
+    candidate_ledger_hash: "sha256:" + "1".repeat(64),
+    selected_model_ids: ["sha256:" + "2".repeat(64), "sha256:" + "3".repeat(64)],
+    test_feature_set_id: "sha256:" + "4".repeat(64),
+    test_label_source_dataset_id: "sha256:" + "5".repeat(64),
+    test_start: "2024-01-15T00:00:00Z", test_end: "2026-11-18T00:00:00Z",
+    selection_reason: "validation winner", label_name: "stock_forward_return",
+  }));
   assert.ok(predictAlphaInput.shape.period);
   assert.ok(backtestAlphaPortfolioInput.shape.portfolio_config);
   assert.ok(backtestOptionsInput.shape.execution_config);
