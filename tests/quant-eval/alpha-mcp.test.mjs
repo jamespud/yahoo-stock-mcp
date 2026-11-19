@@ -13,6 +13,7 @@ import {
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
+  developmentWindows,
 } from "../../dist/quant/alpha-contracts.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -42,4 +43,24 @@ test("Zod contracts are strict and cover the nine public inputs", () => {
   assert.ok(predictAlphaInput.shape.period);
   assert.ok(backtestAlphaPortfolioInput.shape.portfolio_config);
   assert.ok(backtestOptionsInput.shape.execution_config);
+});
+
+test("Validation-only training contract is explicit and rejects Test windows", () => {
+  const windows = {
+    train_start: "2022-01-14T00:00:00Z", train_end: "2022-01-15T00:00:00Z",
+    validation_start: "2022-01-15T00:00:00Z", validation_end: "2022-01-20T00:00:00Z",
+  };
+  const input = {
+    evaluation_mode: "validation_only",
+    research_protocol_hash: "sha256:" + "0".repeat(64),
+    feature_set_id: "sha256:" + "1".repeat(64),
+    label_spec: {label_name: "stock_forward_return", target_type: "stock_return"},
+    windows,
+    resource_budget: {max_seconds: 60},
+  };
+  const parsed = trainAlphaModelInput.parse(input);
+  assert.equal(parsed.evaluation_mode, "validation_only");
+  assert.equal(parsed.research_protocol_hash, "sha256:" + "0".repeat(64));
+  assert.ok(developmentWindows.safeParse(parsed.windows).success);
+  assert.throws(() => developmentWindows.parse({...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"}));
 });

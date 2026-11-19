@@ -26,6 +26,13 @@ export const optionExecutionConfig = z.object({
   initial_cash: z.number().positive().optional(),
   max_premium_fraction: z.number().positive().max(1).optional(),
 }).strict();
+export const developmentWindows = z.object({
+  train_start: z.string().datetime({ offset: true }),
+  train_end: z.string().datetime({ offset: true }),
+  validation_start: z.string().datetime({ offset: true }),
+  validation_end: z.string().datetime({ offset: true }),
+  embargo_days: z.number().int().min(0).max(252).optional(),
+}).strict();
 export const temporalWindows = z.object({
   train_start: z.string().datetime({ offset: true }),
   train_end: z.string().datetime({ offset: true }),
@@ -79,9 +86,11 @@ export const computeOptionFactorsInput = z.object({
 }).strict();
 
 export const trainAlphaModelInput = z.object({
+  evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
+  research_protocol_hash: alphaHash.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
-  windows: temporalWindows,
+  windows: z.union([temporalWindows, developmentWindows]),
   hyperparameters: z.record(z.number()).optional(),
   random_seed: z.number().int().optional(),
   resource_budget: z.object({

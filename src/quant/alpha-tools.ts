@@ -11,6 +11,7 @@ import {
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
 } from "./alpha-contracts.js";
+import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
 import { captureYahooOptionRows } from "./option-capture.js";
 
@@ -76,8 +77,9 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     trainAlphaModelInput.shape,
     async (args) => {
       const { label_spec, windows, ...rest } = args;
+      const split = developmentWindows.safeParse(windows).success ? windows : temporalWindows.parse(windows);
       return submit({
-        kind: "train_alpha_model", ...rest, ...label_spec, split: windows,
+        kind: "train_alpha_model", ...rest, ...label_spec, split,
       });
     },
   );

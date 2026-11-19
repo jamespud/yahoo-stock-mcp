@@ -18,6 +18,7 @@ from uuid import uuid4
 from ...compiler import digest
 from ..contracts import DatasetManifest, DatasetPartition, Hash, StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
+from datetime import datetime, timezone
 from .manifests import canonical_json, content_hash, dataset_identity
 from .partitions import FORMAT, StockBarRow, normalise_stock_rows, read_partition, stock_rows_by_instrument, write_feature_partition, write_option_partition, write_prediction_partition, write_stock_partition
 from .quality import DataQualityReport
@@ -40,6 +41,17 @@ CREATE TABLE IF NOT EXISTS alpha_dataset_parents (
   parent_dataset_id TEXT NOT NULL REFERENCES alpha_datasets(dataset_id),
   PRIMARY KEY(dataset_id, parent_dataset_id));
 '''
+
+
+def _parse_time(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _within(row, start_at, end_at):
+    decision = _parse_time(row.get("decision_at") or row.get("end_at") or row.get("available_at"))
+    return (start_at is None or decision >= start_at) and (end_at is None or decision < end_at)
 
 
 class DatasetStore:
@@ -375,7 +387,7 @@ class DatasetStore:
             coverage=1.0 if not issues else 0.0, issues=issues,
         )
 
-    def read_rows(self, dataset_id: str, columns: Sequence[str] | None = None) -> list[dict]:
+    def read_rows(self, dataset_id: str, columns: Sequence[str] | None = None, start_at=None, end_at=None) -> list[dict]:
         report = self.validate_dataset(dataset_id)
         if not report.valid:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Dataset integrity validation failed", {"issues": report.issues})
@@ -383,8 +395,17 @@ class DatasetStore:
         root = self.datasets / dataset_id.removeprefix("sha256:")
         wanted = list(columns) if columns is not None else None
         rows: list[dict] = []
+        bounded = False
         for partition in manifest.partition_manifest:
-            rows.extend(read_partition(root / partition.logical_path, wanted))
+            partition_rows = read_partition(root / partition.logical_path, wanted)
+            if start_at is not None or end_at is not None:
+                bounded = True
+                start_at = _parse_time(start_at) if start_at is not None else None
+                end_at = _parse_time(end_at) if end_at is not None else None
+                partition_rows = [row for row in partition_rows if _within(row, start_at, end_at)]
+            rows.extend(partition_rows)
+        if bounded and not rows:
+            return []
         return rows
 
     def _safe_root_path(self, value: str) -> Path:

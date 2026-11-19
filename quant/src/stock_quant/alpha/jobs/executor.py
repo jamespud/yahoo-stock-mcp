@@ -67,6 +67,13 @@ def _manifest_payload(manifest: DatasetManifest) -> dict:
             "data_quality": manifest.data_quality, "dataset": manifest.model_dump(mode="json")}
 
 
+def train_development_labels(label_rows, split):
+    """Filter externally supplied label rows to the development split cutoff."""
+    from ..models.temporal_split import split_matured_development
+    matured = split_matured_development(label_rows, split)
+    return matured["train"] + matured["validation"]
+
+
 def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
     began = time.monotonic()
     try:
