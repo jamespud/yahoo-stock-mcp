@@ -1,5 +1,5 @@
 {
-  "commit_sha": "e7da60f1050063701c4268618c5e652ae3f3c571",
+  "commit_sha": "d3e8cd57c8ea8cace1100b18f863e50f8d634189",
   "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
   "dataset_hashes": [
     "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
@@ -12,122 +12,130 @@
     "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
     "sha256:84d6d0b4a3eb16061f18d5af7561d7c2a0ad85ff86825c41ffc830bf3ca61319"
   ],
+  "model_hashes": {
+    "sha256:204ecc8a22f688c131eb275335738841f6df6831508768d5d21a7c153c33475e": "sha256:03ee1b40959fecb9b22fa642f2c3e8fd0d291327004de89756457ee456a08824",
+    "sha256:d5f2e601bdb1a293d6c5d0fd47935fd7d4303fb644ef874ea6725d3afcdac9bd": "sha256:7f9be5f954dbc2e076ed002d088b6839b6d7bc95fba922ba1474276a67f6286a",
+    "sha256:93ce5f0e3d05ce45bfbd734b4c3d7a1f378938f55457a75701e94ec119822ae0": "sha256:a6cf5b49b228d27a2804ab11981f9efc7e21103ebf1bd3be99150e63750bfdcb",
+    "sha256:ddba0cdcd0c5ecd7e2afde2d82d37e9347b8be91ba5e8980eb7cf328d001d261": "sha256:4003ab3d43e42cf75f3f94a27b0740419b77b5e27f5c07891e27aee788bce09e",
+    "sha256:12eca34fb0dddb8b603da01187c4fe8f6495eb3fd275edec21e1b1d2c775e31a": "sha256:a3e0201e56978b2c20a237a95bf435f4adbaaa5068eb1bab122efa5c8e6ef1dc",
+    "sha256:97f605c08828a014e1b259b9caacd9bf1dcd9ab038b2dc450869492dc4c63a11": "sha256:459bd9535fba24b2e3a63add245216382bc02371995f364582a5e5026a889b58"
+  },
   "tool_catalog_hash": "sha256:92778c98eee2476ab1b32d081461d14e081a315daf6171edf03f9fe69000af50",
   "status": "PASS",
   "job_ids": [
     {
       "kind": "compute_factors",
-      "job_id": "alpha_d2820ab746524b198f86dcd9acbc3a44",
+      "job_id": "alpha_9629b91cd2c841e3a557ff634b797e99",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b",
+      "job_id": "alpha_a793e16aa21048b1a2b5a79582214cb2",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_fd7c3f94193a4053a4b3a74b0cb41a76",
+      "job_id": "alpha_5dc64871bf7a4f8bad07a9ea65bb3771",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_ee3f1178ea734bb889141f47bd88a316",
+      "job_id": "alpha_d91165f90e3f439c980bc6ce4eaa0145",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_1440ff9248c94c079882e9be6c55a06c",
+      "job_id": "alpha_e63bc78387af41d18b25cca7b20d8c84",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_154dc9b859a747bb90593cdfee94d267",
+      "job_id": "alpha_883ca2e49f1641539f775379bb1191c1",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_85d8145eea334da79ac4895328928f20",
+      "job_id": "alpha_cfcbb21505784807a36adfcd95499558",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_559ecd037c78425b801b36561e5179ae",
+      "job_id": "alpha_0a52364db12c4454ae68a11546c44589",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_6b0fc15d9a914966898e2df1e605be12",
+      "job_id": "alpha_dde47738c3ee4baeb7f59edd95df8b75",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_90aa83de78324950b84222cbaedc2ffc",
+      "job_id": "alpha_47e67fc0505744969f2e425ec37fe061",
       "attempts": 1
     },
     {
       "kind": "compute_factors",
-      "job_id": "alpha_528ab170104641f6873325ef35120f0b",
+      "job_id": "alpha_69a9fa841fbb4517a4f2ca018ef72ccd",
       "attempts": 1
     },
     {
       "kind": "train_alpha_model",
-      "job_id": "alpha_91269d6fbf65455db5cf67d2ff3e0313",
+      "job_id": "alpha_8b00fb46cf29483b8da2cc3833c04cea",
       "attempts": 1
     },
     {
       "kind": "freeze_alpha_selection",
-      "job_id": "alpha_a5002551b90f4fb2b66f323ed1543774",
+      "job_id": "alpha_ca16e96b8bb44195b38808872726a5bf",
       "attempts": 1
     },
     {
       "kind": "evaluate_alpha_oos",
-      "job_id": "alpha_6b695fc3843c4364b162ec8f92ed096e",
+      "job_id": "alpha_1d86354769084cddaee3b85270d604f7",
       "attempts": 1
     }
   ],
   "execution_attempts": [
     {
-      "alpha_d2820ab746524b198f86dcd9acbc3a44": 1
+      "alpha_9629b91cd2c841e3a557ff634b797e99": 1
     },
     {
-      "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b": 1
+      "alpha_a793e16aa21048b1a2b5a79582214cb2": 1
     },
     {
-      "alpha_fd7c3f94193a4053a4b3a74b0cb41a76": 1
+      "alpha_5dc64871bf7a4f8bad07a9ea65bb3771": 1
     },
     {
-      "alpha_ee3f1178ea734bb889141f47bd88a316": 1
+      "alpha_d91165f90e3f439c980bc6ce4eaa0145": 1
     },
     {
-      "alpha_1440ff9248c94c079882e9be6c55a06c": 1
+      "alpha_e63bc78387af41d18b25cca7b20d8c84": 1
     },
     {
-      "alpha_154dc9b859a747bb90593cdfee94d267": 1
+      "alpha_883ca2e49f1641539f775379bb1191c1": 1
     },
     {
-      "alpha_85d8145eea334da79ac4895328928f20": 1
+      "alpha_cfcbb21505784807a36adfcd95499558": 1
     },
     {
-      "alpha_559ecd037c78425b801b36561e5179ae": 1
+      "alpha_0a52364db12c4454ae68a11546c44589": 1
     },
     {
-      "alpha_6b0fc15d9a914966898e2df1e605be12": 1
+      "alpha_dde47738c3ee4baeb7f59edd95df8b75": 1
     },
     {
-      "alpha_90aa83de78324950b84222cbaedc2ffc": 1
+      "alpha_47e67fc0505744969f2e425ec37fe061": 1
     },
     {
-      "alpha_528ab170104641f6873325ef35120f0b": 1
+      "alpha_69a9fa841fbb4517a4f2ca018ef72ccd": 1
     },
     {
-      "alpha_91269d6fbf65455db5cf67d2ff3e0313": 1
+      "alpha_8b00fb46cf29483b8da2cc3833c04cea": 1
     },
     {
-      "alpha_a5002551b90f4fb2b66f323ed1543774": 1
+      "alpha_ca16e96b8bb44195b38808872726a5bf": 1
     },
     {
-      "alpha_6b695fc3843c4364b162ec8f92ed096e": 1
+      "alpha_1d86354769084cddaee3b85270d604f7": 1
     }
   ],
   "research_parameters": {
@@ -158,6 +166,6 @@
     "sha256:bd3b95a22c34ed7d8e234d7262da2a1b4872bd6cbbbbc7134c301b8af83923c4"
   ],
   "verification_commands": [
-    "ALPHA_RESEARCH_REGISTRY_ROOT=/home/spud/service/yahoo-stock-mcp/quant-runtime/registry.alpha npm run test:quant-alpha-research"
+    "ALPHA_RESEARCH_REGISTRY_PATH=/home/spud/service/yahoo-stock-mcp/quant-runtime/registry.db STOCK_MCP_DB_PATH=/home/spud/service/yahoo-stock-mcp/stocks.db npm run test:quant-alpha-research"
   ]
 }
