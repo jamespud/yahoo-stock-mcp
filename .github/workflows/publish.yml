@@ -52,16 +52,13 @@ jobs:
 
       - run: npm ci
 
-      - name: Validate TypeScript and tests
+      - name: Build and validate release contents
         run: |
           npm run typecheck
-          npm test
-
-      - name: Build TypeScript
-        run: npm run build
-
-      - name: Verify package contents
-        run: npm pack --dry-run --ignore-scripts
+          npm run build
+          npm run test:cli
+          npm run test:mcp
+          npm run verify:pack
 
       # No NODE_AUTH_TOKEN: authentication comes from the OIDC exchange with npm.
       - name: Publish
