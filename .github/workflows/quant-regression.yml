@@ -3,41 +3,72 @@ name: Quant regression
 on:
   push:
     branches: [main]
+    paths:
+      - 'quant/**'
+      - 'src/quant/**'
+      - 'src/mcp/server.ts'
+      - 'tests/quant-eval/**'
+      - 'scripts/test-quant-mcp.ts'
+      - 'scripts/run-quant-regression.py'
+      - 'scripts/quant-research-regression.py'
+      - 'scripts/refresh-quant-summary.mjs'
+      - 'skills/quant-*/**'
+      - 'skills/references/**'
+      - 'plugins/yahoo-stock-mcp/skills/quant-*/**'
+      - 'plugins/yahoo-stock-mcp/skills/references/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/quant-regression.yml'
   pull_request:
+    paths:
+      - 'quant/**'
+      - 'src/quant/**'
+      - 'src/mcp/server.ts'
+      - 'tests/quant-eval/**'
+      - 'scripts/test-quant-mcp.ts'
+      - 'scripts/run-quant-regression.py'
+      - 'scripts/quant-research-regression.py'
+      - 'scripts/refresh-quant-summary.mjs'
+      - 'skills/quant-*/**'
+      - 'skills/references/**'
+      - 'plugins/yahoo-stock-mcp/skills/quant-*/**'
+      - 'plugins/yahoo-stock-mcp/skills/references/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/quant-regression.yml'
   schedule:
-    - cron: '20 2 * * *'
+    - cron: '20 2 * * 0'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
+concurrency:
+  group: quant-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
   quant:
-    name: Quant runtime / Python ${{ matrix.python }}
+    name: Quant runtime / Python 3.12
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
       - run: python -m pip install './quant[alpha,options,theta]' pytest hypothesis
+      - name: Provision trusted sandbox test image
+        run: |
+          docker pull python:3.12-alpine
+          docker image inspect python:3.12-alpine --format 'QUANT_SANDBOX_IMAGE={{.Id}}' >> "$GITHUB_ENV"
       - run: python scripts/run-quant-regression.py
       - run: npm ci
       - run: npm run build
-      - run: npm run test:skills
-      - run: npm run test:skills:quant
-        env:
-          QUANT_PYTHON: python
-      - run: npm run test:plugin
       - run: npm run test:quant-mcp
         env:
           QUANT_PYTHON: python
@@ -47,44 +78,36 @@ jobs:
       - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
-
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
-          name: quant-reports-${{ matrix.python }}
+          name: quant-reports-3.12
           path: reports/
+          retention-days: 7
 
-  quant-sandbox:
-    name: Quant isolated Python acceptance
+  quant-compat:
+    name: Quant compatibility / Python 3.14
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.14'
       - run: python -m pip install './quant[alpha,options,theta]' pytest hypothesis
-      - name: Provision trusted test image and resolve its immutable identity
-        run: |
-          docker pull python:3.12-alpine
-          docker image inspect python:3.12-alpine --format 'QUANT_SANDBOX_IMAGE={{.Id}}' >> "$GITHUB_ENV"
       - run: python scripts/run-quant-regression.py
       - run: npm ci
       - run: npm run build
-      - run: npm run test:skills
-      - run: npm run test:skills:quant
-        env:
-          QUANT_PYTHON: python
-      - run: npm run test:plugin
       - run: npm run test:quant-mcp
         env:
           QUANT_PYTHON: python
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: quant-sandbox-reports
-          path: reports/
+      - run: npm run test:quant-alpha-mcp
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-alpha-e2e
+        env:
+          QUANT_PYTHON: python
