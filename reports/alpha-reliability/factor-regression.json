@@ -1,0 +1,28 @@
+{
+  "commit_sha": "f032c787379b06aaaab7906e2c57ac06dcca0d68",
+  "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
+  "dataset_hashes": [
+    "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
+  ],
+  "factor_spec_hashes": [
+    "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
+    "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
+    "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
+    "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
+    "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
+    "sha256:84d6d0b4a3eb16061f18d5af7561d7c2a0ad85ff86825c41ffc830bf3ca61319"
+  ],
+  "tool_catalog_hash": "sha256:92778c98eee2476ab1b32d081461d14e081a315daf6171edf03f9fe69000af50",
+  "status": "PASS",
+  "feature_set_ids": [
+    "sha256:ac04a9ccfc43a120d974b07ef45d4edcb3ba890393d19e33c0e4b5c39dda44f8",
+    "sha256:cea35742c5ab13fd7e034dbc4f2c3c211cdf344e7c24319e6603c4ecded3501b",
+    "sha256:b1e1bbf1e115bf7b554d6cc8bbf006dd541a0160d6cdf51e8bc8402acf9790ef",
+    "sha256:368b09e6d7230d922ce8a83cb88382e9d63d6e4c74914a15b0e5aca5306e80fc",
+    "sha256:722ccc34004b86262e7bc18db3f6823c18592796ce829565a46cb0260a1d08fc",
+    "sha256:bd3b95a22c34ed7d8e234d7262da2a1b4872bd6cbbbbc7134c301b8af83923c4"
+  ],
+  "verification_commands": [
+    "ALPHA_RESEARCH_REGISTRY_ROOT=/home/spud/service/yahoo-stock-mcp/quant-runtime/registry.alpha npm run test:quant-alpha-research"
+  ]
+}
