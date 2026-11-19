@@ -114,6 +114,7 @@ class FreezeAlphaSelectionJob(AlphaJobBase):
     label_name: str = Field(min_length=1, max_length=128)
     target_type: str = Field(default="stock_return", pattern=r"^(stock_return|option_return|option_iv_change|stock_return_with_option_features)$")
     horizon_days: int = Field(default=5, ge=1, le=252, strict=True)
+    label_version: str | None = Field(default=None, pattern=r"^(observed-record-v1|session-aligned-v2)$")
 
     @model_validator(mode="after")
     def ordered(self):

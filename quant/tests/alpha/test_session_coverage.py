@@ -126,3 +126,4 @@ def test_duplicate_and_extra_session_are_reported():
     assert report["extra_sessions"] == ["2024-01-06"]
     assert report["duplicate_session_count"] == 1
     assert report["extra_session_count"] == 1
+    assert report["session_status"] == "SESSION_ANOMALIES"

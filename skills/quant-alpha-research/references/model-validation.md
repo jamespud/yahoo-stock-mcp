@@ -7,7 +7,9 @@
 - Fit preprocessing on train only. Select iterations/hyperparameters on validation. Read test once
   after freezing the model; repeated test-driven selection is leakage.
 - Persist feature names/order/types, model and environment hashes, seed, hyperparameters, selected
-  iteration, fold/model-set identity and artifact integrity.
+  iteration, fold/model-set identity, artifact integrity and the exact label version.
+- Freeze the model's label version and replay that same version in OOS. A `session-aligned-v2` OOS
+  without verifiable calendar evidence fails closed; a legacy v1 model remains v1.
 - Report Rank IC per decision time, mean, standard deviation, ICIR, prediction coverage, valid-label
   coverage, matched coverage, valid/invalid/expected IC date counts, quantile returns, top-bottom
   spread, feature gain/split importance, sample counts and metric definitions.

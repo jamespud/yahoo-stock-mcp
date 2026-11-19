@@ -5,6 +5,9 @@ from collections import Counter
 from datetime import date, datetime
 from typing import Iterable
 
+from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
+from ..errors import AlphaError, AlphaErrorCode
+
 
 def _as_date(value) -> date:
     if isinstance(value, datetime):
@@ -80,7 +83,14 @@ def audit_session_coverage(
         missing = sorted(expected_set - observed_set)
         matched = sorted(expected_set & observed_set)
         extra = sorted(observed_set - calendar_set)
-        status = "UNVERIFIED_CALENDAR" if not calendar_sessions else ("COMPLETE" if not missing else "MISSING_SESSIONS")
+        if not calendar_sessions:
+            status = "UNVERIFIED_CALENDAR"
+        elif missing:
+            status = "MISSING_SESSIONS"
+        elif extra or duplicates:
+            status = "SESSION_ANOMALIES"
+        else:
+            status = "COMPLETE"
         reports.append({
             "instrument_id": symbol,
             "calendar_id": calendar_id,
@@ -105,3 +115,28 @@ def aggregate_session_coverage(reports: Iterable[dict]) -> float | None:
     expected = sum(int(report["expected_sessions_within_observed_range"]) for report in reports)
     observed = sum(int(report["observed_sessions_within_observed_range"]) for report in reports)
     return (observed / expected) if expected else None
+
+
+def mapped_stock_calendar(manifest):
+    """Rebuild the exact evidenced calendar carried by a stock dataset."""
+    mappings = manifest.data_quality.get("exchange_mappings") if isinstance(manifest.data_quality, dict) else None
+    if not mappings:
+        return None
+    identities = {(item.get("calendar_name"), item.get("calendar_version")) for item in mappings.values()}
+    statuses = {item.get("calendar_mapping_status") for item in mappings.values()}
+    if len(identities) != 1 or not statuses <= {"VERIFIED", "PROXY_ONLY"}:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar mappings are inconsistent or unverified")
+    calendar_name, calendar_version = next(iter(identities))
+    mapping = next(iter(mappings.values()))
+    evidence = mapping.get("mapping_evidence") or {}
+    if not calendar_name or evidence.get("provider_version") != CALENDAR_PROVIDER_VERSION:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar provider version is not executable")
+    calendar = generate_long_calendar(
+        calendar_name=calendar_name,
+        exchange=calendar_name,
+        start_date=manifest.start_at.date(),
+        end_date=manifest.end_at.date(),
+    )
+    if calendar.version != calendar_version:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar version does not match its mapping")
+    return calendar

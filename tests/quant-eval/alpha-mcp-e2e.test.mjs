@@ -18,13 +18,16 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
   applySqliteMigrations(seed);
   const symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "XOM"];
   const dates = [];
+  const holidays = new Set(["2024-01-15", "2024-02-19", "2024-03-29", "2024-05-27", "2024-06-19"]);
   for (let day = new Date("2024-01-02T00:00:00Z"); dates.length < 120; day.setUTCDate(day.getUTCDate() + 1)) {
-    if (![0, 6].includes(day.getUTCDay())) dates.push(day.toISOString().slice(0, 10));
+    const tradeDate = day.toISOString().slice(0, 10);
+    if (![0, 6].includes(day.getUTCDay()) && !holidays.has(tradeDate)) dates.push(tradeDate);
   }
   seed.db.exec(symbols.map((symbol, index) => `INSERT INTO instruments(id,symbol,exchange,currency) VALUES (${index + 1},'${symbol}','XNAS','USD');`).join("\n"));
   const bars = [];
   for (const [index, symbol] of symbols.entries()) {
     for (const [dayIndex, tradeDate] of dates.entries()) {
+      if (symbol === "AAPL" && ["2024-02-15", "2024-05-15"].includes(tradeDate)) continue;
       const close = 100 + index * 10 + dayIndex * 0.2 + Math.sin(dayIndex / 4 + index) * 2;
       bars.push(`(${index + 1},'${tradeDate}','${close.toFixed(4)}','${(close + 1).toFixed(4)}','${(close - 1).toFixed(4)}','${close.toFixed(4)}',${1000 + dayIndex},'yahoo')`);
     }
@@ -62,6 +65,8 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     assert.equal(dataQuality.data_quality.price_attestation_status, "BLOCKED");
     assert.equal(dataQuality.data_quality.execution_validity_status, "BLOCKED");
     assert.ok("volume_null_count" in dataQuality.data_quality);
+    assert.equal(dataQuality.data_quality.session_coverage_by_symbol[0].extra_session_count, 0);
+    assert.ok(dataQuality.data_quality.session_coverage_by_symbol.reduce((sum, row) => sum + row.missing_session_count, 0) >= 2);
     const factors = await call("quant_compute_factors", {dataset_id: dataset.dataset_id,
       factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [
         {id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}},
@@ -84,6 +89,8 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     });
     await done(train.job_id);
     const model = await call("quant_get_result", {job_id: train.job_id, section: "dataset"});
+    const modelRegistry = await call("quant_get_result", {job_id: train.job_id, section: "model_registry"});
+    assert.equal(modelRegistry.rows[0].label_version, "session-aligned-v2");
     const modelDiagnostics = await call("quant_get_alpha_model_diagnostics", {model_id: model.model_id});
     assert.deepEqual(Object.keys(modelDiagnostics.feature_importance_gain), ["ret", "vol"]);
     assert.equal(modelDiagnostics.stability_status, "NOT_TESTED");
@@ -110,6 +117,8 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const oosSummary = await call("quant_get_result", {job_id: oos.job_id, section: "summary"});
     assert.ok("rank_ic_mean" in oosSummary);
     assert.equal(oosSummary.conservation_holds, true);
+    assert.equal(oosSummary.label_version, "session-aligned-v2");
+    assert.ok(oosSummary.exclusion_reasons.INVALID_LABEL > 0);
     assert.equal(oosSummary.expected_opportunities, oosSummary.valid_matched_opportunities + oosSummary.excluded_opportunities);
     assert.equal(oosSummary.valid_ic_date_count + oosSummary.invalid_ic_date_count, oosSummary.expected_ic_date_count);
     const repeatedOos = await call("quant_evaluate_alpha_oos", {freeze_id: frozen.freeze_id});

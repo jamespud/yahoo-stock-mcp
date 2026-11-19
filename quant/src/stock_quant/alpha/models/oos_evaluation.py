@@ -9,6 +9,7 @@ from ...compiler import digest
 from ..contracts import Hash
 from ..data.catalog import DatasetStore
 from ..data.partitions import read_partition
+from ..data.session_coverage import mapped_stock_calendar
 from ..errors import AlphaError, AlphaErrorCode
 from .evaluation import quantile_returns, summarize_rank_ic_records
 from .evaluation_coverage import attribute_evaluation_coverage
@@ -16,6 +17,24 @@ from .inference import predict_alpha
 from .labels import stock_forward_labels
 from .registry import AlphaModelRegistry
 from .research_freeze import FrozenResearchRecord
+
+
+def _label_rows_for_oos(record: FrozenResearchRecord, *, store: DatasetStore, label_manifest, start, end):
+    label_version = record.label_spec.get("label_version") or "observed-record-v1"
+    rows = store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end)
+    horizon = int(record.label_spec.get("horizon_days", 5))
+    if label_version == "observed-record-v1":
+        return stock_forward_labels(rows, horizon=horizon), label_version
+    if label_version == "session-aligned-v2":
+        calendar = mapped_stock_calendar(label_manifest)
+        if calendar is None:
+            raise AlphaError(
+                AlphaErrorCode.DATA_UNAVAILABLE,
+                "session-aligned-v2 OOS requires verifiable calendar evidence",
+                {"test_label_source_dataset_id": label_manifest.dataset_id},
+            )
+        return stock_forward_labels(rows, horizon=horizon, calendar=calendar), label_version
+    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Unsupported frozen label version", {"label_version": label_version})
 
 
 def evaluate_alpha_oos(
@@ -56,9 +75,8 @@ def evaluate_alpha_oos(
     for partition in prediction_manifest.partition_manifest:
         prediction_rows.extend(read_partition(prediction_root / partition.logical_path))
     label_manifest = store.load_manifest(record.test_dataset_ids["test_label_source_dataset_id"])
-    label_rows = stock_forward_labels(
-        store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end),
-        horizon=int(record.label_spec.get("horizon_days", 5)),
+    label_rows, label_version = _label_rows_for_oos(
+        record, store=store, label_manifest=label_manifest, start=start, end=end,
     )
     expected_decisions = sorted({
         row.feature_decision_at for row in label_rows if start <= row.feature_decision_at < end
@@ -109,6 +127,7 @@ def evaluate_alpha_oos(
         "sample_reason_conservation_holds": coverage["sample_reason_conservation_holds"],
         "date_reason_conservation_holds": coverage["date_reason_conservation_holds"],
         "sample_count": coverage["valid_matched_opportunities"],
+        "label_version": label_version,
         "evaluation_window": record.test_window,
         "definition": coverage["definition"],
     }
@@ -121,4 +140,5 @@ def evaluate_alpha_oos(
         "evaluation_window": record.test_window,
         "prediction_dataset_id": prediction_manifest.dataset_id,
         "model_ids": record.frozen_model_ids,
+        "label_version": label_version,
     }

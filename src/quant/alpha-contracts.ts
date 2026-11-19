@@ -90,6 +90,7 @@ export const freezeAlphaSelectionInput = z.object({
   label_name: z.string().min(1).max(128),
   target_type: z.enum(["stock_return", "option_return", "option_iv_change", "stock_return_with_option_features"]).optional(),
   horizon_days: z.number().int().min(1).max(252).optional(),
+  label_version: z.enum(["observed-record-v1", "session-aligned-v2"]).optional(),
 }).strict();
 
 export const evaluateAlphaOOSInput = z.object({
