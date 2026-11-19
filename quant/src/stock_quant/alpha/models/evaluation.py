@@ -93,6 +93,21 @@ def rank_ic_by_decision(
     return records
 
 
+def summarize_rank_ic_records(records: list[dict]) -> dict:
+    correlations = [row["rank_ic"] for row in records if row["rank_ic"] is not None]
+    mean = float(np.mean(correlations)) if correlations else None
+    std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
+    valid_count = len(correlations)
+    return {
+        "rank_ic": correlations,
+        "rank_ic_mean": mean,
+        "rank_ic_std": std,
+        "icir": (mean / std) if mean is not None and std not in (None, 0.0) else None,
+        "valid_ic_date_count": valid_count,
+        "invalid_ic_date_count": len(records) - valid_count,
+    }
+
+
 def metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -106,19 +121,14 @@ def metrics(
         raise ValueError("y_true and y_pred must have equal length")
     expected = sorted(set(expected_decisions if expected_decisions is not None else decisions))
     records = rank_ic_by_decision(targets, predictions, decisions, expected_decisions=expected)
-    correlations = [row["rank_ic"] for row in records if row["rank_ic"] is not None]
-    mean = float(np.mean(correlations)) if correlations else None
-    std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
+    summary = summarize_rank_ic_records(records)
     finite_targets = np.isfinite(targets)
     finite_predictions = np.isfinite(predictions)
     matched = finite_targets & finite_predictions
-    valid_ic_count = len(correlations)
-    invalid_ic_count = len(records) - valid_ic_count
+    valid_ic_count = summary["valid_ic_date_count"]
+    invalid_ic_count = summary["invalid_ic_date_count"]
     return {
-        "rank_ic": correlations,
-        "rank_ic_mean": mean,
-        "rank_ic_std": std,
-        "icir": (mean / std) if mean is not None and std not in (None, 0.0) else None,
+        **summary,
         "sample_count": int(matched.sum()),
         "decision_count": valid_ic_count,
         "prediction_coverage": float(finite_predictions.mean()) if len(predictions) else 0.0,
