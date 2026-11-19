@@ -40,7 +40,6 @@ report = {
     'parameter_stability': group(['parameter', 'research']),
     'walk_forward_results': group(['walk_forward', 'optimization', 'fold']),
     'cost_sensitivity': group(['cost', 'commission', 'slippage']),
-    'semantic_grader_results': {'status': 'NOT_TESTED', 'reason': 'Run npm run test:quant-semantic; separate executable evidence is merged by acceptance runner.'},
     'unsupported_capabilities': ['live trading', 'short selling', 'multi-currency accounting', 'Python sandbox unless explicitly configured'],
     'reproducibility': {'command': display_command, 'python': sys.version, 'source_sha256': {str(p.relative_to(ROOT)): sha(p) for p in source_files}},
     'evidence_boundary': 'Grouped pytest cases are executable coverage, not independent certification of every financial assumption. Skips remain explicit in counts and cases.',
@@ -68,7 +67,7 @@ report['benchmarks'] = {'status': 'PASSED' if benchmark_run.returncode == 0 else
 if benchmark_run.returncode:
     report['correctness_status'] = 'FAILED'
 (REPORTS/'quant-reliability.json').write_text(json.dumps(report, indent=2)+'\n')
-sections = ['golden_oracle_results', 'pit_mutation_results', 'multi_timeframe_results', 'parameter_stability', 'walk_forward_results', 'cost_sensitivity', 'semantic_grader_results']
+sections = ['golden_oracle_results', 'pit_mutation_results', 'multi_timeframe_results', 'parameter_stability', 'walk_forward_results', 'cost_sensitivity']
 (REPORTS/'quant-reliability.md').write_text('# Quant Reliability v0.2\n\nCorrectness: **'+report['correctness_status']+'**\n\n'+json.dumps(report['counts'])+'\n\n'+ '\n'.join(f'- {k}: {report[k]["status"]}' for k in sections)+'\n\nFull evidence: quant-regression.log, quant-regression.junit.xml, quant-reliability.json.\n\nSynthetic research does not establish future profitability. Research performance changes are warnings; computational errors fail the gate.\n')
 summary_path = REPORTS/'quant-test-summary.json'
 summary = json.loads(summary_path.read_text()) if summary_path.exists() else {'schema_version': '0.2'}
