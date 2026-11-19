@@ -4,6 +4,8 @@ import pytest
 
 from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
+from stock_quant.alpha.data.corporate_actions import CorporateActionCoverage, build_corporate_action_dataset
+from stock_quant.alpha.data.price_attestation import PriceReference, attest_price_dataset
 from stock_quant.alpha.portfolio.ranking import rank_predictions
 from stock_quant.alpha.portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from stock_quant.alpha.portfolio.target_weights import equal_target_weights
@@ -39,7 +41,33 @@ def _fixture_store(tmp_path, symbols=25, days=60):
         model_set_id="sha256:" + "b" * 64, start_at=start, end_at=start + timedelta(days=days + 1),
         price_basis="raw_attested",
     )
-    return store, dataset, prediction_set
+    end = start + timedelta(days=days + 1)
+    references = [
+        PriceReference(
+            instrument_id=row["instrument_id"], start_at=row["start_at"], declared_basis="raw",
+            reference_open=row["open"], reference_high=row["high"], reference_low=row["low"],
+            reference_close=row["close"], source="oracle", source_version="v1",
+            evidence_id=f"{row['instrument_id']}:{row['start_at'].isoformat()}",
+        )
+        for row in rows
+    ]
+    attestation = attest_price_dataset(
+        dataset.dataset_id, rows, references, start_at=start, end_at=end,
+        source="fixture", source_version="v1",
+        calendar_identity={"calendar_name": "XNYS", "calendar_version": "fixture"},
+    )
+    action_dataset = build_corporate_action_dataset(
+        [], expected_instruments=[f"S{i:03d}" for i in range(symbols)],
+        start_at=start, end_at=end,
+        coverage=[
+            CorporateActionCoverage(
+                instrument_id=f"S{i:03d}", start_at=start, end_at=end,
+                source="fixture-actions", source_version="v1", status="VERIFIED",
+            )
+            for i in range(symbols)
+        ],
+    )
+    return store, dataset, prediction_set, attestation, action_dataset
 
 
 def test_ranking_and_target_weights_enforce_top_k_and_caps():
@@ -57,12 +85,16 @@ def test_ranking_and_target_weights_enforce_top_k_and_caps():
 
 
 def test_top_k_backtest_reconciles_account_and_never_fills_on_signal_bar(tmp_path):
-    store, dataset, prediction_set = _fixture_store(tmp_path)
-    result = run_top_k_backtest(prediction_set, dataset, store=store, config=TopKPortfolioConfig(top_k=20, initial_cash=1_000_000))
+    store, dataset, prediction_set, attestation, actions = _fixture_store(tmp_path)
+    result = run_top_k_backtest(
+        prediction_set, dataset, store=store,
+        price_attestation=attestation, corporate_action_dataset=actions,
+        config=TopKPortfolioConfig(top_k=20, initial_cash=1_000_000),
+    )
     assert result.metrics["rebalance_count"] >= 1
     assert 0 < result.metrics["prediction_coverage"] < 1
-    assert result.metrics["corporate_actions_modeled"] is False
-    assert result.metrics["return_semantics"] == "raw_price_return_excluding_corporate_actions"
+    assert result.metrics["corporate_actions_modeled"] is True
+    assert result.metrics["return_semantics"] == "total_return_with_corporate_actions"
     assert abs(result.final_account["equity"] - (result.final_account["cash"] + result.final_account["positions_value"])) < 1e-6
     assert abs(result.metrics["commission_paid"] - sum(fill["commission"] for fill in result.fills)) < 1e-9
     assert result.fills
@@ -71,8 +103,12 @@ def test_top_k_backtest_reconciles_account_and_never_fills_on_signal_bar(tmp_pat
 
 
 def test_hundred_stock_sparse_backtest_supports_multiple_rebalances(tmp_path):
-    store, dataset, prediction_set = _fixture_store(tmp_path / "large", symbols=100, days=45)
-    result = run_top_k_backtest(prediction_set, dataset, store=store, config=TopKPortfolioConfig(top_k=20, initial_cash=5_000_000))
+    store, dataset, prediction_set, attestation, actions = _fixture_store(tmp_path / "large", symbols=100, days=45)
+    result = run_top_k_backtest(
+        prediction_set, dataset, store=store,
+        price_attestation=attestation, corporate_action_dataset=actions,
+        config=TopKPortfolioConfig(top_k=20, initial_cash=5_000_000),
+    )
     assert result.metrics["rebalance_count"] >= 3
     assert all(len(row["positions"]) <= 20 for row in result.positions)
     assert len(result.equity_curve) == 45
@@ -81,8 +117,12 @@ def test_hundred_stock_sparse_backtest_supports_multiple_rebalances(tmp_path):
 def test_top_k_rejects_unverified_execution_price_basis(tmp_path):
     from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
 
-    store, dataset, prediction_set = _fixture_store(tmp_path)
+    store, dataset, prediction_set, attestation, actions = _fixture_store(tmp_path)
     manifest = dataset.model_copy(update={"price_basis": "price_basis_unverified"})
     with pytest.raises(AlphaError) as info:
-        run_top_k_backtest(prediction_set, manifest, store=store, config=TopKPortfolioConfig(top_k=20))
+        run_top_k_backtest(
+            prediction_set, manifest, store=store,
+            price_attestation=attestation, corporate_action_dataset=actions,
+            config=TopKPortfolioConfig(top_k=20),
+        )
     assert info.value.code == AlphaErrorCode.PRICE_BASIS_UNVERIFIED

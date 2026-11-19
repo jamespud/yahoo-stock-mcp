@@ -149,6 +149,9 @@ export const predictAlphaInput = z.object({
 export const backtestAlphaPortfolioInput = z.object({
   prediction_set_id: alphaHash,
   dataset_id: alphaHash,
+  price_attestation: z.record(z.unknown()).optional(),
+  corporate_action_dataset: z.record(z.unknown()).optional(),
+  stress_cost_multiplier: z.number().positive().optional(),
   portfolio_config: portfolioConfig.optional(),
 }).strict();
 

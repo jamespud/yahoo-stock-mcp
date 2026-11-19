@@ -139,6 +139,9 @@ class BacktestAlphaPortfolioJob(AlphaJobBase):
     kind: Literal["backtest_alpha_portfolio"]
     prediction_set_id: Hash
     dataset_id: Hash
+    price_attestation: dict | None = None
+    corporate_action_dataset: dict | None = None
+    stress_cost_multiplier: float = Field(default=1.0, gt=0, strict=True)
     portfolio_config: dict = Field(default_factory=dict)
 
 

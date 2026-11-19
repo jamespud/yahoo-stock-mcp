@@ -14,6 +14,8 @@ from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
 from ...compiler import digest
 from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
 from ..data.catalog import DatasetStore
+from ..data.corporate_actions import CorporateActionDataset
+from ..data.price_attestation import PriceAttestation
 from ..data.option_dataset import OptionSnapshotBatch, prepare_option_dataset
 from ..data.thetadata_adapter import ThetaDataHttpClient, ThetaDataV3Provider, ThetaDataV3ResponseError
 from ..data.stock_dataset import StockHistoryBatch, prepare_stock_dataset
@@ -296,14 +298,22 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             result = {"dataset": {"section": "dataset", **_manifest_payload(prediction)},
                       "predictions": [{"dataset_id": prediction.dataset_id}], "rank_ic": []}
         elif isinstance(request, BacktestAlphaPortfolioJob):
+            if request.price_attestation is None or request.corporate_action_dataset is None:
+                raise AlphaError(AlphaErrorCode.PRICE_BASIS_UNVERIFIED, "Portfolio execution requires scoped price attestation and corporate-action coverage")
             prediction = datasets.load_manifest(request.prediction_set_id)
             market = datasets.load_manifest(request.dataset_id)
             config = TopKPortfolioConfig.model_validate(request.portfolio_config)
-            run = run_top_k_backtest(prediction, market, store=datasets, config=config)
+            run = run_top_k_backtest(
+                prediction, market, store=datasets,
+                price_attestation=PriceAttestation.model_validate(request.price_attestation),
+                corporate_action_dataset=CorporateActionDataset.model_validate(request.corporate_action_dataset),
+                config=config, stress_cost_multiplier=request.stress_cost_multiplier,
+            )
             result = {"summary": run.metrics, "portfolio_metrics": [run.metrics], "orders": run.orders,
                       "target_weights": run.target_weights, "equity_curve": run.equity_curve,
                       "positions": run.positions, "fills": run.fills, "risk_events": run.risk_events,
-                      "diagnostics": run.diagnostics, "final_account": run.final_account}
+                      "diagnostics": run.diagnostics, "final_account": run.final_account,
+                      "cash_ledger": run.cash_ledger, "corporate_actions": run.corporate_actions}
         elif isinstance(request, BacktestOptionsJob):
             prediction = datasets.load_manifest(request.prediction_set_id)
             options = datasets.load_manifest(request.option_dataset_id)
