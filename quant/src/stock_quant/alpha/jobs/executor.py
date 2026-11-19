@@ -159,11 +159,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             feature = compute_option_factors(manifest, store=datasets, underlying_prices=prices, pricing_config=config,
                                              selected_outputs=selected_outputs, quote_tolerance_seconds=tolerance, checkpoint=bounded)
             pending.append(feature)
-            result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
-                      "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
-                      "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": factor_diagnostics}
+                      "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
             if request.stock_dataset_id:
