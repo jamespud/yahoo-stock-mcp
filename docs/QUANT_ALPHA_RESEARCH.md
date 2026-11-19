@@ -83,4 +83,4 @@ npm run test:plugin
 npm run verify:pack
 ```
 
-See [the v1 acceptance report](QUANT_ALPHA_ACCEPTANCE.md) for exact evidence and limitations.
+See [the current research status](QUANT_ALPHA_STATUS.md) for exact evidence and limitations.
