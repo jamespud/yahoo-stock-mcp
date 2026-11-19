@@ -84,7 +84,8 @@
     "test:quant-qqq:oracle": "python3 scripts/quant-eval/verify-qqq-real-data.py",
     "test:quant-alpha": "UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/stock-quant-uv} uv run --project quant --all-extras pytest quant/tests/alpha -q",
     "test:quant-alpha-mcp": "node --test tests/quant-eval/alpha-mcp.test.mjs",
-    "test:quant-alpha-e2e": "node --test tests/quant-eval/alpha-mcp-e2e.test.mjs"
+    "test:quant-alpha-e2e": "node --test tests/quant-eval/alpha-mcp-e2e.test.mjs",
+    "test:quant-alpha-research": "node scripts/quant-eval/run-alpha-research-reliability.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
