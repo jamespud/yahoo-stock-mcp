@@ -9,6 +9,7 @@ on:
       - 'src/mcp/server.ts'
       - 'tests/quant-eval/**'
       - 'scripts/test-quant-mcp.ts'
+      - 'scripts/quant-eval/**'
       - 'scripts/run-quant-regression.py'
       - 'scripts/quant-research-regression.py'
       - 'scripts/refresh-quant-summary.mjs'
@@ -26,6 +27,7 @@ on:
       - 'src/mcp/server.ts'
       - 'tests/quant-eval/**'
       - 'scripts/test-quant-mcp.ts'
+      - 'scripts/quant-eval/**'
       - 'scripts/run-quant-regression.py'
       - 'scripts/quant-research-regression.py'
       - 'scripts/refresh-quant-summary.mjs'
@@ -66,7 +68,11 @@ jobs:
         run: |
           docker pull python:3.12-alpine
           docker image inspect python:3.12-alpine --format 'QUANT_SANDBOX_IMAGE={{.Id}}' >> "$GITHUB_ENV"
-      - run: python scripts/run-quant-regression.py
+      - name: Run Quant regression
+        run: |
+          set -o pipefail
+          mkdir -p reports/alpha-data-validity
+          python scripts/run-quant-regression.py | tee reports/alpha-data-validity/regression-output.txt
       - run: npm ci
       - run: npm run build
       - run: npm run test:quant-mcp
@@ -78,8 +84,11 @@ jobs:
       - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
+      - run: npm run test:quant-data-validity
+        env:
+          QUANT_PYTHON: python
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: quant-reports-3.12
           path: reports/
@@ -99,7 +108,11 @@ jobs:
         with:
           python-version: '3.14'
       - run: python -m pip install './quant[alpha,options,theta]' pytest hypothesis
-      - run: python scripts/run-quant-regression.py
+      - name: Run Quant regression
+        run: |
+          set -o pipefail
+          mkdir -p reports/alpha-data-validity
+          python scripts/run-quant-regression.py | tee reports/alpha-data-validity/regression-output.txt
       - run: npm ci
       - run: npm run build
       - run: npm run test:quant-mcp

@@ -59,6 +59,7 @@ class ModelSetManifest(StrictModel):
     model_version: str
     feature_set_id: Hash
     label_definition_hash: Hash
+    label_version: str
     feature_schema: list[str]
     selected_iteration: int
     model_hash: Hash
@@ -190,11 +191,13 @@ def train_validation_only(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
+    label_versions = sorted({row.label_version for row in label_rows})
     label_spec = {
         "label_name": request.label_name,
         "target_type": request.target_type,
         "horizon_days": request.horizon_days,
         "label_source_dataset_id": request.label_source_dataset_id,
+        "label_version": label_versions[0] if len(label_versions) == 1 else "mixed",
     }
     label_hash = digest({
         "label_spec": label_spec,
@@ -224,6 +227,7 @@ def train_validation_only(
     return ModelSetManifest(
         model_id=trained["model_id"], model_set_id=trained["model_set_id"], model_type=MODEL_TYPE,
         model_version=MODEL_VERSION, feature_set_id=request.feature_set_id, label_definition_hash=label_hash,
+        label_version=label_spec["label_version"],
         feature_schema=schema, selected_iteration=int(selected_iteration), model_hash=trained["model_hash"],
         environment_hash=environment_hash,
         training_window={"start": request.split.train_start.isoformat(), "end": request.split.train_end.isoformat()},
@@ -289,11 +293,13 @@ def train_alpha(
         and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
         and validation_metrics["prediction_coverage"] >= 0.8
     )
+    label_versions = sorted({row.label_version for row in label_rows})
     label_spec = {
         "label_name": request.label_name,
         "target_type": request.target_type,
         "horizon_days": request.horizon_days,
         "label_source_dataset_id": request.label_source_dataset_id,
+        "label_version": label_versions[0] if len(label_versions) == 1 else "mixed",
     }
     label_hash = digest({
         "label_spec": label_spec,
@@ -321,6 +327,7 @@ def train_alpha(
     return ModelSetManifest(
         model_id=trained["model_id"], model_set_id=trained["model_set_id"], model_type=MODEL_TYPE,
         model_version=MODEL_VERSION, feature_set_id=request.feature_set_id, label_definition_hash=label_hash,
+        label_version=label_spec["label_version"],
         feature_schema=schema, selected_iteration=int(selected_iteration), model_hash=trained["model_hash"],
         environment_hash=environment_hash,
         training_window={"start": request.split.train_start.isoformat(), "end": request.split.train_end.isoformat()},

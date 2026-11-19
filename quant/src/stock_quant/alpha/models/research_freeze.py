@@ -18,6 +18,7 @@ from ...compiler import digest
 from ...contracts import StrictModel
 from ..contracts import Hash
 from ..data.catalog import DatasetStore
+from ..data.session_coverage import mapped_stock_calendar
 from ..errors import AlphaError, AlphaErrorCode
 from .registry import AlphaModelRegistry
 
@@ -34,6 +35,7 @@ class FreezeRequest(StrictModel):
     label_name: str = Field(min_length=1, max_length=128)
     target_type: str = Field(default="stock_return", pattern=r"^(stock_return|option_return|option_iv_change|stock_return_with_option_features)$")
     horizon_days: int = Field(default=5, ge=1, le=252, strict=True)
+    label_version: str | None = Field(default=None, pattern=r"^(observed-record-v1|session-aligned-v2)$")
 
     @model_validator(mode="after")
     def ordered(self):
@@ -221,13 +223,26 @@ def _model_hash(
     if not isinstance(metadata.get("feature_schema"), list) or not metadata["feature_schema"]:
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model has no frozen feature schema", {"model_id": model_id})
 
+    metadata_label_spec = metadata.get("label_spec") if isinstance(metadata.get("label_spec"), dict) else {}
+    model_label_version = metadata_label_spec.get("label_version") or "observed-record-v1"
+    if model_label_version not in {"observed-record-v1", "session-aligned-v2"}:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Selected model has an unsupported frozen label version",
+            {"model_id": model_id, "label_version": model_label_version},
+        )
     expected_label_definition = {
         "label_name": request.label_name,
         "target_type": request.target_type,
         "horizon_days": request.horizon_days,
+        "label_version": request.label_version or model_label_version,
     }
-    metadata_label_spec = metadata.get("label_spec") if isinstance(metadata.get("label_spec"), dict) else {}
-    actual_label_definition = {key: metadata_label_spec.get(key) for key in expected_label_definition}
+    actual_label_definition = {
+        "label_name": metadata_label_spec.get("label_name"),
+        "target_type": metadata_label_spec.get("target_type"),
+        "horizon_days": metadata_label_spec.get("horizon_days"),
+        "label_version": model_label_version,
+    }
     training_label_source_id = metadata.get("label_source_dataset_id")
 
     mismatches = []
@@ -237,6 +252,7 @@ def _model_hash(
 
     mismatch("research_protocol_hash", request.research_protocol_hash, metadata.get("research_protocol_hash"))
     mismatch("label_spec", expected_label_definition, actual_label_definition)
+    mismatch("label_spec.label_version", request.label_version or model_label_version, model_label_version)
     mismatch("label_spec.label_source_dataset_id", training_label_source_id, metadata_label_spec.get("label_source_dataset_id"))
     mismatch("factor_spec_hash", test_feature.source_version, metadata.get("factor_spec_hash"))
     mismatch("calendar_version", test_feature.calendar_version, metadata.get("calendar_version"))
@@ -315,6 +331,14 @@ def freeze_alpha_selection(
         "test_feature_set_id": test_feature.content_hash,
         "test_label_source_dataset_id": test_label.content_hash,
     }
+    selected_metadata = model_registry.load(request.selected_model_ids[0]).metadata
+    label_version = (selected_metadata.get("label_spec") or {}).get("label_version") or "observed-record-v1"
+    if label_version == "session-aligned-v2" and mapped_stock_calendar(test_label) is None:
+        raise AlphaError(
+            AlphaErrorCode.DATA_UNAVAILABLE,
+            "session-aligned-v2 freeze requires verifiable calendar evidence",
+            {"label_version": label_version, "test_label_source_dataset_id": request.test_label_source_dataset_id},
+        )
     body = {
         "schema_version": "1.0",
         "research_protocol_hash": request.research_protocol_hash,
@@ -328,6 +352,7 @@ def freeze_alpha_selection(
             "label_name": request.label_name, "target_type": request.target_type,
             "horizon_days": request.horizon_days,
             "label_source_dataset_id": request.test_label_source_dataset_id,
+            "label_version": label_version,
         },
         "selection_reason": request.selection_reason,
     }
@@ -345,6 +370,7 @@ def freeze_alpha_selection(
             "label_name": request.label_name, "target_type": request.target_type,
             "horizon_days": request.horizon_days,
             "label_source_dataset_id": request.test_label_source_dataset_id,
+            "label_version": label_version,
         },
         selection_reason=request.selection_reason,
         frozen_at=datetime.now(timezone.utc),

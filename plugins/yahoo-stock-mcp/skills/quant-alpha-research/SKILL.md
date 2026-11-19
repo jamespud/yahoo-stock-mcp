@@ -21,15 +21,17 @@ first. For factor, option, model and reporting details read the local references
 
 - `quant_get_capabilities` - inspect dependency availability, supported operators/models/labels and verified provider coverage.
 - `quant_prepare_alpha_dataset` - create immutable stock datasets with explicit price basis and PIT availability.
+- `quant_get_data_quality` with `dataset_id` - inspect per-instrument session coverage, exchange/calendar mappings and volume NULL/zero/positive/invalid counts.
 - `quant_capture_options_snapshot` - append an observed Yahoo option-chain snapshot; never historical option history.
 - `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
 - `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
 - `quant_train_alpha_model` - train deterministic LightGBM in explicit Validation-only or legacy mode. Validation-only mode must not read or evaluate Test data.
+- `quant_get_alpha_model_diagnostics` - read a verified frozen model, recompute gain/split importance, and report stability as NOT_TESTED until independent development-window folds exist.
 - `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
 - `quant_evaluate_alpha_oos` - submit one independent OOS evaluation that reads only the frozen model and Test inputs.
 - `quant_predict_alpha` - predict with a frozen model set over a later period.
-- `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio.
+- `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio only after scoped raw-price attestation and complete corporate-action coverage are supplied.
 - `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
 - `quant_get_job` / `quant_cancel_job` / `quant_get_result` - poll, cancel and retrieve only terminal evidence.
 
@@ -39,8 +41,10 @@ first. For factor, option, model and reporting details read the local references
    deployed feature check, not as proof of provider coverage. `historical_options_enabled` requires
    both a licensed adapter and verified data; Yahoo current snapshots never qualify.
 2. Prepare an immutable dataset. Record source, source version, calendar version, universe, interval,
-   availability policy, price basis, quality, dataset ID and content hash. Do not auto-fill missing
-   bars or mix unlabelled price bases/providers.
+   availability policy, price basis, quality, dataset ID and content hash. Query `quant_get_data_quality`
+   by `dataset_id`; `coverage` means symbol presence only. Require a separate per-instrument
+   `session_coverage`, explicit calendar mapping evidence, and separate NULL/zero/invalid volume counts.
+   Do not auto-fill missing bars or mix unlabelled price bases/providers.
 3. Compile a FactorSpec v1 DAG. Read [factor policy](references/factor-policy.md). Use only listed
    operators, preserve missing values, and distinguish time-series from decision-time cross-sectional
    scope. Poll the job; do not treat a queued feature set as evidence.
@@ -53,15 +57,17 @@ first. For factor, option, model and reporting details read the local references
    immature labels in train, validation or test.
 6. Prefer `evaluation_mode="validation_only"`. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
    Train-only preprocessing, validation-based selection and one frozen OOS read are mandatory. Inspect
-   coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. OOS
+   coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. Fetch
+   `quant_get_alpha_model_diagnostics` for verified gain/split importance. A single model cannot claim
+   stable importance; report NOT_TESTED until independent development-window folds are trained. OOS
    measurements are report-only and never automatically certify or select a model.
 7. Predict only after the validation window. Verify feature names, order and types match the registry.
    Reject missing/corrupt models and never let a future fold predict past decisions.
 8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
    positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
-   use next valid Bid. The first version reports raw-price returns without stock corporate-action
-   adjustment, and the option engine is a trade simulator rather than a full broker portfolio. Reconcile
-   cash, positions, commissions and equity. Leave unresolved option positions visible.
+   use next valid Bid. Stock execution requires both a scoped raw-OHLC price attestation and complete
+   split/dividend/action coverage; a declared `raw_attested` field alone is not admission. Reconcile
+   cash, positions, commissions, slippage and equity every day. Leave unresolved option positions visible.
 9. Read only completed job sections. Page list sections with returned cursors. Report data source,
    dataset/model/job IDs, window, price basis, costs, unresolved diagnostics and every `BLOCKED`,
    `SKIPPED` or `NOT_TESTED` acceptance item. Use the [report template](references/report-template.md).
@@ -70,6 +76,10 @@ first. For factor, option, model and reporting details read the local references
 
 - A successful simulation is not a live order, investment recommendation or guarantee of future profit.
 - A high backtest return does not establish Alpha without frozen OOS evidence and quality diagnostics.
+- Prediction coverage, valid-label coverage and valid-IC-date coverage are distinct. Preserve null IC
+  dates and reconcile sample-level and date-level OOS exclusions.
+- Feature gain/split importance does not imply stability, and hidden corporate-action gaps block a
+  total-return claim even when raw prices are attested.
 - Do not claim historical option Alpha from Yahoo current snapshots or synthetic fills.
 - Do not claim ThetaData acceptance without real authorized data. Offline fixture passes remain fixture evidence.
 - Do not infer provider coverage from an installed adapter or tool presence.

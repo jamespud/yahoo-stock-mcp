@@ -90,10 +90,15 @@ export const freezeAlphaSelectionInput = z.object({
   label_name: z.string().min(1).max(128),
   target_type: z.enum(["stock_return", "option_return", "option_iv_change", "stock_return_with_option_features"]).optional(),
   horizon_days: z.number().int().min(1).max(252).optional(),
+  label_version: z.enum(["observed-record-v1", "session-aligned-v2"]).optional(),
 }).strict();
 
 export const evaluateAlphaOOSInput = z.object({
   freeze_id: alphaHash,
+}).strict();
+
+export const alphaModelDiagnosticsInput = z.object({
+  model_id: alphaHash,
 }).strict();
 
 export const computeOptionFactorsInput = z.object({
@@ -145,6 +150,9 @@ export const predictAlphaInput = z.object({
 export const backtestAlphaPortfolioInput = z.object({
   prediction_set_id: alphaHash,
   dataset_id: alphaHash,
+  price_attestation: z.record(z.unknown()).optional(),
+  corporate_action_dataset: z.record(z.unknown()).optional(),
+  stress_cost_multiplier: z.number().positive().optional(),
   portfolio_config: portfolioConfig.optional(),
 }).strict();
 

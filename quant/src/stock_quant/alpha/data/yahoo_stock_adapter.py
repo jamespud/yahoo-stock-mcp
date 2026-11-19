@@ -1,15 +1,21 @@
 """Read-only adapter over the existing local Yahoo SQLite tables. No HTTP client."""
 from __future__ import annotations
 
+import math
 import sqlite3
+from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
 
 from ...calendar import generate_calendar
 from ..contracts import StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
+from .exchange_mapping import build_exchange_mapping
 from .partitions import StockBarRow
 from .stock_dataset import StockHistoryBatch
+
+
+SOURCE_VERSION = "yahoo-local-sqlite-v2-null-volume"
 
 
 class YahooStockAdapter:
@@ -42,13 +48,51 @@ class YahooStockAdapter:
                 instruments[row["symbol"].upper()] = row
             missing_symbols = [symbol for symbol in request.symbols if symbol not in instruments]
             bars, missing_ohlcv, non_session = [], 0, []
+            session_dates_by_symbol: dict[str, list] = defaultdict(list)
+            exchange_mappings = {}
+            volume_null_count = volume_zero_count = volume_positive_count = volume_invalid_count = 0
             for symbol in request.symbols:
                 instrument = instruments.get(symbol)
                 if instrument is None:
                     continue
+                mapping = build_exchange_mapping(
+                    symbol,
+                    instrument["exchange"],
+                    start_date=request.start.date(),
+                    end_date=request.end.date(),
+                )
+                if mapping["calendar_mapping_status"] not in {"VERIFIED", "PROXY_ONLY"}:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Source exchange cannot be mapped to a trading calendar",
+                        {"symbol": symbol, "source_exchange": instrument["exchange"], "mapping_status": mapping["calendar_mapping_status"]},
+                    )
+                if mapping["calendar_name"] != calendar.calendar_name or mapping["session_dates"] != [str(session.date) for session in calendar.sessions]:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Per-instrument calendar differs from requested dataset calendar",
+                        {"symbol": symbol, "calendar_name": mapping["calendar_name"], "dataset_calendar_name": calendar.calendar_name},
+                    )
+                exchange_mappings[symbol] = mapping
                 query = "SELECT * FROM daily_bars WHERE instrument_id=? AND trade_date>=? AND trade_date<? ORDER BY trade_date"
                 for bar in connection.execute(query, (instrument["id"], request.start.date().isoformat(), request.end.date().isoformat())):
                     session = sessions.get(__import__("datetime").date.fromisoformat(bar["trade_date"]))
+                    session_dates_by_symbol[symbol].append(__import__("datetime").date.fromisoformat(bar["trade_date"]))
+                    raw_volume = bar["volume"]
+                    if raw_volume is None:
+                        volume_null_count += 1
+                        volume = None
+                    else:
+                        parsed_volume = float(raw_volume)
+                        if not math.isfinite(parsed_volume) or parsed_volume < 0:
+                            volume_invalid_count += 1
+                            volume = None
+                        elif parsed_volume == 0:
+                            volume_zero_count += 1
+                            volume = 0.0
+                        else:
+                            volume_positive_count += 1
+                            volume = parsed_volume
                     if session is None:
                         non_session.append(f"{symbol}:{bar['trade_date']}")
                         continue
@@ -64,10 +108,10 @@ class YahooStockAdapter:
                             end_at=end_at,
                             available_at=end_at + timedelta(seconds=self.publication_delay_seconds),
                             open=float(bar["open"]), high=float(bar["high"]), low=float(bar["low"]), close=float(bar["close"]),
-                            volume=float(bar["volume"] or 0),
+                            volume=volume,
                             adjustment=request.adjustment,
                             source=bar["source"] or "yahoo",
-                            source_version="yahoo-local-sqlite-v1",
+                            source_version=SOURCE_VERSION,
                             currency=(instrument["currency"] or "USD").upper(),
                         ))
                     except (TypeError, ValueError) as error:
@@ -83,14 +127,34 @@ class YahooStockAdapter:
         return StockHistoryBatch(
             rows=bars,
             calendar_version=calendar.version,
-            source_version="yahoo-local-sqlite-v1",
+            calendar_id=calendar.id,
+            calendar_session_dates=[session.date for session in calendar.sessions],
+            session_dates_by_symbol=dict(session_dates_by_symbol),
+            exchange_mappings=exchange_mappings,
+            source_version=SOURCE_VERSION,
             quality={
                 "provider": "yahoo_local_sqlite",
                 "missing_symbols": missing_symbols,
                 "non_session_bars": non_session,
                 "missing_ohlcv_rows": missing_ohlcv,
-                "price_basis_unverified": request.price_basis == "price_basis_unverified",
+                "volume_null_count": volume_null_count,
+                "volume_zero_count": volume_zero_count,
+                "volume_positive_count": volume_positive_count,
+                "volume_invalid_count": volume_invalid_count,
+                "volume_valid_coverage": (
+                    (volume_zero_count + volume_positive_count)
+                    / max(1, volume_null_count + volume_zero_count + volume_positive_count + volume_invalid_count)
+                ),
+                "price_basis_declared": request.price_basis,
+                "price_basis_unverified": True,
+                "price_attestation_status": "BLOCKED",
+                "execution_validity_status": "BLOCKED",
+                "corporate_action_coverage_status": "UNVERIFIED",
                 "calendar_provider": calendar.provider,
+                "calendar_provider_version": calendar.provider_version,
+                "calendar_mapping_status_by_symbol": {
+                    symbol: mapping["calendar_mapping_status"] for symbol, mapping in sorted(exchange_mappings.items())
+                },
                 "publication_delay_seconds": self.publication_delay_seconds,
             },
         )

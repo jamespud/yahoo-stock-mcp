@@ -29,7 +29,7 @@ const deadline = setTimeout(() => { void transport.close(); }, 120_000);
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  for (const name of ["quant_get_capabilities", "quant_validate_strategy", "quant_register_strategy", "quant_compile_strategy", "quant_get_calendar", "quant_get_data_quality", "quant_resample_snapshot", "quant_prepare_alpha_dataset", "quant_capture_options_snapshot", "quant_prepare_options_dataset", "quant_compute_factors", "quant_compute_option_factors", "quant_train_alpha_model", "quant_predict_alpha", "quant_backtest_alpha_portfolio", "quant_backtest_options", "get_bars"]) assert(tools.tools.some(t => t.name === name));
+  for (const name of ["quant_get_capabilities", "quant_validate_strategy", "quant_register_strategy", "quant_compile_strategy", "quant_get_calendar", "quant_get_data_quality", "quant_resample_snapshot", "quant_prepare_alpha_dataset", "quant_capture_options_snapshot", "quant_prepare_options_dataset", "quant_compute_factors", "quant_compute_option_factors", "quant_train_alpha_model", "quant_get_alpha_model_diagnostics", "quant_predict_alpha", "quant_backtest_alpha_portfolio", "quant_backtest_options", "get_bars"]) assert(tools.tools.some(t => t.name === name));
   async function call(name: string, args: Record<string, unknown> = {}) {
     const result = await client.callTool({name, arguments: args});
     assert(!result.isError, JSON.stringify(result));

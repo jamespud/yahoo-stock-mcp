@@ -1,76 +1,40 @@
 """Independent out-of-sample evaluation for a validation-selected research freeze."""
 from __future__ import annotations
 
-import math
-from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Callable
 
 import numpy as np
-import pandas as pd
-from scipy.stats import spearmanr
-
 from ...compiler import digest
 from ..contracts import Hash
 from ..data.catalog import DatasetStore
 from ..data.partitions import read_partition
+from ..data.session_coverage import mapped_stock_calendar
 from ..errors import AlphaError, AlphaErrorCode
-from .evaluation import metrics, quantile_returns
+from .evaluation import quantile_returns, summarize_rank_ic_records
+from .evaluation_coverage import attribute_evaluation_coverage
 from .inference import predict_alpha
-from .labels import LabelRow, stock_forward_labels
+from .labels import stock_forward_labels
 from .registry import AlphaModelRegistry
 from .research_freeze import FrozenResearchRecord
 
 
-def _rank_ic_by_decision(predictions: list[dict], labels: list[LabelRow], start, end) -> tuple[list[dict], dict]:
-    label_by_key = {
-        (row.feature_decision_at, row.instrument_id): row
-        for row in labels
-        if row.label_value is not None and start <= row.feature_decision_at < end
-    }
-    groups = defaultdict(list)
-    for row in predictions:
-        decision = row["decision_at"]
-        if not start <= decision < end:
-            continue
-        label = label_by_key.get((decision, row["instrument_id"]))
-        if label is None:
-            continue
-        prediction = float(row["prediction_value"])
-        target = float(label.label_value)
-        if np.isfinite(prediction) and np.isfinite(target):
-            groups[decision].append((prediction, target))
-    records = []
-    exclusions = defaultdict(int)
-    for decision, values in sorted(groups.items(), key=lambda item: item[0]):
-        eligible_count = len(values)
-        reason = None
-        rank_ic = None
-        valid_pair_count = 0
-        if eligible_count < 2:
-            reason = "INSUFFICIENT_VALID_PAIRS"
-        else:
-            prediction_values, target_values = zip(*values)
-            if len(set(target_values)) <= 1 or len(set(prediction_values)) <= 1:
-                reason = "CONSTANT_ARRAY"
-            else:
-                correlation = spearmanr(target_values, prediction_values).statistic
-                if np.isfinite(correlation):
-                    rank_ic = float(correlation)
-                    valid_pair_count = eligible_count
-                else:
-                    reason = "NONFINITE_CORRELATION"
-        if reason:
-            exclusions[reason] += 1
-        records.append({
-            "decision_at": decision.astimezone(timezone.utc).isoformat(),
-            "rank_ic": rank_ic,
-            "eligible_count": eligible_count,
-            "valid_pair_count": valid_pair_count,
-            "excluded_count": 0 if rank_ic is not None else 1,
-            "reason": reason,
-        })
-    return records, dict(sorted(exclusions.items()))
+def _label_rows_for_oos(record: FrozenResearchRecord, *, store: DatasetStore, label_manifest, start, end):
+    label_version = record.label_spec.get("label_version") or "observed-record-v1"
+    rows = store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end)
+    horizon = int(record.label_spec.get("horizon_days", 5))
+    if label_version == "observed-record-v1":
+        return stock_forward_labels(rows, horizon=horizon), label_version
+    if label_version == "session-aligned-v2":
+        calendar = mapped_stock_calendar(label_manifest)
+        if calendar is None:
+            raise AlphaError(
+                AlphaErrorCode.DATA_UNAVAILABLE,
+                "session-aligned-v2 OOS requires verifiable calendar evidence",
+                {"test_label_source_dataset_id": label_manifest.dataset_id},
+            )
+        return stock_forward_labels(rows, horizon=horizon, calendar=calendar), label_version
+    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Unsupported frozen label version", {"label_version": label_version})
 
 
 def evaluate_alpha_oos(
@@ -110,38 +74,62 @@ def evaluate_alpha_oos(
     prediction_rows = []
     for partition in prediction_manifest.partition_manifest:
         prediction_rows.extend(read_partition(prediction_root / partition.logical_path))
-    label_rows = stock_forward_labels(
-        store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end),
-        horizon=int(record.label_spec.get("horizon_days", 5)),
+    label_manifest = store.load_manifest(record.test_dataset_ids["test_label_source_dataset_id"])
+    label_rows, label_version = _label_rows_for_oos(
+        record, store=store, label_manifest=label_manifest, start=start, end=end,
     )
-    rank_records, exclusion_reasons = _rank_ic_by_decision(prediction_rows, label_rows, start, end)
-    values = [(row["rank_ic"], row) for row in rank_records if row["rank_ic"] is not None]
-    correlations = [row["rank_ic"] for _, row in values]
-    mean = float(np.mean(correlations)) if correlations else None
-    std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
-    icir = mean / std if mean is not None and std not in (None, 0.0) else None
-    # Always align predictions and labels by PIT key so equal lengths cannot hide a mispairing.
-    label_lookup = {(row.feature_decision_at, row.instrument_id): row.label_value for row in label_rows}
-    target_values = np.array([
-        label_lookup.get((row["decision_at"], row["instrument_id"])) if label_lookup.get((row["decision_at"], row["instrument_id"])) is not None else np.nan
-        for row in prediction_rows
-    ], dtype=float)
-    prediction_values = np.array([row["prediction_value"] for row in prediction_rows], dtype=float)
-    quantiles = quantile_returns(target_values, prediction_values, [row["decision_at"] for row in prediction_rows])
+    expected_decisions = sorted({
+        row.feature_decision_at for row in label_rows if start <= row.feature_decision_at < end
+    } | {
+        row["decision_at"] for row in prediction_rows if start <= row["decision_at"] < end
+    })
+    expected_instruments = sorted({
+        *label_manifest.instrument_ids,
+        *(str(row["instrument_id"]).upper() for row in prediction_rows if start <= row["decision_at"] < end),
+    })
+    attribution = attribute_evaluation_coverage(
+        prediction_rows,
+        label_rows,
+        expected_instruments=expected_instruments,
+        expected_decisions=expected_decisions,
+    )
+    coverage = attribution.summary
+    valid_rows = attribution.valid_pairs
+    target_values = np.array([row["label_value"] for row in valid_rows], dtype=float)
+    prediction_values = np.array([row["prediction_value"] for row in valid_rows], dtype=float)
+    decisions = [row["decision_at"] for row in valid_rows]
+    rank_records = coverage["rank_ic_by_decision"]
+    rank_summary = summarize_rank_ic_records(rank_records)
+    quantiles = quantile_returns(target_values, prediction_values, decisions)
     summary = {
-        "rank_ic_mean": mean,
-        "rank_ic_std": std,
-        "icir": icir,
+        "rank_ic_mean": rank_summary["rank_ic_mean"],
+        "rank_ic_std": rank_summary["rank_ic_std"],
+        "icir": rank_summary["icir"],
         "quantile_returns": quantiles["quantile_returns"],
         "top_bottom_spread": quantiles["top_bottom_spread"],
-        "prediction_coverage": float(np.isfinite(prediction_values).mean()) if len(prediction_values) else 0.0,
-        "valid_pair_count": sum(row["valid_pair_count"] for row in rank_records),
+        "prediction_coverage": coverage["prediction_coverage"],
+        "valid_label_coverage": coverage["label_coverage"],
+        "matched_prediction_label_coverage": coverage["matched_prediction_label_coverage"],
+        "valid_ic_date_coverage": coverage["valid_ic_date_coverage"],
+        "valid_ic_date_count": coverage["valid_ic_date_count"],
+        "invalid_ic_date_count": coverage["invalid_ic_date_count"],
+        "expected_ic_date_count": coverage["expected_date_count"],
+        "expected_opportunities": coverage["expected_opportunities"],
+        "valid_matched_opportunities": coverage["valid_matched_opportunities"],
+        "excluded_opportunities": coverage["excluded_opportunities"],
+        "valid_pair_count": coverage["valid_matched_opportunities"],
         "eligible_count": sum(row["eligible_count"] for row in rank_records),
-        "excluded_count": sum(row["excluded_count"] for row in rank_records),
-        "exclusion_reasons": exclusion_reasons,
-        "sample_count": int(np.isfinite(target_values).sum()),
+        "excluded_count": coverage["excluded_opportunities"],
+        "exclusion_reasons": coverage["excluded_samples_by_reason"],
+        "exclusion_date_reasons": coverage["excluded_dates_by_reason"],
+        "secondary_exclusion_flags": coverage["secondary_flags_by_reason"],
+        "conservation_holds": coverage["conservation_holds"],
+        "sample_reason_conservation_holds": coverage["sample_reason_conservation_holds"],
+        "date_reason_conservation_holds": coverage["date_reason_conservation_holds"],
+        "sample_count": coverage["valid_matched_opportunities"],
+        "label_version": label_version,
         "evaluation_window": record.test_window,
-        "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
+        "definition": coverage["definition"],
     }
     if checkpoint:
         checkpoint(1.0)
@@ -152,4 +140,5 @@ def evaluate_alpha_oos(
         "evaluation_window": record.test_window,
         "prediction_dataset_id": prediction_manifest.dataset_id,
         "model_ids": record.frozen_model_ids,
+        "label_version": label_version,
     }

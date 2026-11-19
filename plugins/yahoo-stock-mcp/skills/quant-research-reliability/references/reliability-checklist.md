@@ -6,10 +6,10 @@ Unknown is a real outcome. Never promote a missing check to pass because headlin
 | Dimension | Required evidence and failure conditions |
 | --- | --- |
 | Capability | Actual catalog and deployed capabilities; absent sandbox means no Python execution claim |
-| Data quality | Snapshot ID, explicit calendar, coverage/gaps/staleness at each evaluation clock |
+| Data quality | Snapshot/dataset ID, explicit calendar, symbol vs session coverage, volume NULL/zero/invalid counts and gaps at each evaluation clock |
 | PIT/leakage | Completed and available bars, delayed rows, explicit last_completed alignment and warmup |
 | Fills | Close decisions execute at next eligible open; no future prices/volume in risk decisions |
-| Adjustment/actions | Verified raw execution prices, declared split/dividend terms; absent acquisition disclosed |
+| Adjustment/actions | Independent raw-OHLC attestation, complete source/versioned split/dividend coverage and explicit unsupported actions |
 | Universe | As-of membership provenance, excluded/missing/delisted symbols; survivorship risk disclosed |
 | Search disclosure | All grids, objectives, seeds, candidates, failures and budgets, including earlier attempts |
 | Overfitting | Disjoint frozen train/validation/test, no test selection; repeated holdout reuse disclosed |

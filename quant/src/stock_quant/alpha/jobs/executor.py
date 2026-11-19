@@ -10,12 +10,16 @@ import time
 
 from pydantic import ValidationError
 
+from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
 from ...compiler import digest
 from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
 from ..data.catalog import DatasetStore
+from ..data.corporate_actions import CorporateActionDataset
+from ..data.price_attestation import PriceAttestation
 from ..data.option_dataset import OptionSnapshotBatch, prepare_option_dataset
 from ..data.thetadata_adapter import ThetaDataHttpClient, ThetaDataV3Provider, ThetaDataV3ResponseError
 from ..data.stock_dataset import StockHistoryBatch, prepare_stock_dataset
+from ..data.session_coverage import mapped_stock_calendar
 from ..data.yahoo_option_import import YahooOptionChainImport
 from ..data.yahoo_stock_adapter import YahooStockAdapter
 from ..errors import AlphaError, AlphaErrorCode
@@ -23,6 +27,7 @@ from ..factors.ast import FactorSpec
 from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
+from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
@@ -47,7 +52,6 @@ class _ProviderRows:
 
 def _store(root: Path) -> DatasetStore:
     return DatasetStore(root)
-
 
 def _staged_rows(store, reference: str) -> list[dict]:
     root = Path(store.path).with_suffix(".alpha-inbox")
@@ -170,12 +174,19 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             if request.evaluation_mode == "validation_only":
                 if not request.stock_dataset_id:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                stock_manifest = datasets.load_manifest(request.stock_dataset_id)
                 labels = stock_forward_labels(
                     datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                     horizon=request.horizon_days,
+                    calendar=mapped_stock_calendar(stock_manifest),
                 )
             elif request.stock_dataset_id:
-                labels = stock_forward_labels(datasets.read_rows(request.stock_dataset_id), horizon=request.horizon_days)
+                stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+                labels = stock_forward_labels(
+                    datasets.read_rows(request.stock_dataset_id),
+                    horizon=request.horizon_days,
+                    calendar=mapped_stock_calendar(stock_manifest),
+                )
             elif request.option_dataset_id:
                 manifest = datasets.load_manifest(request.option_dataset_id)
                 labels, _ = historical_option_labels(manifest, datasets, horizon_days=request.horizon_days)
@@ -193,8 +204,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             )
             model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
             staged_model = model
+            model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
+                      "diagnostics": [model_diagnostics],
                       "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
@@ -210,6 +223,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 label_name=request.label_name,
                 target_type=request.target_type,
                 horizon_days=request.horizon_days,
+                label_version=request.label_version,
             )
             record = freeze_alpha_selection(
                 freeze_request, store=datasets, model_registry=final_registry,
@@ -261,14 +275,22 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             result = {"dataset": {"section": "dataset", **_manifest_payload(prediction)},
                       "predictions": [{"dataset_id": prediction.dataset_id}], "rank_ic": []}
         elif isinstance(request, BacktestAlphaPortfolioJob):
+            if request.price_attestation is None or request.corporate_action_dataset is None:
+                raise AlphaError(AlphaErrorCode.PRICE_BASIS_UNVERIFIED, "Portfolio execution requires scoped price attestation and corporate-action coverage")
             prediction = datasets.load_manifest(request.prediction_set_id)
             market = datasets.load_manifest(request.dataset_id)
             config = TopKPortfolioConfig.model_validate(request.portfolio_config)
-            run = run_top_k_backtest(prediction, market, store=datasets, config=config)
+            run = run_top_k_backtest(
+                prediction, market, store=datasets,
+                price_attestation=PriceAttestation.model_validate(request.price_attestation),
+                corporate_action_dataset=CorporateActionDataset.model_validate(request.corporate_action_dataset),
+                config=config, stress_cost_multiplier=request.stress_cost_multiplier,
+            )
             result = {"summary": run.metrics, "portfolio_metrics": [run.metrics], "orders": run.orders,
                       "target_weights": run.target_weights, "equity_curve": run.equity_curve,
                       "positions": run.positions, "fills": run.fills, "risk_events": run.risk_events,
-                      "diagnostics": run.diagnostics, "final_account": run.final_account}
+                      "diagnostics": run.diagnostics, "final_account": run.final_account,
+                      "cash_ledger": run.cash_ledger, "corporate_actions": run.corporate_actions}
         elif isinstance(request, BacktestOptionsJob):
             prediction = datasets.load_manifest(request.prediction_set_id)
             options = datasets.load_manifest(request.option_dataset_id)
