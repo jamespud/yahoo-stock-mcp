@@ -1,9 +1,7 @@
 """Controlled 99-symbol Alpha Research Reliability acceptance."""
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from stock_quant.alpha.data.catalog import DatasetStore
@@ -13,7 +11,7 @@ from stock_quant.alpha.factors.engine import compute_stock_factors
 from stock_quant.alpha.jobs.executor import train_development_labels
 from stock_quant.alpha.models.labels import stock_forward_labels
 from stock_quant.alpha.models.lightgbm_trainer import (
-    AlphaModelRegistry, ModelResourceBudget, ModelSetManifest, TrainAlphaRequest, train_alpha,
+    AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, train_alpha,
 )
 from stock_quant.alpha.models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
 from stock_quant.alpha.models.oos_evaluation import evaluate_alpha_oos
