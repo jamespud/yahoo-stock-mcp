@@ -1,15 +1,11 @@
 """Independent out-of-sample evaluation for a validation-selected research freeze."""
 from __future__ import annotations
 
-import math
-from collections import defaultdict
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime
 from typing import Callable
 
 import numpy as np
-import pandas as pd
-from scipy.stats import spearmanr
-
 from ...compiler import digest
 from ..contracts import Hash
 from ..data.catalog import DatasetStore
@@ -20,57 +16,6 @@ from .inference import predict_alpha
 from .labels import LabelRow, stock_forward_labels
 from .registry import AlphaModelRegistry
 from .research_freeze import FrozenResearchRecord
-
-
-def _rank_ic_by_decision(predictions: list[dict], labels: list[LabelRow], start, end) -> tuple[list[dict], dict]:
-    label_by_key = {
-        (row.feature_decision_at, row.instrument_id): row
-        for row in labels
-        if row.label_value is not None and start <= row.feature_decision_at < end
-    }
-    groups = defaultdict(list)
-    for row in predictions:
-        decision = row["decision_at"]
-        if not start <= decision < end:
-            continue
-        label = label_by_key.get((decision, row["instrument_id"]))
-        if label is None:
-            continue
-        prediction = float(row["prediction_value"])
-        target = float(label.label_value)
-        if np.isfinite(prediction) and np.isfinite(target):
-            groups[decision].append((prediction, target))
-    records = []
-    exclusions = defaultdict(int)
-    for decision, values in sorted(groups.items(), key=lambda item: item[0]):
-        eligible_count = len(values)
-        reason = None
-        rank_ic = None
-        valid_pair_count = 0
-        if eligible_count < 2:
-            reason = "INSUFFICIENT_VALID_PAIRS"
-        else:
-            prediction_values, target_values = zip(*values)
-            if len(set(target_values)) <= 1 or len(set(prediction_values)) <= 1:
-                reason = "CONSTANT_ARRAY"
-            else:
-                correlation = spearmanr(target_values, prediction_values).statistic
-                if np.isfinite(correlation):
-                    rank_ic = float(correlation)
-                    valid_pair_count = eligible_count
-                else:
-                    reason = "NONFINITE_CORRELATION"
-        if reason:
-            exclusions[reason] += 1
-        records.append({
-            "decision_at": decision.astimezone(timezone.utc).isoformat(),
-            "rank_ic": rank_ic,
-            "eligible_count": eligible_count,
-            "valid_pair_count": valid_pair_count,
-            "excluded_count": 0 if rank_ic is not None else 1,
-            "reason": reason,
-        })
-    return records, dict(sorted(exclusions.items()))
 
 
 def evaluate_alpha_oos(
@@ -114,12 +59,6 @@ def evaluate_alpha_oos(
         store.read_rows(record.test_dataset_ids["test_label_source_dataset_id"], start_at=start, end_at=end),
         horizon=int(record.label_spec.get("horizon_days", 5)),
     )
-    rank_records, exclusion_reasons = _rank_ic_by_decision(prediction_rows, label_rows, start, end)
-    values = [(row["rank_ic"], row) for row in rank_records if row["rank_ic"] is not None]
-    correlations = [row["rank_ic"] for _, row in values]
-    mean = float(np.mean(correlations)) if correlations else None
-    std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
-    icir = mean / std if mean is not None and std not in (None, 0.0) else None
     # Always align predictions and labels by PIT key so equal lengths cannot hide a mispairing.
     label_lookup = {(row.feature_decision_at, row.instrument_id): row.label_value for row in label_rows}
     target_values = np.array([
@@ -127,21 +66,34 @@ def evaluate_alpha_oos(
         for row in prediction_rows
     ], dtype=float)
     prediction_values = np.array([row["prediction_value"] for row in prediction_rows], dtype=float)
-    quantiles = quantile_returns(target_values, prediction_values, [row["decision_at"] for row in prediction_rows])
+    decisions = [row["decision_at"] for row in prediction_rows]
+    expected_decisions = sorted(set(decisions))
+    evaluation = metrics(target_values, prediction_values, decisions, expected_decisions=expected_decisions)
+    rank_records = evaluation["rank_ic_by_decision"]
+    exclusion_reasons = Counter(
+        reason for row in rank_records for reason in row.get("exclusion_reasons", [])
+    )
+    quantiles = quantile_returns(target_values, prediction_values, decisions)
     summary = {
-        "rank_ic_mean": mean,
-        "rank_ic_std": std,
-        "icir": icir,
+        "rank_ic_mean": evaluation["rank_ic_mean"],
+        "rank_ic_std": evaluation["rank_ic_std"],
+        "icir": evaluation["icir"],
         "quantile_returns": quantiles["quantile_returns"],
         "top_bottom_spread": quantiles["top_bottom_spread"],
-        "prediction_coverage": float(np.isfinite(prediction_values).mean()) if len(prediction_values) else 0.0,
+        "prediction_coverage": evaluation["prediction_coverage"],
+        "valid_label_coverage": evaluation["valid_label_coverage"],
+        "matched_prediction_label_coverage": evaluation["matched_prediction_label_coverage"],
+        "valid_ic_date_coverage": evaluation["valid_ic_date_coverage"],
+        "valid_ic_date_count": evaluation["valid_ic_date_count"],
+        "invalid_ic_date_count": evaluation["invalid_ic_date_count"],
+        "expected_ic_date_count": evaluation["expected_ic_date_count"],
         "valid_pair_count": sum(row["valid_pair_count"] for row in rank_records),
         "eligible_count": sum(row["eligible_count"] for row in rank_records),
         "excluded_count": sum(row["excluded_count"] for row in rank_records),
-        "exclusion_reasons": exclusion_reasons,
-        "sample_count": int(np.isfinite(target_values).sum()),
+        "exclusion_reasons": dict(sorted(exclusion_reasons.items())),
+        "sample_count": evaluation["sample_count"],
         "evaluation_window": record.test_window,
-        "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
+        "definition": evaluation["definition"],
     }
     if checkpoint:
         checkpoint(1.0)
