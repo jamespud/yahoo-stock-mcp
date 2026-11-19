@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 import {
+  freezeAlphaSelectionInput,
+  evaluateAlphaOOSInput,
   backtestAlphaPortfolioInput,
   backtestOptionsInput,
   captureOptionsSnapshotInput,
@@ -10,7 +13,9 @@ import {
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
+  trainAlphaModelInputFields,
 } from "./alpha-contracts.js";
+import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
 import { captureYahooOptionRows } from "./option-capture.js";
 
@@ -73,11 +78,12 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
   server.tool(
     "quant_train_alpha_model",
     "Train a deterministic CPU LightGBM regressor with chronological train/validation/test windows, label purging and frozen OOS evaluation.",
-    trainAlphaModelInput.shape,
+    trainAlphaModelInputFields.shape,
     async (args) => {
-      const { label_spec, windows, ...rest } = args;
+      const { label_spec, windows, ...rest } = trainAlphaModelInput.parse(args);
+      const split = developmentWindows.safeParse(windows).success ? windows : temporalWindows.parse(windows);
       return submit({
-        kind: "train_alpha_model", ...rest, ...label_spec, split: windows,
+        kind: "train_alpha_model", ...rest, ...label_spec, split,
       });
     },
   );
@@ -87,6 +93,23 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     "Predict with a frozen model set over a non-overlapping feature period and publish an immutable prediction panel.",
     predictAlphaInput.shape,
     async (args) => submit({ kind: "predict_alpha", ...withoutPeriod(args) }),
+  );
+
+  server.tool(
+    "quant_freeze_alpha_selection",
+    "Freeze a Validation-selected model and Test identities into a content-addressed immutable record. This is the only gate that permits an OOS evaluation.",
+    freezeAlphaSelectionInput.shape,
+    async (args) => submit({
+      kind: "freeze_alpha_selection", ...args,
+      idempotency_key: `alpha_freeze:${createHash("sha256").update(JSON.stringify(args)).digest("hex")}`,
+    }),
+  );
+
+  server.tool(
+    "quant_evaluate_alpha_oos",
+    "Submit an independent OOS evaluation that reads only the frozen model and Test inputs.",
+    evaluateAlphaOOSInput.shape,
+    async (args) => submit({ kind: "evaluate_alpha_oos", ...args, idempotency_key: `alpha_oos:${args.freeze_id}` }),
   );
 
   server.tool(

@@ -146,9 +146,9 @@ def read_partition(path: Path, columns: list[str] | None = None) -> list[dict]:
     return table.to_pylist()
 
 
-def write_feature_partition(path: Path, rows: list[dict]) -> tuple[str, str, int, int]:
+def write_feature_partition(path: Path, rows: list[dict] | pa.Table) -> tuple[str, str, int, int]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.Table.from_pylist(rows, schema=FEATURE_SCHEMA)
+    table = rows if isinstance(rows, pa.Table) else pa.Table.from_pylist(rows, schema=FEATURE_SCHEMA)
     pq.write_table(table, path, compression="zstd", write_statistics=True, data_page_version="1.0")
     with path.open("rb") as stream:
         os.fsync(stream.fileno())

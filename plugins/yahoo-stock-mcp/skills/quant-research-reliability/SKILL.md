@@ -21,6 +21,7 @@ first. All references required to install this skill independently live inside t
 - `quant_get_job` - verify terminal status and durable diagnostics
 - `quant_cancel_job` - cancel authorized work or enforce agreed budgets
 - `quant_get_result` - retrieve trial records, ledgers, artifacts and reproducibility
+- `quant_freeze_alpha_selection` / `quant_evaluate_alpha_oos` - audit Validation-selected freezes and independent OOS evidence
 
 ## Workflow
 

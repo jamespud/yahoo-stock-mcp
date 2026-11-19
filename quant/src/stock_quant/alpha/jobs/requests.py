@@ -7,7 +7,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter, model_validator
 
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
-from ..models.temporal_split import TemporalSplit
+from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
 
 
 class AlphaJobBase(StrictModel):
@@ -82,11 +82,49 @@ class TrainAlphaModelJob(AlphaJobBase):
     stock_dataset_id: Hash | None = None
     option_dataset_id: Hash | None = None
     horizon_days: int = Field(default=5, ge=1, le=252)
-    split: TemporalSplit
+    evaluation_mode: str = Field(default="legacy_inline_test", pattern=r"^(validation_only|legacy_inline_test)$")
+    research_protocol_hash: Hash | None = None
+    split: TemporalSplit | ModelDevelopmentSplit
     hyperparameters: dict = Field(default_factory=dict)
     random_seed: int = 0
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+
+    @model_validator(mode="after")
+    def split_mode(self):
+        if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
+            raise ValueError("validation_only training requires ModelDevelopmentSplit")
+        if self.evaluation_mode == "validation_only" and not self.stock_dataset_id:
+            raise ValueError("validation_only training currently requires stock_dataset_id")
+        if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
+            raise ValueError("legacy_inline_test training requires TemporalSplit")
+        return self
+
+
+class FreezeAlphaSelectionJob(AlphaJobBase):
+    kind: Literal["freeze_alpha_selection"]
+    research_protocol_hash: Hash
+    candidate_ledger_hash: Hash
+    selected_model_ids: list[Hash] = Field(min_length=1, max_length=1)
+    test_feature_set_id: Hash
+    test_label_source_dataset_id: Hash
+    test_start: AwareDatetime
+    test_end: AwareDatetime
+    selection_reason: str = Field(min_length=1, max_length=1024)
+    label_name: str = Field(min_length=1, max_length=128)
+    target_type: str = Field(default="stock_return", pattern=r"^(stock_return|option_return|option_iv_change|stock_return_with_option_features)$")
+    horizon_days: int = Field(default=5, ge=1, le=252, strict=True)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.test_start >= self.test_end:
+            raise ValueError("Expected test_start < test_end")
+        return self
+
+
+class EvaluateAlphaOOSJob(AlphaJobBase):
+    kind: Literal["evaluate_alpha_oos"]
+    freeze_id: Hash
 
 
 class PredictAlphaJob(AlphaJobBase):
@@ -113,11 +151,13 @@ class BacktestOptionsJob(AlphaJobBase):
 
 AlphaJobRequest = Annotated[
     PrepareStockDatasetJob | CaptureOptionChainJob | PrepareOptionsDatasetJob | ComputeFactorsJob |
-    ComputeOptionFactorsJob | TrainAlphaModelJob | PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
+    ComputeOptionFactorsJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
+    PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
     Field(discriminator="kind"),
 ]
 ALPHA_REQUEST_ADAPTER = TypeAdapter(AlphaJobRequest)
 ALPHA_KINDS = {
     "prepare_dataset", "capture_option_chain", "prepare_options_dataset", "compute_factors",
-    "compute_option_factors", "train_alpha_model", "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
+    "compute_option_factors", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
+    "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
 }

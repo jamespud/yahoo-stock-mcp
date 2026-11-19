@@ -55,6 +55,18 @@ def stock_forward_labels(bars: list[dict], horizon: int = 5) -> list[LabelRow]:
             else:
                 entry = rows[entry_index]
                 exit_row = rows[exit_index]
+                gap_days = (exit_row["start_at"].date() - entry["start_at"].date()).days
+                if gap_days > horizon + 2:
+                    entry_at = entry["start_at"]
+                    exit_at = exit_row["start_at"]
+                    available_at = max(entry["available_at"], exit_row["available_at"])
+                    labels.append(LabelRow(
+                        feature_decision_at=decision_at, entry_at=entry_at, exit_at=exit_at,
+                        label_available_at=available_at, label_value=None,
+                        label_quality=["MISSING_LABEL_SESSIONS"], instrument_id=symbol,
+                        label_name="stock_forward_return",
+                    ))
+                    continue
                 entry_at = entry["start_at"]
                 exit_at = exit_row["start_at"]
                 available_at = max(entry["available_at"], exit_row["available_at"])

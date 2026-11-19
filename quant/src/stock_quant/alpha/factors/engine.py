@@ -4,12 +4,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable
 
+import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from ...compiler import digest
 
 from ..contracts import DatasetManifest
 from ..data.catalog import DatasetStore
+from ..data.partitions import FEATURE_SCHEMA
 from ..errors import AlphaError, AlphaErrorCode
 from .compiler import CompiledFactorSpec
 from .operators import OPERATORS, apply_cross_section, apply_operator, operator_version
@@ -30,6 +33,7 @@ def compute_stock_factors(
     store: DatasetStore,
     rows: Iterable[dict] | None = None,
     checkpoint: Callable[[float], None] | None = None,
+    diagnostics: list[dict] | None = None,
 ) -> DatasetManifest:
     if dataset.dataset_kind != "stock_bars":
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Stock factors require a stock_bars dataset")
@@ -60,36 +64,88 @@ def compute_stock_factors(
                 transformed = apply_operator(node.operator, [source.iloc[indexes] for source in inputs], node.params)
                 series.loc[indexes] = transformed
         node_values[node_id] = series
-    feature_rows = []
-    for output in compiled.spec.outputs:
-        version = operator_version(compiled.node_map[output].operator)
-        for position, value in node_values[output].items():
-            numeric = None if pd.isna(value) else float(value)
-            feature_rows.append({
-                "decision_at": frame.at[position, "decision_at"].to_pydatetime(),
-                "instrument_id": frame.at[position, "instrument_id"],
-                "factor_name": output,
-                "factor_value": numeric,
-                "feature_available_at": frame.at[position, "available_at"].to_pydatetime(),
-                "eligible": numeric is not None,
-                "quality_flags": [] if numeric is not None else ["MISSING_VALUE"],
-                "factor_version": version,
-            })
-    feature_rows.sort(key=lambda row: (row["decision_at"], row["instrument_id"], row["factor_name"]))
+    if checkpoint:
+        checkpoint(0.75)
+    factor_diagnostics = stock_factor_diagnostics(frame, compiled, node_values)
+    if diagnostics is not None:
+        diagnostics.extend(factor_diagnostics)
+    feature_table = _feature_table(frame, compiled, node_values)
     if checkpoint:
         checkpoint(0.8)
     manifest = store.publish_feature_panel(
-        feature_rows,
+        feature_table,
         parent_dataset_id=dataset.dataset_id,
         factor_spec_hash=compiled.spec_hash,
-        instrument_ids=sorted({row["instrument_id"] for row in feature_rows}),
-        start_at=min(row["decision_at"] for row in feature_rows),
-        end_at=max(row["decision_at"] for row in feature_rows) + timedelta(microseconds=1),
+        instrument_ids=sorted(set(frame["instrument_id"].tolist())),
+        start_at=min(frame["decision_at"].tolist()),
+        end_at=max(frame["decision_at"].tolist()) + timedelta(microseconds=1),
         calendar_version=dataset.calendar_version,
         price_basis=dataset.price_basis,
         checkpoint=checkpoint,
     )
     return manifest
+
+
+def _feature_table(frame: pd.DataFrame, compiled: CompiledFactorSpec, node_values: dict[str, pd.Series]) -> pa.Table:
+    """Materialize a typed feature panel without per-row Python dictionaries."""
+    decision = pa.array(frame["decision_at"].to_numpy(), type=pa.timestamp("us", tz="UTC"))
+    available = pa.array(frame["available_at"].to_numpy(), type=pa.timestamp("us", tz="UTC"))
+    instrument = pa.array(frame["instrument_id"].to_numpy(), type=pa.string())
+    flag_values: list[str] = []
+    offsets = np.empty(frame.index.size + 1, dtype=np.int64)
+    tables = []
+    for output in compiled.spec.outputs:
+        version = operator_version(compiled.node_map[output].operator)
+        values = pa.array(node_values[output].to_numpy(dtype=float), type=pa.float64())
+        values_np = values.to_numpy(zero_copy_only=False)
+        missing_np = np.isnan(values_np)
+        values = pa.compute.if_else(pa.array(missing_np), None, values)
+        counts = missing_np.astype(np.int64)
+        offsets.fill(0)
+        np.cumsum(counts, out=offsets[1:])
+        flags = ["MISSING_VALUE"] * int(counts.sum())
+        flag_values.clear()
+        flag_values.extend(flags)
+        tables.append(pa.Table.from_arrays([
+            decision, instrument,
+            pa.array([output] * frame.index.size, type=pa.string()),
+            values, available,
+            pa.array(~missing_np, type=pa.bool_()),
+            pa.ListArray.from_arrays(pa.array(offsets, type=pa.int32()), pa.array(flag_values, type=pa.string())),
+            pa.array([version] * frame.index.size, type=pa.string()),
+        ], schema=FEATURE_SCHEMA))
+    return pa.concat_tables(tables)
+
+
+def stock_factor_diagnostics(frame: pd.DataFrame, compiled: CompiledFactorSpec, node_values: dict[str, pd.Series]) -> list[dict]:
+    """Per instrument/factor diagnostics; missingness is never treated as zero missingness."""
+    diagnostics = []
+    for instrument_id, group in frame.groupby("instrument_id", sort=True):
+        indexes = group.index
+        for output in compiled.spec.outputs:
+            values = node_values[output].reindex(indexes)
+            observed = int(group.index.size)
+            valid = int(values.notna().sum())
+            nonfinite = int(sum(1 for value in values.dropna() if not __import__("math").isfinite(float(value))))
+            warmup = compiled.lookback.get(output, 0)
+            warmup_missing = min(warmup, observed - valid - nonfinite if observed >= warmup else warmup)
+            unexpected_missing = max(0, observed - valid - nonfinite - warmup_missing)
+            valid_positions = [position for position, value in zip(group.index, values) if not pd.isna(value)]
+            diagnostics.append({
+                "instrument_id": instrument_id,
+                "factor_name": output,
+                "expected_observations": observed,
+                "observed_observations": observed,
+                "valid_values": valid,
+                "warmup_missing": warmup_missing,
+                "unexpected_missing": unexpected_missing,
+                "nonfinite_values": nonfinite,
+                "eligible_values": max(0, valid - nonfinite),
+                "coverage": valid / observed if observed else 0.0,
+                "first_valid_at": frame.at[valid_positions[0], "available_at"].isoformat() if valid_positions else None,
+                "last_valid_at": frame.at[valid_positions[-1], "available_at"].isoformat() if valid_positions else None,
+            })
+    return diagnostics
 
 
 def combine_feature_panels(

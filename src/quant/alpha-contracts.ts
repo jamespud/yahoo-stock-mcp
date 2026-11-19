@@ -26,6 +26,13 @@ export const optionExecutionConfig = z.object({
   initial_cash: z.number().positive().optional(),
   max_premium_fraction: z.number().positive().max(1).optional(),
 }).strict();
+export const developmentWindows = z.object({
+  train_start: z.string().datetime({ offset: true }),
+  train_end: z.string().datetime({ offset: true }),
+  validation_start: z.string().datetime({ offset: true }),
+  validation_end: z.string().datetime({ offset: true }),
+  embargo_days: z.number().int().min(0).max(252).optional(),
+}).strict();
 export const temporalWindows = z.object({
   train_start: z.string().datetime({ offset: true }),
   train_end: z.string().datetime({ offset: true }),
@@ -71,6 +78,24 @@ export const computeFactorsInput = z.object({
   auxiliary_feature_set_ids: z.array(alphaHash).max(8).optional(),
 }).strict();
 
+export const freezeAlphaSelectionInput = z.object({
+  research_protocol_hash: alphaHash,
+  candidate_ledger_hash: alphaHash,
+  selected_model_ids: z.array(alphaHash).min(1).max(1),
+  test_feature_set_id: alphaHash,
+  test_label_source_dataset_id: alphaHash,
+  test_start: z.string().datetime({ offset: true }),
+  test_end: z.string().datetime({ offset: true }),
+  selection_reason: z.string().min(1).max(1024),
+  label_name: z.string().min(1).max(128),
+  target_type: z.enum(["stock_return", "option_return", "option_iv_change", "stock_return_with_option_features"]).optional(),
+  horizon_days: z.number().int().min(1).max(252).optional(),
+}).strict();
+
+export const evaluateAlphaOOSInput = z.object({
+  freeze_id: alphaHash,
+}).strict();
+
 export const computeOptionFactorsInput = z.object({
   option_dataset_id: alphaHash,
   factor_spec: factorSpec,
@@ -78,10 +103,12 @@ export const computeOptionFactorsInput = z.object({
   underlying_price_dataset_id: alphaHash.optional(),
 }).strict();
 
-export const trainAlphaModelInput = z.object({
+export const trainAlphaModelInputFields = z.object({
+  evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
+  research_protocol_hash: alphaHash.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
-  windows: temporalWindows,
+  windows: z.union([temporalWindows, developmentWindows]),
   hyperparameters: z.record(z.number()).optional(),
   random_seed: z.number().int().optional(),
   resource_budget: z.object({
@@ -90,6 +117,24 @@ export const trainAlphaModelInput = z.object({
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
 }).strict();
+
+export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
+  if (value.evaluation_mode !== "validation_only") return;
+  if (!value.research_protocol_hash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["research_protocol_hash"],
+      message: "validation_only training requires research_protocol_hash",
+    });
+  }
+  if (!value.label_spec.stock_dataset_id) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["label_spec", "stock_dataset_id"],
+      message: "validation_only training currently requires stock_dataset_id",
+    });
+  }
+});
 
 export const predictAlphaInput = z.object({
   model_set_id: alphaHash,

@@ -1,0 +1,185 @@
+{
+  "commit_sha": "34f02eed6c72de3e8bea96f85ab0ce6a4b343a6b",
+  "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
+  "dataset_hashes": [
+    "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
+  ],
+  "factor_spec_hashes": [
+    "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
+    "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
+    "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
+    "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
+    "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
+    "sha256:84d6d0b4a3eb16061f18d5af7561d7c2a0ad85ff86825c41ffc830bf3ca61319"
+  ],
+  "model_hashes": {
+    "sha256:204ecc8a22f688c131eb275335738841f6df6831508768d5d21a7c153c33475e": "sha256:03ee1b40959fecb9b22fa642f2c3e8fd0d291327004de89756457ee456a08824",
+    "sha256:d5f2e601bdb1a293d6c5d0fd47935fd7d4303fb644ef874ea6725d3afcdac9bd": "sha256:7f9be5f954dbc2e076ed002d088b6839b6d7bc95fba922ba1474276a67f6286a",
+    "sha256:93ce5f0e3d05ce45bfbd734b4c3d7a1f378938f55457a75701e94ec119822ae0": "sha256:a6cf5b49b228d27a2804ab11981f9efc7e21103ebf1bd3be99150e63750bfdcb",
+    "sha256:ddba0cdcd0c5ecd7e2afde2d82d37e9347b8be91ba5e8980eb7cf328d001d261": "sha256:4003ab3d43e42cf75f3f94a27b0740419b77b5e27f5c07891e27aee788bce09e",
+    "sha256:12eca34fb0dddb8b603da01187c4fe8f6495eb3fd275edec21e1b1d2c775e31a": "sha256:a3e0201e56978b2c20a237a95bf435f4adbaaa5068eb1bab122efa5c8e6ef1dc",
+    "sha256:97f605c08828a014e1b259b9caacd9bf1dcd9ab038b2dc450869492dc4c63a11": "sha256:459bd9535fba24b2e3a63add245216382bc02371995f364582a5e5026a889b58"
+  },
+  "tool_catalog_hash": "sha256:92778c98eee2476ab1b32d081461d14e081a315daf6171edf03f9fe69000af50",
+  "status": "PASS",
+  "job_ids": [
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_598a2b23428f4557b5abbc15d778e3cb",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_622e45534b8e44b7ba42e20dc34ef0f7",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_af8a5c2aa9494ae19cd79c7c184fe17a",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_4d5e0165eb094cdf90bb57763263cb79",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_5d9f12306d11450bb40c1be3547bfee1",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_3cacd70a6dc64d80b103d04686d7439e",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_bce37b8a880d4214a2788f5a72f10c08",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_05ffd9f6d01a4632b11dd411ae8381cc",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_97d43a038de049c98264d4780f47c7db",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_6c5356a414fa481eb23b6950e7cd4f9f",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_8cd042e009c9490cad1a26fdb3ecd217",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_3db6976a778f472aa616d044696f742f",
+      "attempts": 1
+    },
+    {
+      "kind": "freeze_alpha_selection",
+      "job_id": "alpha_ca16e96b8bb44195b38808872726a5bf",
+      "attempts": 1
+    },
+    {
+      "kind": "evaluate_alpha_oos",
+      "job_id": "alpha_1d86354769084cddaee3b85270d604f7",
+      "attempts": 1
+    }
+  ],
+  "execution_attempts": [
+    {
+      "alpha_598a2b23428f4557b5abbc15d778e3cb": 1
+    },
+    {
+      "alpha_622e45534b8e44b7ba42e20dc34ef0f7": 1
+    },
+    {
+      "alpha_af8a5c2aa9494ae19cd79c7c184fe17a": 1
+    },
+    {
+      "alpha_4d5e0165eb094cdf90bb57763263cb79": 1
+    },
+    {
+      "alpha_5d9f12306d11450bb40c1be3547bfee1": 1
+    },
+    {
+      "alpha_3cacd70a6dc64d80b103d04686d7439e": 1
+    },
+    {
+      "alpha_bce37b8a880d4214a2788f5a72f10c08": 1
+    },
+    {
+      "alpha_05ffd9f6d01a4632b11dd411ae8381cc": 1
+    },
+    {
+      "alpha_97d43a038de049c98264d4780f47c7db": 1
+    },
+    {
+      "alpha_6c5356a414fa481eb23b6950e7cd4f9f": 1
+    },
+    {
+      "alpha_8cd042e009c9490cad1a26fdb3ecd217": 1
+    },
+    {
+      "alpha_3db6976a778f472aa616d044696f742f": 1
+    },
+    {
+      "alpha_ca16e96b8bb44195b38808872726a5bf": 1
+    },
+    {
+      "alpha_1d86354769084cddaee3b85270d604f7": 1
+    }
+  ],
+  "research_parameters": {
+    "train": [
+      "2017-07-03T00:00:00Z",
+      "2022-01-01T00:00:00Z"
+    ],
+    "validation": [
+      "2022-01-14T00:00:00Z",
+      "2024-01-01T00:00:00Z"
+    ],
+    "test": [
+      "2024-01-15T00:00:00Z",
+      "2026-11-18T00:00:00Z"
+    ],
+    "embargo_days": 5,
+    "label": "stock_forward_return",
+    "horizon_days": 5,
+    "random_seed": 20261119,
+    "selection_rule": "highest validation rank_ic_mean with prediction_coverage >= 0.8"
+  },
+  "freeze_id": "sha256:7aac3da29593f053670b951f398537f7374cd7acbcbaad709035e104e9dd1eea",
+  "oos_summary": {
+    "rank_ic_mean": 0.006761322978107036,
+    "rank_ic_std": 0.141003344901017,
+    "icir": 0.047951507695462255,
+    "quantile_returns": {
+      "0": -0.004820135843595629,
+      "1": -0.0007147080813014055,
+      "2": 0.007082135969806226,
+      "3": 0.0022154600307028216,
+      "4": 0.012438819613289402
+    },
+    "top_bottom_spread": 0.01725895545688503,
+    "prediction_coverage": 1,
+    "valid_pair_count": 56925,
+    "eligible_count": 56925,
+    "excluded_count": 0,
+    "exclusion_reasons": {},
+    "sample_count": 56925,
+    "evaluation_window": {
+      "end": "2026-11-18T00:00:00+00:00",
+      "start": "2024-01-15T00:00:00+00:00"
+    },
+    "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation"
+  }
+}

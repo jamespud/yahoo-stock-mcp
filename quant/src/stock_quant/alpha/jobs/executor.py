@@ -25,14 +25,16 @@ from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
+from ..models.oos_evaluation import evaluate_alpha_oos
+from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
-    ComputeFactorsJob, ComputeOptionFactorsJob, PrepareOptionsDatasetJob, PrepareStockDatasetJob,
-    PredictAlphaJob, TrainAlphaModelJob,
+    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, FreezeAlphaSelectionJob,
+    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
 )
 
 
@@ -67,6 +69,13 @@ def _manifest_payload(manifest: DatasetManifest) -> dict:
             "data_quality": manifest.data_quality, "dataset": manifest.model_dump(mode="json")}
 
 
+def train_development_labels(label_rows, split):
+    """Filter externally supplied label rows to the development split cutoff."""
+    from ..models.temporal_split import split_matured_development
+    matured = split_matured_development(label_rows, split)
+    return matured["train"] + matured["validation"]
+
+
 def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
     began = time.monotonic()
     try:
@@ -79,6 +88,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         staging_registry = AlphaModelRegistry(Path(store.path).with_suffix(f".models-staging-{claim['id']}"))
         pending = []
         staged_model = None
+        staged_freeze = None
         def bounded(progress):
             if time.monotonic() - began > request.max_seconds:
                 raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Alpha job exceeded max_seconds")
@@ -126,13 +136,14 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             except KeyError as error:
                 raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Dataset was not found", {"dataset_id": request.dataset_id}) from error
             compiled = compile_factor_spec(FactorSpec.model_validate(request.factor_spec))
-            feature = compute_stock_factors(manifest, compiled, store=datasets, checkpoint=bounded)
+            factor_diagnostics = []
+            feature = compute_stock_factors(manifest, compiled, store=datasets, checkpoint=bounded, diagnostics=factor_diagnostics)
             if request.auxiliary_feature_set_ids:
                 feature = combine_feature_panels(feature, [datasets.load_manifest(item) for item in request.auxiliary_feature_set_ids], store=datasets)
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id, "factor_spec_hash": compiled.spec_hash}],
-                      "factor_diagnostics": [], "reproducibility": {"dataset_id": request.dataset_id, "factor_spec_hash": compiled.spec_hash}}
+                      "factor_diagnostics": factor_diagnostics, "reproducibility": {"dataset_id": request.dataset_id, "factor_spec_hash": compiled.spec_hash}}
         elif isinstance(request, ComputeOptionFactorsJob):
             manifest = datasets.load_manifest(request.option_dataset_id)
             prices = {}
@@ -151,27 +162,99 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             feature = compute_option_factors(manifest, store=datasets, underlying_prices=prices, pricing_config=config,
                                              selected_outputs=selected_outputs, quote_tolerance_seconds=tolerance, checkpoint=bounded)
             pending.append(feature)
+            pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
-            if request.stock_dataset_id:
+            if request.evaluation_mode == "validation_only":
+                if not request.stock_dataset_id:
+                    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                labels = stock_forward_labels(
+                    datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
+                    horizon=request.horizon_days,
+                )
+            elif request.stock_dataset_id:
                 labels = stock_forward_labels(datasets.read_rows(request.stock_dataset_id), horizon=request.horizon_days)
             elif request.option_dataset_id:
                 manifest = datasets.load_manifest(request.option_dataset_id)
                 labels, _ = historical_option_labels(manifest, datasets, horizon_days=request.horizon_days)
             if labels is None:
                 raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "A label source dataset is required")
-            train_req = TrainAlphaRequest(feature_set_id=request.feature_set_id, label_name=request.label_name,
-                                          target_type=request.target_type, split=request.split,
-                                          hyperparameters={key: value for key, value in request.hyperparameters.items()},
-                                          random_seed=request.random_seed, resource_budget=request.resource_budget,
-                                          min_rank_ic=request.min_rank_ic)
+            train_req = TrainAlphaRequest(
+                feature_set_id=request.feature_set_id,
+                label_source_dataset_id=request.stock_dataset_id or request.option_dataset_id,
+                label_name=request.label_name, horizon_days=request.horizon_days,
+                target_type=request.target_type, evaluation_mode=request.evaluation_mode,
+                research_protocol_hash=request.research_protocol_hash, split=request.split,
+                hyperparameters={key: value for key, value in request.hyperparameters.items()},
+                random_seed=request.random_seed, resource_budget=request.resource_budget,
+                min_rank_ic=request.min_rank_ic,
+            )
             model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
             staged_model = model
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
                       "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+        elif isinstance(request, FreezeAlphaSelectionJob):
+            freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
+            freeze_request = FreezeRequest(
+                research_protocol_hash=request.research_protocol_hash,
+                candidate_ledger_hash=request.candidate_ledger_hash,
+                selected_model_ids=request.selected_model_ids,
+                test_feature_set_id=request.test_feature_set_id,
+                test_label_source_dataset_id=request.test_label_source_dataset_id,
+                test_start=request.test_start,
+                test_end=request.test_end,
+                selection_reason=request.selection_reason,
+                label_name=request.label_name,
+                target_type=request.target_type,
+                horizon_days=request.horizon_days,
+            )
+            record = freeze_alpha_selection(
+                freeze_request, store=datasets, model_registry=final_registry,
+            )
+            staged_freeze = (freeze_store, record)
+            result = {
+                "summary": record.model_dump(mode="json"),
+                "reproducibility": {
+                    "freeze_id": record.freeze_id,
+                    "research_protocol_hash": record.research_protocol_hash,
+                    "candidate_ledger_hash": record.candidate_ledger_hash,
+                },
+            }
+        elif isinstance(request, EvaluateAlphaOOSJob):
+            completed_freeze = store.completed_freeze_job(request.freeze_id)
+            if completed_freeze is None:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "OOS evaluation requires a completed Alpha freeze job",
+                    {"freeze_id": request.freeze_id},
+                )
+            try:
+                completed_record = FrozenResearchRecord.model_validate(completed_freeze["record"])
+            except Exception as error:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Completed freeze job contains an invalid freeze record",
+                    {"freeze_id": request.freeze_id, "reason": str(error)},
+                ) from error
+            freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
+            record = freeze_store.materialize(completed_record)
+            evaluation = evaluate_alpha_oos(
+                record, store=datasets, model_registry=final_registry, checkpoint=bounded,
+            )
+            prediction = datasets.load_published_manifest(evaluation["prediction_dataset_id"])
+            pending.append(prediction)
+            result = {
+                "summary": evaluation["summary"],
+                "rank_ic": evaluation["rank_ic"],
+                "reproducibility": {
+                    "freeze_id": record.freeze_id,
+                    "prediction_dataset_id": prediction.dataset_id,
+                    "model_ids": record.frozen_model_ids,
+                },
+            }
         elif isinstance(request, PredictAlphaJob):
             prediction = predict_alpha(request.model_set_id, request.feature_set_id, request.start, request.end, store=datasets, registry=final_registry)
             pending.append(prediction)
@@ -197,6 +280,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
         if not store.begin_publish(claim, result):
             return False
+        staged_freeze_path = None
         try:
             def publish_checkpoint():
                 if not store.heartbeat(claim, .99):
@@ -205,9 +289,26 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 datasets.register(manifest, checkpoint=publish_checkpoint)
             if staged_model is not None:
                 final_registry.commit_from(staging_registry, staged_model.model_id, checkpoint=publish_checkpoint)
-            return store.complete_publish(claim)
+            if staged_freeze is not None:
+                freeze_store, freeze_record = staged_freeze
+                staged_freeze_path = freeze_store.stage(freeze_record, checkpoint=publish_checkpoint)
+            completed = store.complete_publish(claim)
         except Exception as error:
+            if staged_freeze_path is not None and staged_freeze_path.exists():
+                staged_freeze_path.unlink()
             return store.fail_publish(claim, error, "EXECUTION_FAILED")
+        if not completed:
+            if staged_freeze_path is not None and staged_freeze_path.exists():
+                staged_freeze_path.unlink()
+            return False
+        if staged_freeze is not None:
+            freeze_store, freeze_record = staged_freeze
+            try:
+                freeze_store.finalize(freeze_record, staged_freeze_path)
+            except Exception:
+                # The completed job result is authoritative; OOS materializes from it if needed.
+                pass
+        return True
     except AlphaError as error:
         return store.fail_publish(claim, error, error.code.value)
     except FactorCompileError as error:

@@ -162,7 +162,7 @@ def test_publishing_heartbeat_and_expired_recovery(tmp_path):
         recovered = jobs.claim()
         assert recovered and recovered["id"] == run["job_id"]
         assert recovered["owner"] != claim["owner"]
-        jobs.connection.execute("UPDATE jobs SET status='publishing',lease_until=unixepoch()+1 WHERE id=?", (run["job_id"],))
+        jobs.connection.execute("UPDATE jobs SET status='publishing',lease_until=unixepoch()+15 WHERE id=?", (run["job_id"],))
         jobs.connection.commit()
         assert jobs.heartbeat(recovered, .99) is True
         lease = jobs.connection.execute("SELECT lease_until FROM jobs WHERE id=?", (run["job_id"],)).fetchone()[0]

@@ -25,7 +25,9 @@ first. For factor, option, model and reporting details read the local references
 - `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
 - `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
-- `quant_train_alpha_model` - train deterministic LightGBM with chronological train/validation/test separation.
+- `quant_train_alpha_model` - train deterministic LightGBM in explicit Validation-only or legacy mode. Validation-only mode must not read or evaluate Test data.
+- `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
+- `quant_evaluate_alpha_oos` - submit one independent OOS evaluation that reads only the frozen model and Test inputs.
 - `quant_predict_alpha` - predict with a frozen model set over a later period.
 - `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio.
 - `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
@@ -49,7 +51,7 @@ first. For factor, option, model and reporting details read the local references
 5. Define labels and windows before training. Require `label_available_at <= split_end`, purge overlap,
    apply any embargo, and keep stock-return, option-return and IV-change labels separate. Never place
    immature labels in train, validation or test.
-6. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
+6. Prefer `evaluation_mode="validation_only"`. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
    Train-only preprocessing, validation-based selection and one frozen OOS read are mandatory. Inspect
    coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. OOS
    measurements are report-only and never automatically certify or select a model.
