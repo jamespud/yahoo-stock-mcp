@@ -39,3 +39,21 @@ def test_factor_diagnostics_cover_warmup_and_valid_values(tmp_path):
         assert set(row)>= {'instrument_id','factor_name','expected_observations','observed_observations','valid_values','warmup_missing','unexpected_missing','nonfinite_values','eligible_values','coverage','first_valid_at','last_valid_at'}
     assert row['warmup_missing']==1
     assert row['valid_values']==9
+
+
+def test_factor_job_result_includes_diagnostics(tmp_path):
+    from stock_quant.jobs import JobStore, execute_job
+    from stock_quant.alpha.factors.ast import FactorSpec
+    store = DatasetStore(tmp_path / "registry.alpha")
+    request = __import__('stock_quant.alpha.contracts', fromlist=['StockDatasetRequest']).StockDatasetRequest(
+        source='fixture', symbols=['AAPL', 'MSFT'], start=datetime(2024, 1, 1, tzinfo=timezone.utc), end=datetime(2024, 1, 11, tzinfo=timezone.utc))
+    dataset = store.publish_stock(request, _rows(), calendar_version='fixture', source_version='v1', data_quality={})
+    with JobStore(tmp_path / "registry.sqlite3") as jobs:
+        run = jobs.submit_alpha({"kind": "compute_factors", "dataset_id": dataset.dataset_id,
+                                 "factor_spec": {"schema_version": "1.0", "timeframe": "1d",
+                                                 "nodes": [{"id": "ret", "operator": "pct_change", "inputs": ["close"], "params": {"period": 1}}],
+                                                 "outputs": ["ret"]}})
+        assert execute_job(jobs, jobs.claim()) is True
+        diagnostics = jobs.get_result(run["job_id"], "factor_diagnostics")
+        assert diagnostics["rows"]
+        assert {"instrument_id", "factor_name", "warmup_missing", "unexpected_missing", "coverage"} <= set(diagnostics["rows"][0])

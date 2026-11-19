@@ -33,6 +33,7 @@ def compute_stock_factors(
     store: DatasetStore,
     rows: Iterable[dict] | None = None,
     checkpoint: Callable[[float], None] | None = None,
+    diagnostics: list[dict] | None = None,
 ) -> DatasetManifest:
     if dataset.dataset_kind != "stock_bars":
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Stock factors require a stock_bars dataset")
@@ -65,6 +66,9 @@ def compute_stock_factors(
         node_values[node_id] = series
     if checkpoint:
         checkpoint(0.75)
+    factor_diagnostics = stock_factor_diagnostics(frame, compiled, node_values)
+    if diagnostics is not None:
+        diagnostics.extend(factor_diagnostics)
     feature_table = _feature_table(frame, compiled, node_values)
     if checkpoint:
         checkpoint(0.8)

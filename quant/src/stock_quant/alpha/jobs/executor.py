@@ -133,13 +133,14 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             except KeyError as error:
                 raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Dataset was not found", {"dataset_id": request.dataset_id}) from error
             compiled = compile_factor_spec(FactorSpec.model_validate(request.factor_spec))
-            feature = compute_stock_factors(manifest, compiled, store=datasets, checkpoint=bounded)
+            factor_diagnostics = []
+            feature = compute_stock_factors(manifest, compiled, store=datasets, checkpoint=bounded, diagnostics=factor_diagnostics)
             if request.auxiliary_feature_set_ids:
                 feature = combine_feature_panels(feature, [datasets.load_manifest(item) for item in request.auxiliary_feature_set_ids], store=datasets)
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id, "factor_spec_hash": compiled.spec_hash}],
-                      "factor_diagnostics": [], "reproducibility": {"dataset_id": request.dataset_id, "factor_spec_hash": compiled.spec_hash}}
+                      "factor_diagnostics": factor_diagnostics, "reproducibility": {"dataset_id": request.dataset_id, "factor_spec_hash": compiled.spec_hash}}
         elif isinstance(request, ComputeOptionFactorsJob):
             manifest = datasets.load_manifest(request.option_dataset_id)
             prices = {}
@@ -160,6 +161,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
+            pending.append(feature)
+            result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
+                      "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": factor_diagnostics}
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
             if request.stock_dataset_id:
