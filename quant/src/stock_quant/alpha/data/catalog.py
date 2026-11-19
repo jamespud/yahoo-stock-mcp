@@ -7,6 +7,9 @@ import re
 import shutil
 import sqlite3
 import tempfile
+
+import numpy as np
+import pyarrow as pa
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
@@ -152,9 +155,16 @@ class DatasetStore:
     ) -> DatasetManifest:
         grouped: dict[str, list[dict]] = {}
         total = 0
-        for row in rows:
-            grouped.setdefault(row["factor_name"], []).append(row)
-            total += 1
+        table = rows if isinstance(rows, pa.Table) else None
+        if table is not None:
+            factor_names = table["factor_name"].to_pylist()
+            total = table.num_rows
+            for factor_name in sorted(set(factor_names)):
+                grouped[factor_name] = np.flatnonzero(np.asarray(factor_names) == factor_name).tolist()
+        else:
+            for row in rows:
+                grouped.setdefault(row["factor_name"], []).append(row)
+                total += 1
         if not grouped:
             raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No factor rows to publish")
         stage = Path(tempfile.mkdtemp(prefix="stage-", dir=self.staging))
@@ -165,7 +175,8 @@ class DatasetStore:
                     checkpoint(ordinal / max(1, len(grouped)))
                 safe = re.sub(r"[^A-Za-z0-9_.-]", "_", factor_name)
                 logical = f"feature_panel/factor_name={safe}/part-00000.parquet"
-                file_hash, schema_hash, row_count, byte_count = write_feature_partition(stage / logical, factor_rows)
+                payload = table.take(factor_rows) if table is not None else factor_rows
+                file_hash, schema_hash, row_count, byte_count = write_feature_partition(stage / logical, payload)
                 partitions.append(DatasetPartition(ordinal=ordinal, logical_path=logical, format=FORMAT, content_hash=file_hash, schema_hash=schema_hash, row_count=row_count, byte_count=byte_count))
             capture = datetime.now(timezone.utc)
             body = {

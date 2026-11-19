@@ -9,6 +9,8 @@ import base64
 from datetime import datetime
 import json
 from pathlib import Path
+import sqlite3
+import threading
 import time
 from uuid import uuid4
 from typing import Annotated, Literal
@@ -451,6 +453,27 @@ def execute_job(store: JobStore, claim: dict) -> bool:
                 return store.finish(claim, error=ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed"), error_code="DATA_UNAVAILABLE")
             if not store.heartbeat(claim):
                 return False
+            heartbeat_stop = threading.Event()
+            def alpha_heartbeat():
+                connection = sqlite3.connect(store.path, timeout=30)
+                connection.execute("PRAGMA busy_timeout=30000")
+                try:
+                    while not heartbeat_stop.wait(1.0):
+                        row = connection.execute(
+                            "SELECT 1 FROM jobs WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()",
+                            (claim["id"], claim["owner"]),
+                        ).fetchone()
+                        if row is None:
+                            break
+                        connection.execute(
+                            "UPDATE jobs SET lease_until=unixepoch()+15 WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()",
+                            (claim["id"], claim["owner"]),
+                        )
+                        connection.commit()
+                finally:
+                    connection.close()
+            heartbeat_thread = threading.Thread(target=alpha_heartbeat, name="alpha-job-heartbeat", daemon=True)
+            heartbeat_thread.start()
             began = time.monotonic()
             last_check = 0.0
             def alpha_checkpoint(progress):
@@ -461,9 +484,13 @@ def execute_job(store: JobStore, claim: dict) -> bool:
                         raise OwnershipLost()
                     last_check = now
             try:
-                return execute_alpha_job(store, claim, alpha_checkpoint)
+                result = execute_alpha_job(store, claim, alpha_checkpoint)
+                return result
             except OwnershipLost:
                 return False
+            finally:
+                heartbeat_stop.set()
+                heartbeat_thread.join(timeout=2)
         request = REQUEST_ADAPTER.validate_python(claim["request"])
         if digest(request.model_dump(mode="json")) != claim["config_hash"]:
             raise ValueError("Job configuration integrity check failed")
