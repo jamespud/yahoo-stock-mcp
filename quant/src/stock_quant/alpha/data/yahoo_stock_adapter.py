@@ -9,6 +9,7 @@ from pathlib import Path
 from ...calendar import generate_calendar
 from ..contracts import StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
+from .exchange_mapping import build_exchange_mapping
 from .partitions import StockBarRow
 from .stock_dataset import StockHistoryBatch
 
@@ -44,10 +45,30 @@ class YahooStockAdapter:
             missing_symbols = [symbol for symbol in request.symbols if symbol not in instruments]
             bars, missing_ohlcv, non_session = [], 0, []
             session_dates_by_symbol: dict[str, list] = defaultdict(list)
+            exchange_mappings = {}
             for symbol in request.symbols:
                 instrument = instruments.get(symbol)
                 if instrument is None:
                     continue
+                mapping = build_exchange_mapping(
+                    symbol,
+                    instrument["exchange"],
+                    start_date=request.start.date(),
+                    end_date=request.end.date(),
+                )
+                if mapping["calendar_mapping_status"] not in {"VERIFIED", "PROXY_ONLY"}:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Source exchange cannot be mapped to a trading calendar",
+                        {"symbol": symbol, "source_exchange": instrument["exchange"], "mapping_status": mapping["calendar_mapping_status"]},
+                    )
+                if mapping["calendar_name"] != calendar.calendar_name or mapping["session_dates"] != [str(session.date) for session in calendar.sessions]:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Per-instrument calendar differs from requested dataset calendar",
+                        {"symbol": symbol, "calendar_name": mapping["calendar_name"], "dataset_calendar_name": calendar.calendar_name},
+                    )
+                exchange_mappings[symbol] = mapping
                 query = "SELECT * FROM daily_bars WHERE instrument_id=? AND trade_date>=? AND trade_date<? ORDER BY trade_date"
                 for bar in connection.execute(query, (instrument["id"], request.start.date().isoformat(), request.end.date().isoformat())):
                     session = sessions.get(__import__("datetime").date.fromisoformat(bar["trade_date"]))
@@ -89,6 +110,7 @@ class YahooStockAdapter:
             calendar_id=calendar.id,
             calendar_session_dates=[session.date for session in calendar.sessions],
             session_dates_by_symbol=dict(session_dates_by_symbol),
+            exchange_mappings=exchange_mappings,
             source_version="yahoo-local-sqlite-v1",
             quality={
                 "provider": "yahoo_local_sqlite",
@@ -98,6 +120,9 @@ class YahooStockAdapter:
                 "price_basis_unverified": request.price_basis == "price_basis_unverified",
                 "calendar_provider": calendar.provider,
                 "calendar_provider_version": calendar.provider_version,
+                "calendar_mapping_status_by_symbol": {
+                    symbol: mapping["calendar_mapping_status"] for symbol, mapping in sorted(exchange_mappings.items())
+                },
                 "publication_delay_seconds": self.publication_delay_seconds,
             },
         )

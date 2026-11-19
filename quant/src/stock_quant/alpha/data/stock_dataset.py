@@ -20,6 +20,7 @@ class StockHistoryBatch(StrictModel):
     calendar_id: str | None = Field(default=None, max_length=160)
     calendar_session_dates: list[date] = Field(default_factory=list)
     session_dates_by_symbol: dict[str, list[date]] = Field(default_factory=dict)
+    exchange_mappings: dict[str, dict] = Field(default_factory=dict)
     source_version: str = Field(min_length=1, max_length=128)
     quality: dict = Field(default_factory=dict)
 
@@ -55,6 +56,11 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
         "session_coverage": aggregate_session_coverage(session_reports),
         "session_coverage_by_symbol": session_reports,
         "calendar_id": batch.calendar_id or batch.calendar_version,
+        "exchange_mappings": batch.exchange_mappings,
+        "calendar_mapping_status_by_symbol": {
+            symbol: mapping.get("calendar_mapping_status", "UNVERIFIED")
+            for symbol, mapping in sorted(batch.exchange_mappings.items())
+        },
         "price_basis": request.price_basis,
         "missing_rows_filled": False,
     }
