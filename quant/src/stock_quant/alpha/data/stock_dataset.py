@@ -1,6 +1,7 @@
 """Stock dataset preparation and provider boundary."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Callable, Protocol
 
 from pydantic import Field
@@ -10,11 +11,15 @@ from ..contracts import DatasetManifest, StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
 from .catalog import DatasetStore
 from .partitions import StockBarRow
+from .session_coverage import aggregate_session_coverage, audit_session_coverage
 
 
 class StockHistoryBatch(StrictModel):
     rows: list[StockBarRow]
     calendar_version: str = Field(min_length=1, max_length=128)
+    calendar_id: str | None = Field(default=None, max_length=160)
+    calendar_session_dates: list[date] = Field(default_factory=list)
+    session_dates_by_symbol: dict[str, list[date]] = Field(default_factory=dict)
     source_version: str = Field(min_length=1, max_length=128)
     quality: dict = Field(default_factory=dict)
 
@@ -30,6 +35,14 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
             counts[row.instrument_id] += 1
     missing = sorted(symbol for symbol, count in counts.items() if count == 0)
     total = sum(counts.values())
+    symbol_presence_coverage = (sum(1 for count in counts.values() if count) / len(counts)) if counts else 0.0
+    session_reports = audit_session_coverage(
+        batch.rows,
+        requested_symbols=request.symbols,
+        calendar_session_dates=batch.calendar_session_dates,
+        calendar_id=batch.calendar_id or batch.calendar_version,
+        session_dates_by_symbol=batch.session_dates_by_symbol,
+    )
     return {
         **batch.quality,
         "requested_symbols": len(request.symbols),
@@ -37,7 +50,11 @@ def _quality(request: StockDatasetRequest, batch: StockHistoryBatch) -> dict:
         "row_count": total,
         "rows_by_symbol": counts,
         "missing_symbols": missing,
-        "coverage": (sum(1 for count in counts.values() if count) / len(counts)) if counts else 0.0,
+        "coverage": symbol_presence_coverage,
+        "symbol_presence_coverage": symbol_presence_coverage,
+        "session_coverage": aggregate_session_coverage(session_reports),
+        "session_coverage_by_symbol": session_reports,
+        "calendar_id": batch.calendar_id or batch.calendar_version,
         "price_basis": request.price_basis,
         "missing_rows_filled": False,
     }

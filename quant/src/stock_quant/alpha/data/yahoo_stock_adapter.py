@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
 
@@ -42,6 +43,7 @@ class YahooStockAdapter:
                 instruments[row["symbol"].upper()] = row
             missing_symbols = [symbol for symbol in request.symbols if symbol not in instruments]
             bars, missing_ohlcv, non_session = [], 0, []
+            session_dates_by_symbol: dict[str, list] = defaultdict(list)
             for symbol in request.symbols:
                 instrument = instruments.get(symbol)
                 if instrument is None:
@@ -49,6 +51,7 @@ class YahooStockAdapter:
                 query = "SELECT * FROM daily_bars WHERE instrument_id=? AND trade_date>=? AND trade_date<? ORDER BY trade_date"
                 for bar in connection.execute(query, (instrument["id"], request.start.date().isoformat(), request.end.date().isoformat())):
                     session = sessions.get(__import__("datetime").date.fromisoformat(bar["trade_date"]))
+                    session_dates_by_symbol[symbol].append(__import__("datetime").date.fromisoformat(bar["trade_date"]))
                     if session is None:
                         non_session.append(f"{symbol}:{bar['trade_date']}")
                         continue
@@ -83,6 +86,9 @@ class YahooStockAdapter:
         return StockHistoryBatch(
             rows=bars,
             calendar_version=calendar.version,
+            calendar_id=calendar.id,
+            calendar_session_dates=[session.date for session in calendar.sessions],
+            session_dates_by_symbol=dict(session_dates_by_symbol),
             source_version="yahoo-local-sqlite-v1",
             quality={
                 "provider": "yahoo_local_sqlite",
@@ -91,6 +97,7 @@ class YahooStockAdapter:
                 "missing_ohlcv_rows": missing_ohlcv,
                 "price_basis_unverified": request.price_basis == "price_basis_unverified",
                 "calendar_provider": calendar.provider,
+                "calendar_provider_version": calendar.provider_version,
                 "publication_delay_seconds": self.publication_delay_seconds,
             },
         )
