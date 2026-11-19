@@ -1,5 +1,5 @@
 {
-  "commit_sha": "e25bf7275f4c65b3819f6ac8781a666c4fe5f185",
+  "commit_sha": "e7da60f1050063701c4268618c5e652ae3f3c571",
   "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
   "dataset_hashes": [
     "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
@@ -14,12 +14,147 @@
   ],
   "tool_catalog_hash": "sha256:92778c98eee2476ab1b32d081461d14e081a315daf6171edf03f9fe69000af50",
   "status": "PASS",
+  "job_ids": [
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_d2820ab746524b198f86dcd9acbc3a44",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_fd7c3f94193a4053a4b3a74b0cb41a76",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_ee3f1178ea734bb889141f47bd88a316",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_1440ff9248c94c079882e9be6c55a06c",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_154dc9b859a747bb90593cdfee94d267",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_85d8145eea334da79ac4895328928f20",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_559ecd037c78425b801b36561e5179ae",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_6b0fc15d9a914966898e2df1e605be12",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_90aa83de78324950b84222cbaedc2ffc",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_528ab170104641f6873325ef35120f0b",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_91269d6fbf65455db5cf67d2ff3e0313",
+      "attempts": 1
+    },
+    {
+      "kind": "freeze_alpha_selection",
+      "job_id": "alpha_a5002551b90f4fb2b66f323ed1543774",
+      "attempts": 1
+    },
+    {
+      "kind": "evaluate_alpha_oos",
+      "job_id": "alpha_6b695fc3843c4364b162ec8f92ed096e",
+      "attempts": 1
+    }
+  ],
+  "execution_attempts": [
+    {
+      "alpha_d2820ab746524b198f86dcd9acbc3a44": 1
+    },
+    {
+      "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b": 1
+    },
+    {
+      "alpha_fd7c3f94193a4053a4b3a74b0cb41a76": 1
+    },
+    {
+      "alpha_ee3f1178ea734bb889141f47bd88a316": 1
+    },
+    {
+      "alpha_1440ff9248c94c079882e9be6c55a06c": 1
+    },
+    {
+      "alpha_154dc9b859a747bb90593cdfee94d267": 1
+    },
+    {
+      "alpha_85d8145eea334da79ac4895328928f20": 1
+    },
+    {
+      "alpha_559ecd037c78425b801b36561e5179ae": 1
+    },
+    {
+      "alpha_6b0fc15d9a914966898e2df1e605be12": 1
+    },
+    {
+      "alpha_90aa83de78324950b84222cbaedc2ffc": 1
+    },
+    {
+      "alpha_528ab170104641f6873325ef35120f0b": 1
+    },
+    {
+      "alpha_91269d6fbf65455db5cf67d2ff3e0313": 1
+    },
+    {
+      "alpha_a5002551b90f4fb2b66f323ed1543774": 1
+    },
+    {
+      "alpha_6b695fc3843c4364b162ec8f92ed096e": 1
+    }
+  ],
+  "research_parameters": {
+    "train": [
+      "2017-07-03T00:00:00Z",
+      "2022-01-01T00:00:00Z"
+    ],
+    "validation": [
+      "2022-01-14T00:00:00Z",
+      "2024-01-01T00:00:00Z"
+    ],
+    "test": [
+      "2024-01-15T00:00:00Z",
+      "2026-11-18T00:00:00Z"
+    ],
+    "embargo_days": 5,
+    "label": "stock_forward_return",
+    "horizon_days": 5,
+    "random_seed": 20261119,
+    "selection_rule": "highest validation rank_ic_mean with prediction_coverage >= 0.8"
+  },
   "candidate_ledger_hash": [
     {
       "candidate": "H01",
-      "factor_spec_hash": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
       "feature_set_id": "sha256:ac04a9ccfc43a120d974b07ef45d4edcb3ba890393d19e33c0e4b5c39dda44f8",
-      "model_id": "sha256:572ca46d4c24d8dfe84550da35b5d5ced1b0641d8195f009e614dbf0068adc04",
+      "factor_spec_hash": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
+      "model_id": "sha256:9c1b70b808a44433bd60d87530b4bb02b80902c5f396719bba671c87c2b0a131",
       "validation_metrics": {
         "decision_count": 397,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -3619,9 +3754,9 @@
     },
     {
       "candidate": "H02",
-      "factor_spec_hash": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
       "feature_set_id": "sha256:cea35742c5ab13fd7e034dbc4f2c3c211cdf344e7c24319e6603c4ecded3501b",
-      "model_id": "sha256:bab442d9e436e7959cf1fc512db6c284ad9501ce8ba76c3409bef087727088f0",
+      "factor_spec_hash": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
+      "model_id": "sha256:3482e4edb511d0eeddb685fc5ca2938c5c0e3d9524a5f3179d6cb871bd1a0442",
       "validation_metrics": {
         "decision_count": 387,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -7211,9 +7346,9 @@
     },
     {
       "candidate": "H03",
-      "factor_spec_hash": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
       "feature_set_id": "sha256:b1e1bbf1e115bf7b554d6cc8bbf006dd541a0160d6cdf51e8bc8402acf9790ef",
-      "model_id": "sha256:94c5f671eb1f70b4a5128039a9a81549b9c4600d219fe7520676b1ac0245f359",
+      "factor_spec_hash": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
+      "model_id": "sha256:07c6372f35cc9ed87e70785b60b1cded6905e29f6e52ddcb5e7c69d8f95170df",
       "validation_metrics": {
         "decision_count": 398,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -10814,9 +10949,9 @@
     },
     {
       "candidate": "H04",
-      "factor_spec_hash": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
       "feature_set_id": "sha256:368b09e6d7230d922ce8a83cb88382e9d63d6e4c74914a15b0e5aca5306e80fc",
-      "model_id": "sha256:54b691f5fe634f086de402bab7d6ad18a629391c6b785833cd6e91f2e5f17c09",
+      "factor_spec_hash": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
+      "model_id": "sha256:1c245024f19fa16c0e58b8179142717c386e8ebe13533312280935620588eeea",
       "validation_metrics": {
         "decision_count": 397,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -14416,9 +14551,9 @@
     },
     {
       "candidate": "H05",
-      "factor_spec_hash": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
       "feature_set_id": "sha256:722ccc34004b86262e7bc18db3f6823c18592796ce829565a46cb0260a1d08fc",
-      "model_id": "sha256:c9cfd7909824e8fb0e442a730c044eed6f08b4762f8b38ee391b86db53a9968a",
+      "factor_spec_hash": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
+      "model_id": "sha256:2cdfc39b95c45e7e90c5efdb2fe4ff5c2fbfe89e553a2ca592b8222fc69d3b6a",
       "validation_metrics": {
         "decision_count": 398,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -18019,9 +18154,9 @@
     },
     {
       "candidate": "H06",
-      "factor_spec_hash": "sha256:84d6d0b4a3eb16061f18d5af7561d7c2a0ad85ff86825c41ffc830bf3ca61319",
       "feature_set_id": "sha256:bd3b95a22c34ed7d8e234d7262da2a1b4872bd6cbbbbc7134c301b8af83923c4",
-      "model_id": "sha256:49ca7686ad5ada57c59926fb01598b0b605103c00b84652dd1542e0984e2b3a2",
+      "factor_spec_hash": "sha256:84d6d0b4a3eb16061f18d5af7561d7c2a0ad85ff86825c41ffc830bf3ca61319",
+      "model_id": "sha256:aee02845f43e2583ffebacfa988063348847804a1c429267725a33f01ccb0b28",
       "validation_metrics": {
         "decision_count": 338,
         "definition": "Spearman correlation per decision time; ICIR=mean/std with sample standard deviation",
@@ -21561,5 +21696,5 @@
       }
     }
   ],
-  "selected_model_id": "sha256:c9cfd7909824e8fb0e442a730c044eed6f08b4762f8b38ee391b86db53a9968a"
+  "selected_model_id": "sha256:2cdfc39b95c45e7e90c5efdb2fe4ff5c2fbfe89e553a2ca592b8222fc69d3b6a"
 }

@@ -1,5 +1,5 @@
 {
-  "commit_sha": "e25bf7275f4c65b3819f6ac8781a666c4fe5f185",
+  "commit_sha": "e7da60f1050063701c4268618c5e652ae3f3c571",
   "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
   "dataset_hashes": [
     "sha256:ded14a7ae40ed989fe0b205b4bc531d3ab82ea7352080fe80ef5772486a237cc"
@@ -14,13 +14,148 @@
   ],
   "tool_catalog_hash": "sha256:92778c98eee2476ab1b32d081461d14e081a315daf6171edf03f9fe69000af50",
   "status": "PASS",
-  "freeze_id": "sha256:e34876a5d775794972307667f4df50c49aaa000aca8cf4f6cedc4086756e3995",
+  "job_ids": [
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_d2820ab746524b198f86dcd9acbc3a44",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_fd7c3f94193a4053a4b3a74b0cb41a76",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_ee3f1178ea734bb889141f47bd88a316",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_1440ff9248c94c079882e9be6c55a06c",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_154dc9b859a747bb90593cdfee94d267",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_85d8145eea334da79ac4895328928f20",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_559ecd037c78425b801b36561e5179ae",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_6b0fc15d9a914966898e2df1e605be12",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_90aa83de78324950b84222cbaedc2ffc",
+      "attempts": 1
+    },
+    {
+      "kind": "compute_factors",
+      "job_id": "alpha_528ab170104641f6873325ef35120f0b",
+      "attempts": 1
+    },
+    {
+      "kind": "train_alpha_model",
+      "job_id": "alpha_91269d6fbf65455db5cf67d2ff3e0313",
+      "attempts": 1
+    },
+    {
+      "kind": "freeze_alpha_selection",
+      "job_id": "alpha_a5002551b90f4fb2b66f323ed1543774",
+      "attempts": 1
+    },
+    {
+      "kind": "evaluate_alpha_oos",
+      "job_id": "alpha_6b695fc3843c4364b162ec8f92ed096e",
+      "attempts": 1
+    }
+  ],
+  "execution_attempts": [
+    {
+      "alpha_d2820ab746524b198f86dcd9acbc3a44": 1
+    },
+    {
+      "alpha_83bcdeb9dd144a9cb0e0e25f78669e0b": 1
+    },
+    {
+      "alpha_fd7c3f94193a4053a4b3a74b0cb41a76": 1
+    },
+    {
+      "alpha_ee3f1178ea734bb889141f47bd88a316": 1
+    },
+    {
+      "alpha_1440ff9248c94c079882e9be6c55a06c": 1
+    },
+    {
+      "alpha_154dc9b859a747bb90593cdfee94d267": 1
+    },
+    {
+      "alpha_85d8145eea334da79ac4895328928f20": 1
+    },
+    {
+      "alpha_559ecd037c78425b801b36561e5179ae": 1
+    },
+    {
+      "alpha_6b0fc15d9a914966898e2df1e605be12": 1
+    },
+    {
+      "alpha_90aa83de78324950b84222cbaedc2ffc": 1
+    },
+    {
+      "alpha_528ab170104641f6873325ef35120f0b": 1
+    },
+    {
+      "alpha_91269d6fbf65455db5cf67d2ff3e0313": 1
+    },
+    {
+      "alpha_a5002551b90f4fb2b66f323ed1543774": 1
+    },
+    {
+      "alpha_6b695fc3843c4364b162ec8f92ed096e": 1
+    }
+  ],
+  "research_parameters": {
+    "train": [
+      "2017-07-03T00:00:00Z",
+      "2022-01-01T00:00:00Z"
+    ],
+    "validation": [
+      "2022-01-14T00:00:00Z",
+      "2024-01-01T00:00:00Z"
+    ],
+    "test": [
+      "2024-01-15T00:00:00Z",
+      "2026-11-18T00:00:00Z"
+    ],
+    "embargo_days": 5,
+    "label": "stock_forward_return",
+    "horizon_days": 5,
+    "random_seed": 20261119,
+    "selection_rule": "highest validation rank_ic_mean with prediction_coverage >= 0.8"
+  },
+  "freeze_id": "sha256:5aa57a668a9118722960b6278567d7072b8fa01a0ce88fb73d8991b056b23d9e",
   "freeze_record": {
-    "candidate_ledger_hash": "sha256:728e0c4ef134353e51944649362561c7c2e5c5a95c094853d37bbeff1377a676",
-    "freeze_id": "sha256:e34876a5d775794972307667f4df50c49aaa000aca8cf4f6cedc4086756e3995",
-    "frozen_at": "2026-11-19T04:05:22.485142Z",
+    "candidate_ledger_hash": "sha256:8c2261a3807371f45ca85269d82056124928983ec1955019885edd9f6f0bc8a8",
+    "freeze_id": "sha256:5aa57a668a9118722960b6278567d7072b8fa01a0ce88fb73d8991b056b23d9e",
+    "frozen_at": "2026-11-19T07:28:43.962069Z",
     "frozen_model_ids": [
-      "sha256:c9cfd7909824e8fb0e442a730c044eed6f08b4762f8b38ee391b86db53a9968a"
+      "sha256:2cdfc39b95c45e7e90c5efdb2fe4ff5c2fbfe89e553a2ca592b8222fc69d3b6a"
     ],
     "label_spec": {
       "horizon_days": 5,
@@ -28,11 +163,11 @@
       "target_type": "stock_return"
     },
     "model_hashes": {
-      "sha256:c9cfd7909824e8fb0e442a730c044eed6f08b4762f8b38ee391b86db53a9968a": "sha256:a3e0201e56978b2c20a237a95bf435f4adbaaa5068eb1bab122efa5c8e6ef1dc"
+      "sha256:2cdfc39b95c45e7e90c5efdb2fe4ff5c2fbfe89e553a2ca592b8222fc69d3b6a": "sha256:a3e0201e56978b2c20a237a95bf435f4adbaaa5068eb1bab122efa5c8e6ef1dc"
     },
     "research_protocol_hash": "sha256:9a1103dcc225013a4d6045ed8682a08d6cdf653fab7747166aebaa2ee9349804",
     "schema_version": "1.0",
-    "selection_reason": "highest validation rank_ic_mean",
+    "selection_reason": "highest validation rank_ic_mean with coverage >= 0.8",
     "test_dataset_hashes": {
       "test_feature_set_id": "sha256:91123a7120cb5046c821f2bdb033b7ca245d9b846628f4a0bbb3a6b332978646",
       "test_label_source_dataset_id": "sha256:ac315bb6d15c125a8fbea2ed5960c79e90cd0944077c8e390b15cb019d96fdf8"
