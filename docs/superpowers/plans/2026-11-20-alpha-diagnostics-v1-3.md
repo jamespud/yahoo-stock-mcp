@@ -332,3 +332,4 @@ Commit: `test(alpha): freeze and verify v1.3 diagnostics acceptance`
 - [x] Centralize the frozen Validation gate: Rank IC `>= 0.03`, coverage `>= 0.8` over instruments x mapped sessions, ICIR `>= 0.0`, and Rank IC `>= 0.0` in both exact frozen subperiods.
 - [x] Bound diagnostic-fold rows, iterations and elapsed time through `ModelResourceBudget` and LightGBM callbacks while preserving equal candidate budgets.
 - [x] Record executable source provenance and validate the recorded source commit against Git ancestry in Python and Node evidence checks.
+- [x] Add deterministic tracked-source content provenance, Python/Node parity tests, content-tamper rejection, unavailable/non-ancestor commit fallback, and full-depth CI checkouts.

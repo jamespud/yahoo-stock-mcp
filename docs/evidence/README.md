@@ -33,7 +33,7 @@ Validation independently rehashes and deep-compares the embedded protocol body. 
 
 Runtime jobs use an explicit `protocol_mode`. `synthetic_contract` remains explicitly non-v1.3. `frozen_v1_3` requires the exact protocol hash, 50-symbol membership, windows and embargo, D01/D02 signal identity, candidate configuration, mapped calendar, `session-aligned-v2` labels, thresholds and resource budgets. Validation-only physical dataset coverage must remain outside `[2012-01-01, 2015-01-01)`, and frozen folds enforce row, iteration and elapsed-time bounds.
 
-Evidence records the actual clean Git source commit on which acceptance ran. Validation requires the same commit in the command provenance and proves it is an ancestor of the current evidence commit.
+Evidence records the actual clean Git source commit on which acceptance ran plus a deterministic `tracked-source-files-v1` content hash over tracked files outside `docs/evidence/**`, `docs/superpowers/**`, `.superpowers/**` and `reports/**`. Validation always recomputes and requires that content hash. When the recorded commit is available and remains an ancestor, the stronger Git-history check is retained; shallow, squash or rebase checkouts may fall back to the matching content hash. Mismatched source content or evidence still fails. Both Quant CI checkouts use `fetch-depth: 0`.
 
 Run and verify the synthetic acceptance contract with:
 
