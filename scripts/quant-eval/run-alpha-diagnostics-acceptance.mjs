@@ -676,7 +676,7 @@ function writeCommittedEvidence() {
     "docs/evidence/alpha-diagnostics-v1-3.sha256",
   ]);
   const unexpectedChanges = dirty
-    ? dirty.split("\n").map(line => line.replace(/^[ MADRCU?!]{2}\s/, "").trim()).filter(path => !allowedEvidencePaths.has(path))
+    ? dirty.split("\n").map(line => line.replace(/^[ MADRCU?!]{1,2}\s+/, "").trim()).filter(path => !allowedEvidencePaths.has(path))
     : [];
   assert.equal(unexpectedChanges.length, 0, `Evidence regeneration requires a clean source worktree: ${unexpectedChanges.join(", ")}`);
   assert.equal(commandResults.source_commit, currentCommit, "Evidence command results source commit mismatch");
