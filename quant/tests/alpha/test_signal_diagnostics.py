@@ -15,7 +15,12 @@ from stock_quant.alpha.models.signal_diagnostics import (
     evaluate_direct_signal,
     evaluate_weekly_signal,
     expected_session_dates,
+    moving_block_bootstrap,
+    regime_breakdown,
+    sign_consistency,
     signal_spec_hash,
+    stability_by_subperiod,
+    stability_by_year,
     top20_forward_diagnostics,
     weekly_last_session_dates,
 )
@@ -482,3 +487,183 @@ def test_top20_analysis_label_is_present_on_every_payload():
 
     payloads = [result, result["summary"], *result["top20_forward_labels"]]
     assert all(payload["analysis_label"] == "predictive_label_analysis_not_executable_backtest" for payload in payloads)
+
+
+def test_stability_by_year_retains_periods_timestamps_denominators_and_null_ics():
+    records = [
+        {
+            "decision_at": "2009-12-30T21:05:00+00:00", "rank_ic": 0.2,
+            "expected_count": 3, "valid_count": 3, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+        {
+            "decision_at": "2009-12-31T21:05:00+00:00", "rank_ic": None,
+            "expected_count": 3, "valid_count": 1, "excluded_count": 2,
+            "exclusion_reasons": ["NO_LABEL"],
+        },
+        {
+            "decision_at": "2010-01-04T21:05:00+00:00", "rank_ic": 0.4,
+            "expected_count": 4, "valid_count": 4, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+    ]
+
+    annual = stability_by_year(records)
+
+    assert [record["year"] for record in annual] == [2009, 2010]
+    assert annual[0]["period_start"] == "2009-12-30T21:05:00+00:00"
+    assert annual[0]["period_end"] == "2009-12-31T21:05:00+00:00"
+    assert annual[0]["decision_count"] == 2
+    assert annual[0]["expected_count"] == 6
+    assert annual[0]["valid_count"] == 4
+    assert annual[0]["excluded_count"] == 2
+    assert annual[0]["valid_ic_decision_count"] == 1
+    assert annual[0]["invalid_ic_decision_count"] == 1
+    assert annual[0]["rank_ic_mean"] == pytest.approx(0.2)
+    assert [row["rank_ic"] for row in annual[0]["decisions"]] == [0.2, None]
+    assert annual[0]["decisions"][1]["expected_count"] == 3
+
+
+def test_stability_by_subperiod_keeps_chronological_chunks_and_null_records():
+    records = [
+        {
+            "decision_at": f"2010-01-0{index + 1}T21:05:00+00:00",
+            "rank_ic": None if index == 2 else index / 10,
+            "expected_count": 2,
+            "valid_count": 1 if index == 2 else 2,
+            "excluded_count": 1 if index == 2 else 0,
+            "exclusion_reasons": ["NO_LABEL"] if index == 2 else [],
+        }
+        for index in range(6)
+    ]
+
+    periods = stability_by_subperiod(records, period_count=3)
+
+    assert [period["period_index"] for period in periods] == [0, 1, 2]
+    assert [period["decision_count"] for period in periods] == [2, 2, 2]
+    assert periods[1]["decisions"][0]["rank_ic"] is None
+    assert periods[1]["rank_ic_mean"] == pytest.approx(0.3)
+
+
+def test_regime_breakdown_uses_only_trailing_63_session_benchmark_data_available_by_decision():
+    sessions = [
+        date(2024, 1, 2) + timedelta(days=index)
+        for index in range(65)
+    ]
+    benchmark_rows = []
+    for index, session in enumerate(sessions):
+        decision_at = datetime.combine(session, time(21, 5), tzinfo=UTC)
+        benchmark_rows.append({
+            "instrument_id": "SPY",
+            "start_at": datetime.combine(session, time(14, 30), tzinfo=UTC),
+            "end_at": datetime.combine(session, time(21, 0), tzinfo=UTC),
+            "available_at": decision_at if index != 64 else decision_at + timedelta(hours=1),
+            "close": 100.0 + index,
+        })
+    ic_rows = [
+        {
+            "decision_at": (datetime.combine(sessions[62], time(21, 5), tzinfo=UTC)).isoformat(),
+            "rank_ic": None, "expected_count": 4, "valid_count": 1, "excluded_count": 3,
+            "exclusion_reasons": ["NO_LABEL"],
+        },
+        {
+            "decision_at": (datetime.combine(sessions[63], time(21, 5), tzinfo=UTC)).isoformat(),
+            "rank_ic": 0.3, "expected_count": 4, "valid_count": 4, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+        {
+            "decision_at": (datetime.combine(sessions[64], time(21, 5), tzinfo=UTC)).isoformat(),
+            "rank_ic": 0.1, "expected_count": 4, "valid_count": 4, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+    ]
+
+    regimes = regime_breakdown(ic_rows, benchmark_rows, benchmark_symbol="SPY")
+    by_name = {record["regime"]: record for record in regimes}
+
+    assert [row["decision_at"][:10] for row in by_name["UP"]["decisions"]] == [sessions[63].isoformat()]
+    assert by_name["UP"]["rank_ic_mean"] == pytest.approx(0.3)
+    assert [row["decision_at"][:10] for row in by_name["UNKNOWN"]["decisions"]] == [
+        sessions[62].isoformat(), sessions[64].isoformat(),
+    ]
+    assert by_name["UNKNOWN"]["decisions"][0]["rank_ic"] is None
+    assert {
+        by_name["UNKNOWN"]["decisions"][0]["regime_reason"],
+        by_name["UNKNOWN"]["decisions"][1]["regime_reason"],
+    } == {"INCOMPLETE_63_SESSION_WINDOW", "BENCHMARK_NOT_AVAILABLE_BY_DECISION"}
+
+
+def test_sign_consistency_reports_direction_without_dropping_null_periods():
+    positive = sign_consistency([
+        {"period": "2009", "rank_ic": 0.1},
+        {"period": "2010", "rank_ic": 0.2},
+    ])
+    mixed = sign_consistency([
+        {"period": "2009", "rank_ic": 0.1},
+        {"period": "2010", "rank_ic": None},
+        {"period": "2011", "rank_ic": -0.2},
+    ])
+
+    assert positive["status"] == "CONSISTENT_POSITIVE"
+    assert positive["positive_count"] == 2
+    assert positive["null_count"] == 0
+    assert mixed["status"] == "MIXED"
+    assert mixed["period_count"] == 3
+    assert mixed["valid_period_count"] == 2
+    assert mixed["null_count"] == 1
+
+
+def test_moving_block_bootstrap_is_reproducible_and_reuses_paired_draws_for_delta():
+    weekly = [
+        {
+            "decision_at": f"2010-01-{index + 1:02d}T21:05:00+00:00",
+            "rank_ic": 0.01 * (index - 4),
+            "paired_rank_ic": -0.01 * (index - 4),
+        }
+        for index in range(12)
+    ]
+
+    first = moving_block_bootstrap(weekly)
+    second = moving_block_bootstrap(weekly)
+
+    assert first == second
+    assert first["status"] == "TESTED"
+    assert first["config"] == {
+        "block_weeks": 4,
+        "draws": 2000,
+        "seed": 20261120,
+        "rng": "PCG64",
+        "interval": 0.95,
+        "percentile_method": "linear",
+    }
+    assert first["finite_draw_count"] == 2000
+    assert first["rank_ic"]["ci_lower"] is not None
+    assert first["paired_delta"]["observed_mean"] == pytest.approx(2 * first["rank_ic"]["observed_mean"])
+    assert first["paired_delta"]["ci_lower"] == pytest.approx(2 * first["rank_ic"]["ci_lower"])
+    assert first["paired_delta"]["ci_upper"] == pytest.approx(2 * first["rank_ic"]["ci_upper"])
+
+
+def test_moving_block_bootstrap_returns_not_tested_below_each_hard_threshold():
+    seven_weeks = [
+        {"decision_at": f"2010-01-{index + 1:02d}T21:05:00+00:00", "rank_ic": 0.1}
+        for index in range(7)
+    ]
+    seven_valid = [
+        {"decision_at": f"2010-02-{index + 1:02d}T21:05:00+00:00", "rank_ic": None if index == 0 else 0.1}
+        for index in range(8)
+    ]
+    insufficient_finite_draws = [
+        {"decision_at": f"2010-03-{index + 1:02d}T21:05:00+00:00", "rank_ic": None if index == 5 else 0.1}
+        for index in range(10)
+    ]
+
+    too_short = moving_block_bootstrap(seven_weeks)
+    few_valid = moving_block_bootstrap(seven_valid)
+    few_finite = moving_block_bootstrap(insufficient_finite_draws)
+
+    assert (too_short["status"], too_short["reason"]) == ("NOT_TESTED", "FEWER_THAN_EIGHT_WEEKS")
+    assert (few_valid["status"], few_valid["reason"]) == ("NOT_TESTED", "FEWER_THAN_EIGHT_VALID_ICS")
+    assert few_finite["status"] == "NOT_TESTED"
+    assert few_finite["reason"] == "FEWER_THAN_1900_FINITE_DRAWS"
+    assert few_finite["finite_draw_count"] < 1900
+    assert few_finite["rank_ic"]["ci_lower"] is None

@@ -107,6 +107,12 @@ class EvaluateAlphaSignalJob(AlphaJobBase):
     split: ModelDevelopmentSplit
     evaluation_window: SignalEvaluationWindow
     signal_spec: DirectSignalSpec
+    benchmark_symbol: Identifier | None = None
+
+    @field_validator("benchmark_symbol")
+    @classmethod
+    def normalize_benchmark_symbol(cls, value):
+        return value.upper() if value is not None else None
 
     @model_validator(mode="after")
     def development_only(self):
@@ -149,6 +155,36 @@ class TrainAlphaModelJob(AlphaJobBase):
             raise ValueError("selection metrics are validation-only")
         if self.evaluation_mode == "legacy_inline_test" and self.baseline_signal is not None:
             raise ValueError("baseline_signal is validation-only")
+        return self
+
+
+class TrainAlphaDiagnosticFoldsJob(AlphaJobBase):
+    kind: Literal["train_alpha_diagnostic_folds"]
+    research_protocol_hash: Hash
+    feature_set_id: Hash
+    stock_dataset_id: Hash
+    label_name: Literal["stock_forward_return"] = "stock_forward_return"
+    target_type: Literal["stock_return"] = "stock_return"
+    horizon_days: Literal[5] = 5
+    split: ModelDevelopmentSplit
+    split_at: AwareDatetime
+    hyperparameters: dict = Field(default_factory=dict)
+    random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
+
+    _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
+
+    @model_validator(mode="after")
+    def train_only(self):
+        split_at = self.split_at.astimezone(timezone.utc)
+        if not self.split.train_start < split_at < self.split.train_end:
+            raise ValueError("split_at must be strictly inside Train")
+        if (
+            self.split.train_end > RESERVED_TEST_START
+            or self.split.validation_end > RESERVED_TEST_START
+            or split_at >= RESERVED_TEST_START
+        ):
+            raise ValueError("diagnostic folds must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
+        object.__setattr__(self, "split_at", split_at)
         return self
 
 
@@ -206,13 +242,15 @@ class BacktestOptionsJob(AlphaJobBase):
 
 AlphaJobRequest = Annotated[
     PrepareStockDatasetJob | CaptureOptionChainJob | PrepareOptionsDatasetJob | ComputeFactorsJob |
-    ComputeOptionFactorsJob | EvaluateAlphaSignalJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
+    ComputeOptionFactorsJob | EvaluateAlphaSignalJob | TrainAlphaModelJob | TrainAlphaDiagnosticFoldsJob |
+    FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
     PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
     Field(discriminator="kind"),
 ]
 ALPHA_REQUEST_ADAPTER = TypeAdapter(AlphaJobRequest)
 ALPHA_KINDS = {
     "prepare_dataset", "capture_option_chain", "prepare_options_dataset", "compute_factors",
-    "compute_option_factors", "evaluate_alpha_signal", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
+    "compute_option_factors", "evaluate_alpha_signal", "train_alpha_model", "train_alpha_diagnostic_folds",
+    "freeze_alpha_selection", "evaluate_alpha_oos",
     "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
 }

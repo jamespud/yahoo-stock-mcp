@@ -38,8 +38,14 @@ from ..models.signal_diagnostics import (
     evaluate_direct_signal,
     evaluate_weekly_signal,
     expected_session_dates,
+    moving_block_bootstrap,
+    regime_breakdown,
+    sign_consistency,
+    stability_by_subperiod,
+    stability_by_year,
     top20_forward_diagnostics,
 )
+from ..models.window_diagnostics import diagnostic_window_importance
 from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
@@ -48,7 +54,8 @@ from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
     ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, EvaluateAlphaSignalJob, FreezeAlphaSelectionJob,
-    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, RESERVED_TEST_START, TrainAlphaModelJob,
+    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, RESERVED_TEST_START,
+    TrainAlphaDiagnosticFoldsJob, TrainAlphaModelJob,
 )
 
 
@@ -256,6 +263,55 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 expected_sessions=expected_sessions,
                 spec=request.signal_spec,
             )
+            annual_stability = stability_by_year(diagnostics["rank_ic_by_decision"])
+            subperiod_stability = stability_by_subperiod(diagnostics["rank_ic_by_decision"])
+            weekly_bootstrap = moving_block_bootstrap(weekly["weekly_rank_ic"])
+            benchmark_rows = []
+            if request.benchmark_symbol is not None:
+                benchmark_symbols = {str(value).upper() for value in stock_manifest.instrument_ids}
+                if request.benchmark_symbol not in benchmark_symbols:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Requested benchmark symbol is not present in the stock dataset",
+                        {"benchmark_symbol": request.benchmark_symbol},
+                    )
+                benchmark_rows = datasets.read_rows(
+                    request.stock_dataset_id,
+                    columns=("instrument_id", "start_at", "end_at", "available_at", "close"),
+                    start_at=request.split.train_start,
+                    end_at=request.evaluation_window.end,
+                )
+            regimes = regime_breakdown(
+                diagnostics["rank_ic_by_decision"],
+                benchmark_rows,
+                benchmark_symbol=request.benchmark_symbol,
+            )
+            annual_sign = sign_consistency(annual_stability)
+            subperiod_sign = sign_consistency(subperiod_stability)
+            weekly_sign = sign_consistency(weekly["weekly_rank_ic"])
+            stability_summary = {
+                "annual_period_count": len(annual_stability),
+                "annual_sign_consistency": annual_sign,
+                "subperiod_count": len(subperiod_stability),
+                "subperiod_sign_consistency": subperiod_sign,
+                "weekly_sign_consistency": weekly_sign,
+                "weekly_bootstrap": weekly_bootstrap,
+                "regime_decision_counts": {
+                    record["regime"]: record["decision_count"] for record in regimes
+                },
+            }
+            diagnostic_rows = [
+                {**record, "diagnostic": "annual_stability"} for record in annual_stability
+            ] + [
+                {**record, "diagnostic": "subperiod_stability"} for record in subperiod_stability
+            ] + [
+                {**record, "diagnostic": "regime_breakdown"} for record in regimes
+            ] + [
+                {"diagnostic": "weekly_moving_block_bootstrap", **weekly_bootstrap},
+                {"diagnostic": "annual_sign_consistency", **annual_sign},
+                {"diagnostic": "subperiod_sign_consistency", **subperiod_sign},
+                {"diagnostic": "weekly_sign_consistency", **weekly_sign},
+            ]
             bounded(.95)
             evaluation_window = {
                 "start": request.evaluation_window.start.isoformat(),
@@ -276,6 +332,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "daily_prediction_coverage": diagnostics["coverage"]["prediction_coverage"],
                 "daily_label_coverage": diagnostics["coverage"]["label_coverage"],
                 "top20_forward_label_summary": top20["summary"],
+                "stability_summary": stability_summary,
             }
             source_windows = {
                 "feature_start": request.evaluation_window.start.isoformat(),
@@ -283,11 +340,15 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "stock_start": request.evaluation_window.start.isoformat(),
                 "stock_end": request.split.validation_end.isoformat(),
             }
+            if request.benchmark_symbol is not None:
+                source_windows["benchmark_start"] = request.split.train_start.isoformat()
+                source_windows["benchmark_end"] = request.evaluation_window.end.isoformat()
             result = {
                 "summary": summary,
                 "rank_ic_by_decision": diagnostics["rank_ic_by_decision"],
                 "weekly_rank_ic": weekly["weekly_rank_ic"],
                 "top20_forward_labels": top20["top20_forward_labels"],
+                "diagnostics": diagnostic_rows,
                 "reproducibility": {
                     "signal_spec": request.signal_spec.model_dump(mode="json"),
                     "signal_spec_hash": summary["signal_spec_hash"],
@@ -314,6 +375,11 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "weekly_label_coverage": summary["weekly_label_coverage"],
                     "weekly_coverage": summary["weekly_coverage"],
                     "top20_forward_label_summary": summary["top20_forward_label_summary"],
+                    "stability_summary": stability_summary,
+                    "benchmark_symbol": request.benchmark_symbol,
+                    "regime_lookback_sessions": 63,
+                    "regime_definition": "positive/negative/flat trailing 63-session benchmark return available by decision",
+                    "bootstrap_config": weekly_bootstrap["config"],
                     "analysis_label": ANALYSIS_LABEL,
                     "reserved_test_start": RESERVED_TEST_START.isoformat(),
                 },
@@ -393,6 +459,101 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                               if model.baseline_comparison is not None else None
                           ),
                       }}
+        elif isinstance(request, TrainAlphaDiagnosticFoldsJob):
+            feature_manifest = datasets.load_manifest(request.feature_set_id)
+            if feature_manifest.dataset_kind != "feature_panel":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a feature_panel dataset")
+            stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            if stock_manifest.dataset_kind != "stock_bars":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a stock_bars dataset")
+            if feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Diagnostic fold dataset physical coverage enters reserved Test",
+                    {"feature_end": feature_manifest.end_at.isoformat(), "stock_end": stock_manifest.end_at.isoformat()},
+                )
+            if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
+            bounded(.1)
+            feature_rows = datasets.read_rows(
+                request.feature_set_id,
+                start_at=request.split.train_start,
+                end_at=request.split.train_end,
+            )
+            bounded(.35)
+            stock_rows = datasets.read_rows(
+                request.stock_dataset_id,
+                start_at=request.split.train_start,
+                end_at=request.split.train_end,
+            )
+            labels = stock_forward_labels(
+                stock_rows,
+                horizon=request.horizon_days,
+                calendar=mapped_stock_calendar(stock_manifest),
+            )
+            labels = [row for row in labels if row.label_name == request.label_name]
+            fold_result = diagnostic_window_importance(
+                feature_rows,
+                labels,
+                split=request.split,
+                split_at=request.split_at,
+                hyperparameters=request.hyperparameters,
+                random_seed=request.random_seed,
+                checkpoint=bounded,
+            )
+            fold_rows = fold_result["folds"]
+            tested_count = sum(fold["status"] == "TESTED" for fold in fold_rows)
+            label_versions = sorted({row.label_version for row in labels})
+            label_version = label_versions[0] if len(label_versions) == 1 else "mixed"
+            summary = {
+                "kind": request.kind,
+                "status": fold_result["status"],
+                "reason": fold_result["reason"],
+                "schema_version": fold_result["schema_version"],
+                "feature_set_id": request.feature_set_id,
+                "stock_dataset_id": request.stock_dataset_id,
+                "label_name": request.label_name,
+                "label_version": label_version,
+                "target_type": request.target_type,
+                "horizon_days": request.horizon_days,
+                "split_at": request.split_at.isoformat(),
+                "train_window": {
+                    "start": request.split.train_start.isoformat(),
+                    "end": request.split.train_end.isoformat(),
+                },
+                "fold_count": len(fold_rows),
+                "tested_fold_count": tested_count,
+                "importance_deltas": fold_result["importance_deltas"],
+                "importance_rank_correlation": fold_result["importance_rank_correlation"],
+                "stability_claim": fold_result["stability_claim"],
+                "definition": fold_result["definition"],
+            }
+            result = {
+                "summary": summary,
+                "diagnostics": fold_rows,
+                "reproducibility": {
+                    "research_protocol_hash": request.research_protocol_hash,
+                    "feature_set_id": request.feature_set_id,
+                    "stock_dataset_id": request.stock_dataset_id,
+                    "label_name": request.label_name,
+                    "label_version": label_version,
+                    "calendar_version": stock_manifest.calendar_version,
+                    "split": request.split.model_dump(mode="json"),
+                    "split_at": request.split_at.isoformat(),
+                    "hyperparameters": request.hyperparameters,
+                    "random_seed": request.random_seed,
+                    "source_windows": {
+                        "feature_start": request.split.train_start.isoformat(),
+                        "feature_end": request.split.train_end.isoformat(),
+                        "stock_start": request.split.train_start.isoformat(),
+                        "stock_end": request.split.train_end.isoformat(),
+                    },
+                    "model_selection_affected": False,
+                    "frozen_candidate_ledger_modified": False,
+                    "test_or_oos_read": False,
+                    "reserved_test_start": RESERVED_TEST_START.isoformat(),
+                },
+            }
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             freeze_request = FreezeRequest(

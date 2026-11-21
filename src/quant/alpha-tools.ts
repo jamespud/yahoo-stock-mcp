@@ -16,6 +16,8 @@ import {
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
   trainAlphaModelToolFields,
+  trainAlphaDiagnosticFoldsInput,
+  trainAlphaDiagnosticFoldsToolFields,
 } from "./alpha-contracts.js";
 import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
@@ -84,6 +86,23 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     async (args) => {
       const { windows, ...rest } = args;
       return submit({ kind: "evaluate_alpha_signal", ...rest, split: windows });
+    },
+  );
+
+  server.registerTool(
+    "quant_train_alpha_diagnostic_folds",
+    {
+      description: "Fit two independent deterministic LightGBM models over disjoint Train slices. The caller-approved split_at must remain strictly inside Train; outputs are exploratory importance evidence and never affect model selection or prior candidate records.",
+      inputSchema: trainAlphaDiagnosticFoldsToolFields,
+    },
+    async (args) => {
+      const parsed = trainAlphaDiagnosticFoldsInput.safeParse(args);
+      if (!parsed.success) {
+        const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".") || "request"))].sort();
+        return {isError: true, content: [{type: "text", text: `Invalid Alpha diagnostic fold fields: ${fields.join(", ")}`}]};
+      }
+      const { windows, ...rest } = parsed.data;
+      return submit({ kind: "train_alpha_diagnostic_folds", ...rest, split: windows });
     },
   );
 

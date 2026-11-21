@@ -82,8 +82,9 @@ export const evaluateAlphaSignalInput = z.object({
   windows: developmentWindows,
   evaluation_window: signalEvaluationWindow,
   signal_spec: directSignalSpec,
+  benchmark_symbol: z.string().min(1).max(64).optional(),
 }).strict().describe(
-  "Direct signal diagnostics always include daily Rank IC, mapped weekly-last-session Rank IC, and frozen Top20 forward-label groups; there is no caller-selectable TopN.",
+  "Direct signal diagnostics always include daily Rank IC, mapped weekly-last-session Rank IC, frozen Top20 forward-label groups, and fixed stability evidence. An optional benchmark_symbol enables explicit trailing-63-session regime grouping.",
 );
 
 export const prepareAlphaDatasetInput = z.object({
@@ -233,6 +234,43 @@ export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((valu
       code: z.ZodIssueCode.custom,
       path: ["label_spec", "stock_dataset_id"],
       message: "validation_only training currently requires stock_dataset_id",
+    });
+  }
+});
+
+export const trainAlphaDiagnosticFoldsFields = z.object({
+  research_protocol_hash: alphaHash,
+  feature_set_id: alphaHash,
+  stock_dataset_id: alphaHash,
+  label_name: z.literal("stock_forward_return").optional(),
+  target_type: z.literal("stock_return").optional(),
+  horizon_days: z.literal(5).optional(),
+  windows: developmentWindows,
+  split_at: z.string().datetime({ offset: true }),
+  hyperparameters: lightgbmHyperparameters.optional(),
+  random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
+}).strict();
+
+export const trainAlphaDiagnosticFoldsToolFields = trainAlphaDiagnosticFoldsFields.passthrough();
+
+export const trainAlphaDiagnosticFoldsInput = trainAlphaDiagnosticFoldsFields.superRefine((value, context) => {
+  const trainStart = new Date(value.windows.train_start);
+  const trainEnd = new Date(value.windows.train_end);
+  const validationEnd = new Date(value.windows.validation_end);
+  const splitAt = new Date(value.split_at);
+  const reservedTestStart = new Date("2012-01-01T00:00:00Z");
+  if (!(trainStart < splitAt && splitAt < trainEnd)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["split_at"],
+      message: "split_at must be strictly inside Train",
+    });
+  }
+  if (trainEnd > reservedTestStart || validationEnd > reservedTestStart || splitAt >= reservedTestStart) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["split_at"],
+      message: "diagnostic folds must not enter reserved Test interval",
     });
   }
 });

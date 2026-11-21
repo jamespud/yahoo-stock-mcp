@@ -14,6 +14,15 @@ from .evaluation_coverage import attribute_evaluation_coverage
 
 ANALYSIS_LABEL = "predictive_label_analysis_not_executable_backtest"
 TOP20_FORWARD_LABEL_GROUP_SIZE = 20
+BOOTSTRAP_BLOCK_WEEKS = 4
+BOOTSTRAP_DRAWS = 2_000
+BOOTSTRAP_SEED = 20261120
+BOOTSTRAP_INTERVAL = 0.95
+BOOTSTRAP_MIN_WEEKS = 8
+BOOTSTRAP_MIN_VALID_ICS = 8
+BOOTSTRAP_MIN_FINITE_DRAWS = 1_900
+REGIME_LOOKBACK_SESSIONS = 63
+REGIME_NAMES = ("UP", "DOWN", "FLAT", "UNKNOWN")
 
 
 def _utc(value: date | datetime | str) -> datetime:
@@ -83,6 +92,338 @@ def _ic_summary(records: list[dict]) -> tuple[float | None, float | None, float 
     std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
     icir = mean / std if mean is not None and std not in (None, 0.0) else None
     return mean, std, icir
+
+
+def _period_record(records: list[dict], *, start: str | None, end: str | None, **extra) -> dict:
+    correlations = [
+        float(record["rank_ic"])
+        for record in records
+        if record.get("rank_ic") is not None and np.isfinite(float(record["rank_ic"]))
+    ]
+    mean = float(np.mean(correlations)) if correlations else None
+    std = float(np.std(correlations, ddof=1)) if len(correlations) >= 2 else None
+    icir = mean / std if mean is not None and std not in (None, 0.0) else None
+    return {
+        **extra,
+        "period_start": start,
+        "period_end": end,
+        "decision_count": len(records),
+        "valid_ic_decision_count": len(correlations),
+        "invalid_ic_decision_count": len(records) - len(correlations),
+        "expected_count": sum(int(record.get("expected_count", 0)) for record in records),
+        "valid_count": sum(int(record.get("valid_count", 0)) for record in records),
+        "excluded_count": sum(int(record.get("excluded_count", 0)) for record in records),
+        "rank_ic_mean": mean,
+        "rank_ic_std": std,
+        "icir": icir,
+        "decisions": [
+            {
+                **record,
+                "decision_at": _utc(record["decision_at"]).isoformat(),
+            }
+            for record in records
+        ],
+    }
+
+
+def stability_by_year(records: list[dict]) -> list[dict]:
+    """Aggregate decision-level IC evidence by UTC calendar year without dropping nulls."""
+    ordered = sorted(records, key=lambda record: _utc(record["decision_at"]))
+    grouped: dict[int, list[dict]] = {}
+    for record in ordered:
+        grouped.setdefault(_utc(record["decision_at"]).year, []).append(record)
+    return [
+        _period_record(
+            group,
+            start=group[0]["decision_at"] if group else None,
+            end=group[-1]["decision_at"] if group else None,
+            year=year,
+        )
+        for year, group in sorted(grouped.items())
+    ]
+
+
+def stability_by_subperiod(records: list[dict], *, period_count: int = 4) -> list[dict]:
+    """Return contiguous chronological chunks, retaining empty and null-IC periods."""
+    if type(period_count) is not int or period_count < 1:
+        raise ValueError("period_count must be a positive integer")
+    ordered = sorted(records, key=lambda record: _utc(record["decision_at"]))
+    chunks = np.array_split(np.asarray(ordered, dtype=object), period_count) if ordered else [
+        np.asarray([], dtype=object) for _ in range(period_count)
+    ]
+    result = []
+    for index, chunk in enumerate(chunks):
+        group = list(chunk)
+        result.append(_period_record(
+            group,
+            start=group[0]["decision_at"] if group else None,
+            end=group[-1]["decision_at"] if group else None,
+            period_index=index,
+        ))
+    return result
+
+
+def _benchmark_observations(benchmark_rows: list[dict], *, benchmark_symbol: str) -> list[dict]:
+    symbol = benchmark_symbol.upper()
+    by_session = {}
+    for row in benchmark_rows:
+        if str(row["instrument_id"]).upper() != symbol:
+            continue
+        session = _session_date(row["start_at"])
+        if session in by_session:
+            raise ValueError(f"Duplicate benchmark session: {session.isoformat()}")
+        by_session[session] = row
+    return [
+        {
+            **row,
+            "session": session,
+            "available_at": _utc(row["available_at"]),
+            "close_value": float(row["close"]),
+        }
+        for session, row in sorted(by_session.items())
+    ]
+
+
+def _regime_for_decision(record: dict, observations: list[dict], *, benchmark_symbol: str | None) -> dict:
+    decision_at = _utc(record["decision_at"])
+    base = {
+        **record,
+        "decision_at": decision_at.isoformat(),
+        "benchmark_symbol": benchmark_symbol.upper() if benchmark_symbol else None,
+        "benchmark_trailing_return": None,
+        "benchmark_window_start": None,
+        "benchmark_window_end": None,
+        "benchmark_observation_count": 0,
+        "regime": "UNKNOWN",
+        "regime_reason": None,
+    }
+    if benchmark_symbol is None:
+        return {**base, "regime_reason": "BENCHMARK_NOT_CONFIGURED"}
+    available = [
+        row for row in observations
+        if row["session"] <= decision_at.date() and row["available_at"] <= decision_at
+    ]
+    current = [row for row in available if row["session"] == decision_at.date()]
+    if not current:
+        return {**base, "regime_reason": "BENCHMARK_NOT_AVAILABLE_BY_DECISION"}
+    required = REGIME_LOOKBACK_SESSIONS + 1
+    window = available[-required:]
+    if len(window) < required or window[-1]["session"] != decision_at.date():
+        return {
+            **base,
+            "benchmark_observation_count": len(window),
+            "benchmark_window_start": window[0]["session"].isoformat() if window else None,
+            "benchmark_window_end": window[-1]["session"].isoformat() if window else None,
+            "regime_reason": "INCOMPLETE_63_SESSION_WINDOW",
+        }
+    start_value = window[0]["close_value"]
+    end_value = window[-1]["close_value"]
+    if not np.isfinite(start_value) or not np.isfinite(end_value) or start_value <= 0:
+        return {
+            **base,
+            "benchmark_observation_count": len(window),
+            "benchmark_window_start": window[0]["session"].isoformat(),
+            "benchmark_window_end": window[-1]["session"].isoformat(),
+            "regime_reason": "INVALID_BENCHMARK_PRICE",
+        }
+    trailing_return = float(end_value / start_value - 1.0)
+    regime = "UP" if trailing_return > 0 else "DOWN" if trailing_return < 0 else "FLAT"
+    return {
+        **base,
+        "benchmark_trailing_return": trailing_return,
+        "benchmark_window_start": window[0]["session"].isoformat(),
+        "benchmark_window_end": window[-1]["session"].isoformat(),
+        "benchmark_observation_count": len(window),
+        "regime": regime,
+        "regime_reason": None,
+    }
+
+
+def regime_breakdown(
+    records: list[dict],
+    benchmark_rows: list[dict],
+    *,
+    benchmark_symbol: str | None = None,
+) -> list[dict]:
+    """Group IC decisions by an explicit trailing-63-session benchmark regime."""
+    observations = (
+        _benchmark_observations(benchmark_rows, benchmark_symbol=benchmark_symbol)
+        if benchmark_symbol else []
+    )
+    classified = [
+        _regime_for_decision(record, observations, benchmark_symbol=benchmark_symbol)
+        for record in sorted(records, key=lambda item: _utc(item["decision_at"]))
+    ]
+    grouped = {regime: [] for regime in REGIME_NAMES}
+    for record in classified:
+        grouped[record["regime"]].append(record)
+    return [
+        {
+            **_period_record(
+                group,
+                start=group[0]["decision_at"] if group else None,
+                end=group[-1]["decision_at"] if group else None,
+                regime=regime,
+            ),
+            "benchmark_symbol": benchmark_symbol.upper() if benchmark_symbol else None,
+            "lookback_sessions": REGIME_LOOKBACK_SESSIONS,
+            "definition": "UNKNOWN unless a complete 64-observation benchmark window is available by decision",
+        }
+        for regime, group in grouped.items()
+    ]
+
+
+def sign_consistency(records: list[dict]) -> dict:
+    """Describe directional consistency without treating missing IC periods as zero."""
+    values = [
+        float(record["rank_ic"])
+        for record in records
+        if record.get("rank_ic") is not None and np.isfinite(float(record["rank_ic"]))
+    ]
+    positive = sum(value > 0 for value in values)
+    negative = sum(value < 0 for value in values)
+    zero = sum(value == 0 for value in values)
+    null_count = len(records) - len(values)
+    if len(values) < 2:
+        status, reason = "NOT_TESTED", "FEWER_THAN_TWO_VALID_PERIODS"
+    elif positive == len(values):
+        status, reason = "CONSISTENT_POSITIVE", "ALL_VALID_PERIODS_POSITIVE"
+    elif negative == len(values):
+        status, reason = "CONSISTENT_NEGATIVE", "ALL_VALID_PERIODS_NEGATIVE"
+    elif zero == len(values):
+        status, reason = "ZERO", "ALL_VALID_PERIODS_ZERO"
+    else:
+        status, reason = "MIXED", "POSITIVE_AND_NEGATIVE_PERIODS"
+    return {
+        "status": status,
+        "reason": reason,
+        "period_count": len(records),
+        "valid_period_count": len(values),
+        "null_count": null_count,
+        "positive_count": positive,
+        "negative_count": negative,
+        "zero_count": zero,
+        "positive_fraction": positive / len(values) if values else None,
+        "negative_fraction": negative / len(values) if values else None,
+    }
+
+
+def _bootstrap_draw_matrix(length: int) -> np.ndarray:
+    blocks_per_draw = int(np.ceil(length / BOOTSTRAP_BLOCK_WEEKS))
+    rng = np.random.Generator(np.random.PCG64(BOOTSTRAP_SEED))
+    starts = rng.integers(
+        0,
+        length - BOOTSTRAP_BLOCK_WEEKS + 1,
+        size=(BOOTSTRAP_DRAWS, blocks_per_draw),
+    )
+    offsets = np.arange(BOOTSTRAP_BLOCK_WEEKS)
+    indices = (starts[:, :, None] + offsets[None, None, :]).reshape(BOOTSTRAP_DRAWS, -1)
+    return indices[:, :length]
+
+
+def _bootstrap_metric(values: np.ndarray, indices: np.ndarray, *, tested: bool) -> dict:
+    if indices.size:
+        draws = np.asarray([values[row] for row in indices], dtype=float)
+        finite = np.all(np.isfinite(draws), axis=1)
+        means = np.mean(draws[finite], axis=1) if finite.any() else np.asarray([], dtype=float)
+    else:
+        finite = np.zeros(0, dtype=bool)
+        means = np.asarray([], dtype=float)
+    observed = values[np.isfinite(values)]
+    alpha = (1.0 - BOOTSTRAP_INTERVAL) / 2.0
+    return {
+        "observed_mean": float(np.mean(observed)) if observed.size else None,
+        "ci_lower": float(np.quantile(means, alpha)) if tested and means.size else None,
+        "ci_upper": float(np.quantile(means, 1.0 - alpha)) if tested and means.size else None,
+        "finite_draw_count": int(finite.sum()),
+        "excluded_draw_count": int(len(finite) - finite.sum()),
+    }
+
+
+def moving_block_bootstrap(weekly_ic: list[dict]) -> dict:
+    """Run the frozen 4-week moving-block bootstrap over chronological weekly ICs."""
+    ordered = sorted(weekly_ic, key=lambda record: _utc(record["decision_at"]))
+    length = len(ordered)
+    values = np.asarray([
+        float(record["rank_ic"])
+        if record.get("rank_ic") is not None and np.isfinite(float(record["rank_ic"]))
+        else np.nan
+        for record in ordered
+    ], dtype=float)
+    paired_values = np.asarray([
+        float(record["paired_rank_ic"])
+        if record.get("paired_rank_ic") is not None and np.isfinite(float(record["paired_rank_ic"]))
+        else np.nan
+        for record in ordered
+    ], dtype=float) if any("paired_rank_ic" in record for record in ordered) else None
+    valid_ic_count = int(np.isfinite(values).sum())
+    indices = _bootstrap_draw_matrix(length) if length >= BOOTSTRAP_BLOCK_WEEKS else None
+    finite_draw_count = 0
+    rank_summary = {
+        "observed_mean": float(np.nanmean(values)) if valid_ic_count else None,
+        "ci_lower": None,
+        "ci_upper": None,
+        "finite_draw_count": 0,
+        "excluded_draw_count": 0,
+    }
+    paired_summary = None
+    delta_summary = None
+    if indices is not None:
+        provisional = _bootstrap_metric(values, indices, tested=False)
+        finite_draw_count = provisional["finite_draw_count"]
+        if paired_values is not None:
+            paired_provisional = _bootstrap_metric(paired_values, indices, tested=False)
+            delta_values = values - paired_values
+            delta_provisional = _bootstrap_metric(delta_values, indices, tested=False)
+        else:
+            paired_provisional = None
+            delta_provisional = None
+    else:
+        paired_provisional = _bootstrap_metric(paired_values, np.empty((0, length), dtype=int), tested=False) if paired_values is not None else None
+        delta_provisional = None
+    if length < BOOTSTRAP_MIN_WEEKS:
+        status, reason = "NOT_TESTED", "FEWER_THAN_EIGHT_WEEKS"
+    elif valid_ic_count < BOOTSTRAP_MIN_VALID_ICS:
+        status, reason = "NOT_TESTED", "FEWER_THAN_EIGHT_VALID_ICS"
+    elif finite_draw_count < BOOTSTRAP_MIN_FINITE_DRAWS:
+        status, reason = "NOT_TESTED", "FEWER_THAN_1900_FINITE_DRAWS"
+    else:
+        status, reason = "TESTED", None
+    tested = status == "TESTED"
+    if indices is not None:
+        rank_summary = _bootstrap_metric(values, indices, tested=tested)
+        if paired_values is not None:
+            paired_summary = _bootstrap_metric(paired_values, indices, tested=tested)
+            delta_summary = _bootstrap_metric(values - paired_values, indices, tested=tested)
+    elif paired_values is not None:
+        paired_summary = paired_provisional
+    result = {
+        "schema_version": "weekly-moving-block-bootstrap-v1",
+        "status": status,
+        "reason": reason,
+        "config": {
+            "block_weeks": BOOTSTRAP_BLOCK_WEEKS,
+            "draws": BOOTSTRAP_DRAWS,
+            "seed": BOOTSTRAP_SEED,
+            "rng": "PCG64",
+            "interval": BOOTSTRAP_INTERVAL,
+            "percentile_method": "linear",
+        },
+        "week_count": length,
+        "valid_ic_count": valid_ic_count,
+        "finite_draw_count": finite_draw_count,
+        "thresholds": {
+            "minimum_weeks": BOOTSTRAP_MIN_WEEKS,
+            "minimum_valid_ics": BOOTSTRAP_MIN_VALID_ICS,
+            "minimum_finite_draws": BOOTSTRAP_MIN_FINITE_DRAWS,
+        },
+        "rank_ic": rank_summary,
+        "paired_rank_ic": paired_summary,
+        "paired_delta": delta_summary,
+        "draw_alignment": "one shared moving-block index matrix for all paired metrics",
+        "definition": "Current-week decision ICs; four-consecutive-week blocks sampled with replacement.",
+    }
+    return result
 
 
 def _reason_list(record: dict) -> list[str]:

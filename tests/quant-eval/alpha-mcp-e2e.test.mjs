@@ -282,6 +282,11 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     const signalTool = tools.find(tool => tool.name === "quant_evaluate_alpha_signal");
     assert.ok(signalTool, "quant_evaluate_alpha_signal is advertised");
     assert.equal(Object.keys(signalTool.inputSchema.properties).some(key => key.startsWith("test") || key.endsWith("_path")), false);
+    assert.ok(signalTool.inputSchema.properties.benchmark_symbol, "explicit benchmark symbol is advertised");
+    const foldTool = tools.find(tool => tool.name === "quant_train_alpha_diagnostic_folds");
+    assert.ok(foldTool, "quant_train_alpha_diagnostic_folds is advertised");
+    assert.equal(Object.keys(foldTool.inputSchema.properties).some(key => key.startsWith("test") || key.endsWith("_path")), false);
+    assert.ok(foldTool.inputSchema.properties.split_at, "caller-approved Train split is advertised");
     async function call(name, args) {
       const result = await client.callTool({name, arguments: args});
       assert(!result.isError, JSON.stringify(result));
@@ -310,6 +315,21 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
       evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
       signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
     };
+    const invalidFold = {
+      research_protocol_hash: fake,
+      feature_set_id: fake,
+      stock_dataset_id: fake,
+      label_name: "stock_forward_return",
+      target_type: "stock_return",
+      horizon_days: 5,
+      windows: {
+        train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+        validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+      },
+      split_at: "2009-02-01T00:00:00Z",
+      hyperparameters: {n_estimators: 5},
+      random_seed: 20261120,
+    };
     const rejected = [];
     for (const args of [
       {...invalid, signal_spec: {...invalid.signal_spec, score_multiplier: 0}},
@@ -321,10 +341,24 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     ]) {
       rejected.push(Boolean((await client.callTool({name: "quant_evaluate_alpha_signal", arguments: args})).isError));
     }
+    const rejectedFold = [];
+    for (const args of [
+      {...invalidFold, split_at: "2009-01-02T00:00:00Z"},
+      {...invalidFold, split_at: "2009-04-01T00:00:00Z"},
+      {...invalidFold, windows: {...invalidFold.windows, train_end: "2012-01-02T00:00:00Z"}, split_at: "2012-01-01T00:00:00Z"},
+      {...invalidFold, test_start: "2009-07-01T00:00:00Z"},
+      {...invalidFold, feature_path: "/tmp/features.parquet"},
+    ]) {
+      rejectedFold.push(Boolean((await client.callTool({name: "quant_train_alpha_diagnostic_folds", arguments: args})).isError));
+    }
     const [rejectedCount] = JSON.parse(execFileSync(python, ["-c",
       "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0]]))",
       resolve(tmp, "quant.db")], {encoding: "utf8"}));
-    assert.deepEqual({rejected, rejectedCount}, {rejected: [true, true, true, true, true, true], rejectedCount: 0});
+    assert.deepEqual({rejected, rejectedFold, rejectedCount}, {
+      rejected: [true, true, true, true, true, true],
+      rejectedFold: [true, true, true, true, true],
+      rejectedCount: 0,
+    });
 
     const prepared = await call("quant_prepare_alpha_dataset", {
       source: "yahoo", symbols, period: {start: "2009-01-02T00:00:00Z", end: "2009-07-01T00:00:00Z"},
@@ -382,6 +416,7 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
       },
       evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
       signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+      benchmark_symbol: "AAPL",
     });
     await done(signal.job_id);
     const summary = await call("quant_get_result", {job_id: signal.job_id, section: "summary"});
@@ -392,6 +427,10 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
       "top20_forward_label_summary"]) {
       assert.ok(key in summary, key);
     }
+    assert.ok(summary.stability_summary, "B5 stability summary is present");
+    assert.equal(summary.stability_summary.weekly_bootstrap.config.seed, 20261120);
+    assert.equal(summary.stability_summary.weekly_bootstrap.config.block_weeks, 4);
+    assert.equal(summary.stability_summary.weekly_bootstrap.config.draws, 2000);
     assert.equal(summary.feature_set_id, factorDataset.dataset_id);
     assert.equal(summary.label_version, "session-aligned-v2");
     assert.ok(summary.evaluation_window.end <= "2012-01-01T00:00:00+00:00");
@@ -412,6 +451,16 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     assert.equal(top20Page.rows.length, 1);
     assert.equal(top20Page.rows[0].analysis_label, "predictive_label_analysis_not_executable_backtest");
     assert.ok(top20Page.rows[0].exclusion_reasons.includes("INSUFFICIENT_TOP20_NAMES"));
+    const diagnosticPage = await call("quant_get_result", {job_id: signal.job_id, section: "diagnostics", limit: 2});
+    assert.equal(diagnosticPage.rows.length, 2);
+    assert.ok(diagnosticPage.total_count > 2);
+    assert.ok(diagnosticPage.next_cursor);
+    const diagnostics = await call("quant_get_result", {job_id: signal.job_id, section: "diagnostics", limit: 100});
+    const bootstrapDiagnostic = diagnostics.rows.find(row => row.diagnostic === "weekly_moving_block_bootstrap");
+    const regimeDiagnostics = diagnostics.rows.filter(row => row.diagnostic === "regime_breakdown");
+    assert.equal(bootstrapDiagnostic.config.seed, 20261120);
+    assert.equal(regimeDiagnostics.reduce((sum, row) => sum + row.decision_count, 0), summary.daily_decision_count);
+    assert.equal(diagnostics.rows.some(row => row.diagnostic === "annual_stability"), true);
     const misbound = await client.callTool({name: "quant_get_result", arguments: {
       job_id: signal.job_id, section: "summary", cursor: firstPage.next_cursor,
     }});
@@ -422,12 +471,57 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     assert.equal(reproducibility.excluded_opportunities, summary.excluded_opportunities);
     assert.deepEqual(reproducibility.weekly_decision_dates, summary.weekly_decision_dates);
     assert.deepEqual(reproducibility.top20_forward_label_summary, summary.top20_forward_label_summary);
+    assert.equal(reproducibility.benchmark_symbol, "AAPL");
+    assert.equal(reproducibility.regime_lookback_sessions, 63);
+    assert.equal(reproducibility.bootstrap_config.seed, 20261120);
     assert.equal(reproducibility.reserved_test_start, "2012-01-01T00:00:00+00:00");
     const request = JSON.parse(execFileSync(python, ["-c",
       "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute('select request from jobs where id=?',(sys.argv[2],)).fetchone(); print(json.dumps(json.loads(row[0])))",
       resolve(tmp, "quant.db"), signal.job_id], {encoding: "utf8"}));
     assert.equal(Object.keys(request).some(key => key.startsWith("test") || key.endsWith("_path")), false);
     assert.equal(request.evaluation_window.end, "2009-06-01T00:00:00Z");
+    assert.equal(request.benchmark_symbol, "AAPL");
+
+    const folds = await call("quant_train_alpha_diagnostic_folds", {
+      research_protocol_hash: "sha256:" + "0".repeat(64),
+      feature_set_id: factorDataset.dataset_id,
+      stock_dataset_id: dataset.dataset_id,
+      label_name: "stock_forward_return",
+      target_type: "stock_return",
+      horizon_days: 5,
+      windows: {
+        train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+        validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+      },
+      split_at: "2009-02-15T00:00:00Z",
+      hyperparameters: {
+        learning_rate: 0.1, num_leaves: 4, min_child_samples: 2, n_estimators: 5,
+      },
+      random_seed: 20261120,
+    });
+    await done(folds.job_id);
+    const foldSummary = await call("quant_get_result", {job_id: folds.job_id, section: "summary"});
+    assert.equal(foldSummary.kind, "train_alpha_diagnostic_folds");
+    assert.equal(foldSummary.status, "TESTED");
+    assert.equal(foldSummary.fold_count, 2);
+    const foldPage = await call("quant_get_result", {job_id: folds.job_id, section: "diagnostics", limit: 1});
+    assert.equal(foldPage.total_count, 2);
+    assert.equal(foldPage.rows.length, 1);
+    assert.ok(foldPage.next_cursor);
+    const foldTail = await call("quant_get_result", {
+      job_id: folds.job_id, section: "diagnostics", limit: 1, cursor: foldPage.next_cursor,
+    });
+    assert.equal(foldTail.rows.length, 1);
+    assert.equal(foldTail.next_cursor, null);
+    const foldReproducibility = await call("quant_get_result", {job_id: folds.job_id, section: "reproducibility"});
+    assert.equal(foldReproducibility.model_selection_affected, false);
+    assert.equal(foldReproducibility.frozen_candidate_ledger_modified, false);
+    assert.equal(foldReproducibility.test_or_oos_read, false);
+    const foldRequest = JSON.parse(execFileSync(python, ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute('select request from jobs where id=?',(sys.argv[2],)).fetchone(); print(json.dumps(json.loads(row[0])))",
+      resolve(tmp, "quant.db"), folds.job_id], {encoding: "utf8"}));
+    assert.equal(foldRequest.split_at, "2009-02-15T00:00:00Z");
+    assert.equal(Object.keys(foldRequest).some(key => key.startsWith("test") || key.endsWith("_path")), false);
   } finally {
     await client.close();
     rmSync(tmp, {recursive: true, force: true});
