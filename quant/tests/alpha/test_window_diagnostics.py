@@ -192,6 +192,41 @@ def test_diagnostic_folds_fit_independent_deterministic_train_only_models(tmp_pa
     assert first["definition"] == "independent_train_window_importance_not_model_selection"
 
 
+def test_fold_schema_is_local_and_future_only_feature_does_not_change_first_fold():
+    features, labels = _window_fixture()
+
+    def select_features(include_future_only):
+        selected = []
+        for row in features:
+            in_first = row["decision_at"] < SPLIT_AT
+            if in_first and row["factor_name"] != "f1":
+                continue
+            if not in_first and row["factor_name"] not in {"f1", "f2"}:
+                if not include_future_only or row["factor_name"] != "f3":
+                    continue
+            selected.append(row)
+        return selected
+
+    kwargs = {
+        "split": _split(),
+        "split_at": SPLIT_AT,
+        "hyperparameters": _fold_request()["hyperparameters"],
+        "random_seed": 11,
+    }
+    baseline = diagnostic_window_importance(select_features(False), labels, **kwargs)
+    future_only = diagnostic_window_importance(select_features(True), labels, **kwargs)
+
+    assert baseline["folds"][0]["feature_schema"] == ["f1"]
+    assert baseline["folds"][1]["feature_schema"] == ["f1", "f2"]
+    assert future_only["folds"][0]["feature_schema"] == ["f1"]
+    assert future_only["folds"][1]["feature_schema"] == ["f1", "f2", "f3"]
+    assert future_only["folds"][0]["model_hash"] == baseline["folds"][0]["model_hash"]
+    assert set(future_only["folds"][0]["feature_importance_gain"]) == {"f1"}
+    assert baseline["schema_comparison"]["same"] is False
+    assert baseline["status"] == "NOT_TESTED"
+    assert baseline["reason"] == "FOLD_FEATURE_SCHEMA_MISMATCH"
+
+
 def test_diagnostic_folds_return_not_tested_without_two_comparable_fits():
     features, labels = _window_fixture()
     first_slice_only = [
@@ -352,3 +387,29 @@ def test_fold_job_publishes_paginated_diagnostics_and_reads_only_train(tmp_path,
     assert all(end is None or end <= TRAIN_END for _, _, end in observed_reads)
     assert {dataset_id for dataset_id, _, _ in observed_reads} == {stock_id, feature_id}
     assert store.load_manifest(stock_id)
+
+
+def test_fold_job_with_no_generated_labels_reports_unavailable_not_mixed(tmp_path, monkeypatch):
+    _, _, _, raw = _job_fixture(tmp_path)
+    from stock_quant.alpha.jobs import executor as alpha_executor
+
+    monkeypatch.setattr(alpha_executor, "stock_forward_labels", lambda *args, **kwargs: [])
+    registry_path = tmp_path / "registry.sqlite3"
+    with JobStore(registry_path) as jobs:
+        submitted = jobs.submit_alpha(raw)
+        assert execute_job(jobs, jobs.claim()) is True
+        job = jobs.get_job(submitted["job_id"])
+        assert job["status"] == "completed", job
+
+        summary = jobs.get_result(submitted["job_id"], "summary")
+        reproducibility = jobs.get_result(submitted["job_id"], "reproducibility")
+        assert summary["status"] == "NOT_TESTED"
+        assert summary["label_version"] is None
+        assert summary["label_availability"] == "UNAVAILABLE"
+        assert summary["label_availability_reason"] == "NO_LABELS_GENERATED"
+        assert reproducibility["label_version"] is None
+        assert reproducibility["label_availability"] == "UNAVAILABLE"
+        assert reproducibility["label_availability_reason"] == "NO_LABELS_GENERATED"
+        assert all(fold["reason"] == "NO_MATURED_LABELS" for fold in jobs.get_result(
+            submitted["job_id"], "diagnostics", limit=10,
+        )["rows"])

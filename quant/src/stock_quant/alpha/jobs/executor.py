@@ -267,6 +267,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             subperiod_stability = stability_by_subperiod(diagnostics["rank_ic_by_decision"])
             weekly_bootstrap = moving_block_bootstrap(weekly["weekly_rank_ic"])
             benchmark_rows = []
+            regime_session_grid = []
             if request.benchmark_symbol is not None:
                 benchmark_symbols = {str(value).upper() for value in stock_manifest.instrument_ids}
                 if request.benchmark_symbol not in benchmark_symbols:
@@ -275,6 +276,11 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                         "Requested benchmark symbol is not present in the stock dataset",
                         {"benchmark_symbol": request.benchmark_symbol},
                     )
+                regime_session_grid = expected_session_dates(
+                    calendar,
+                    request.split.train_start.date(),
+                    request.evaluation_window.end.date(),
+                )
                 benchmark_rows = datasets.read_rows(
                     request.stock_dataset_id,
                     columns=("instrument_id", "start_at", "end_at", "available_at", "close"),
@@ -285,6 +291,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 diagnostics["rank_ic_by_decision"],
                 benchmark_rows,
                 benchmark_symbol=request.benchmark_symbol,
+                expected_sessions=regime_session_grid,
             )
             annual_sign = sign_consistency(annual_stability)
             subperiod_sign = sign_consistency(subperiod_stability)
@@ -296,6 +303,12 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "subperiod_sign_consistency": subperiod_sign,
                 "weekly_sign_consistency": weekly_sign,
                 "weekly_bootstrap": weekly_bootstrap,
+                "regime_session_grid": {
+                    "source": "mapped_development_sessions" if request.benchmark_symbol is not None else None,
+                    "start": request.split.train_start.isoformat() if request.benchmark_symbol is not None else None,
+                    "end": request.evaluation_window.end.isoformat() if request.benchmark_symbol is not None else None,
+                    "session_count": len(regime_session_grid),
+                },
                 "regime_decision_counts": {
                     record["regime"]: record["decision_count"] for record in regimes
                 },
@@ -504,7 +517,18 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             fold_rows = fold_result["folds"]
             tested_count = sum(fold["status"] == "TESTED" for fold in fold_rows)
             label_versions = sorted({row.label_version for row in labels})
-            label_version = label_versions[0] if len(label_versions) == 1 else "mixed"
+            if not labels:
+                label_version = None
+                label_availability = "UNAVAILABLE"
+                label_availability_reason = "NO_LABELS_GENERATED"
+            elif len(label_versions) == 1:
+                label_version = label_versions[0]
+                label_availability = "AVAILABLE"
+                label_availability_reason = None
+            else:
+                label_version = None
+                label_availability = "INVALID"
+                label_availability_reason = "MIXED_LABEL_VERSIONS"
             summary = {
                 "kind": request.kind,
                 "status": fold_result["status"],
@@ -514,6 +538,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "stock_dataset_id": request.stock_dataset_id,
                 "label_name": request.label_name,
                 "label_version": label_version,
+                "label_availability": label_availability,
+                "label_availability_reason": label_availability_reason,
                 "target_type": request.target_type,
                 "horizon_days": request.horizon_days,
                 "split_at": request.split_at.isoformat(),
@@ -537,6 +563,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "stock_dataset_id": request.stock_dataset_id,
                     "label_name": request.label_name,
                     "label_version": label_version,
+                    "label_availability": label_availability,
+                    "label_availability_reason": label_availability_reason,
                     "calendar_version": stock_manifest.calendar_version,
                     "split": request.split.model_dump(mode="json"),
                     "split_at": request.split_at.isoformat(),

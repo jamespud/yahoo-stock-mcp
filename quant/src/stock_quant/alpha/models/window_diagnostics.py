@@ -60,12 +60,19 @@ def _join_labels(features: pd.DataFrame, labels: list[LabelRow]) -> pd.DataFrame
     return joined[joined["label_value"].notna()].copy()
 
 
-def _slice(joined: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
-    return joined[
-        (joined["decision_at"] >= pd.Timestamp(start))
-        & (joined["decision_at"] < pd.Timestamp(end))
-        & (joined["label_available_at"] < pd.Timestamp(end))
-    ].copy()
+def _window_feature_rows(feature_rows: list[dict], start: datetime, end: datetime) -> list[dict]:
+    return [
+        row for row in feature_rows
+        if start <= _utc(row["decision_at"]) < end
+    ]
+
+
+def _window_labels(label_rows: list[LabelRow], start: datetime, end: datetime) -> list[LabelRow]:
+    return [
+        row for row in label_rows
+        if start <= _utc(row.feature_decision_at) < end
+        and _utc(row.label_available_at) < end
+    ]
 
 
 def _params(hyperparameters: dict, random_seed: int) -> tuple[dict, int]:
@@ -131,8 +138,6 @@ def diagnostic_window_importance(
     if not split.train_start < split_at < split.train_end:
         raise ValueError("split_at must be strictly inside Train")
     hyperparameters = validate_hyperparameters(hyperparameters or {})
-    features, schema = _feature_frame(feature_rows)
-    joined = _join_labels(features, label_rows)
     params, iteration_count = _params(hyperparameters, random_seed)
     windows = (
         ("train_first", split.train_start, split_at),
@@ -140,7 +145,26 @@ def diagnostic_window_importance(
     )
     fits = []
     for index, (fold_id, start, end) in enumerate(windows):
-        frame = _slice(joined, start, end)
+        fold_feature_rows = _window_feature_rows(feature_rows, start, end)
+        if not fold_feature_rows:
+            fits.append({
+                "fold_id": fold_id,
+                "window": {"start": _utc(start).isoformat(), "end": _utc(end).isoformat()},
+                "feature_schema": [],
+                "iteration_count": iteration_count,
+                "selection_method": "fixed_iteration_no_validation_selection",
+                "label_evidence": _label_evidence(pd.DataFrame()),
+                "status": "NOT_TESTED",
+                "reason": "NO_FEATURES_IN_WINDOW",
+                "sample_count": 0,
+                "feature_importance_gain": None,
+                "normalized_importance": None,
+                "model_hash": None,
+            })
+            continue
+        features, schema = _feature_frame(fold_feature_rows)
+        fold_labels = _window_labels(label_rows, start, end)
+        frame = _join_labels(features, fold_labels)
         base = {
             "fold_id": fold_id,
             "window": {"start": _utc(start).isoformat(), "end": _utc(end).isoformat()},
@@ -203,21 +227,38 @@ def diagnostic_window_importance(
         if checkpoint:
             checkpoint((index + 1) / 2)
 
-    comparable = [
-        fit for fit in fits
-        if fit["status"] == "TESTED" and fit["feature_schema"] == schema
-    ]
+    schemas = [fit["feature_schema"] for fit in fits]
+    schema_comparison = {
+        "first": schemas[0],
+        "second": schemas[1],
+        "same": schemas[0] == schemas[1],
+    }
+    comparable = [fit for fit in fits if fit["status"] == "TESTED"]
     if len(comparable) < 2:
         return {
             "schema_version": DIAGNOSTIC_WINDOW_VERSION,
             "status": "NOT_TESTED",
             "reason": "FEWER_THAN_TWO_COMPARABLE_FITS",
             "folds": fits,
+            "schema_comparison": schema_comparison,
             "importance_deltas": None,
             "importance_rank_correlation": None,
             "stability_claim": None,
             "definition": "independent_train_window_importance_not_model_selection",
         }
+    if not schema_comparison["same"]:
+        return {
+            "schema_version": DIAGNOSTIC_WINDOW_VERSION,
+            "status": "NOT_TESTED",
+            "reason": "FOLD_FEATURE_SCHEMA_MISMATCH",
+            "folds": fits,
+            "schema_comparison": schema_comparison,
+            "importance_deltas": None,
+            "importance_rank_correlation": None,
+            "stability_claim": None,
+            "definition": "independent_train_window_importance_not_model_selection",
+        }
+    schema = comparable[0]["feature_schema"]
     first_scores = [comparable[0]["normalized_importance"][name] for name in schema]
     second_scores = [comparable[1]["normalized_importance"][name] for name in schema]
     correlation = spearmanr(first_scores, second_scores).statistic
@@ -228,6 +269,7 @@ def diagnostic_window_importance(
         "status": "TESTED",
         "reason": None,
         "folds": fits,
+        "schema_comparison": schema_comparison,
         "importance_deltas": {
             name: comparable[1]["normalized_importance"][name] - comparable[0]["normalized_importance"][name]
             for name in schema

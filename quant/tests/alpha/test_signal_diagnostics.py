@@ -524,6 +524,37 @@ def test_stability_by_year_retains_periods_timestamps_denominators_and_null_ics(
     assert annual[0]["decisions"][1]["expected_count"] == 3
 
 
+def test_stability_by_year_emits_explicit_empty_year_records():
+    records = [
+        {
+            "decision_at": "2009-12-31T21:05:00+00:00", "rank_ic": 0.2,
+            "expected_count": 3, "valid_count": 3, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+        {
+            "decision_at": "2011-01-03T21:05:00+00:00", "rank_ic": -0.1,
+            "expected_count": 3, "valid_count": 3, "excluded_count": 0,
+            "exclusion_reasons": [],
+        },
+    ]
+
+    annual = stability_by_year(records)
+
+    assert [record["year"] for record in annual] == [2009, 2010, 2011]
+    empty = annual[1]
+    assert empty["status"] == "EMPTY"
+    assert empty["reason"] == "NO_DECISIONS_IN_YEAR"
+    assert empty["period_start"] == "2010-01-01T00:00:00+00:00"
+    assert empty["period_end"] == "2011-01-01T00:00:00+00:00"
+    assert empty["decision_count"] == 0
+    assert empty["expected_count"] == 0
+    assert empty["valid_count"] == 0
+    assert empty["excluded_count"] == 0
+    assert empty["rank_ic_mean"] is None
+    assert empty["icir"] is None
+    assert empty["decisions"] == []
+
+
 def test_stability_by_subperiod_keeps_chronological_chunks_and_null_records():
     records = [
         {
@@ -578,7 +609,9 @@ def test_regime_breakdown_uses_only_trailing_63_session_benchmark_data_available
         },
     ]
 
-    regimes = regime_breakdown(ic_rows, benchmark_rows, benchmark_symbol="SPY")
+    regimes = regime_breakdown(
+        ic_rows, benchmark_rows, benchmark_symbol="SPY", expected_sessions=sessions,
+    )
     by_name = {record["regime"]: record for record in regimes}
 
     assert [row["decision_at"][:10] for row in by_name["UP"]["decisions"]] == [sessions[63].isoformat()]
@@ -591,6 +624,39 @@ def test_regime_breakdown_uses_only_trailing_63_session_benchmark_data_available
         by_name["UNKNOWN"]["decisions"][0]["regime_reason"],
         by_name["UNKNOWN"]["decisions"][1]["regime_reason"],
     } == {"INCOMPLETE_63_SESSION_WINDOW", "BENCHMARK_NOT_AVAILABLE_BY_DECISION"}
+
+
+def test_regime_breakdown_rejects_missing_intermediate_expected_sessions():
+    sessions = [date(2024, 1, 2) + timedelta(days=index) for index in range(64)]
+    missing_session = sessions[10]
+    benchmark_rows = []
+    for session in sessions:
+        if session == missing_session:
+            continue
+        decision_at = datetime.combine(session, time(21, 5), tzinfo=UTC)
+        benchmark_rows.append({
+            "instrument_id": "SPY",
+            "start_at": datetime.combine(session, time(14, 30), tzinfo=UTC),
+            "end_at": datetime.combine(session, time(21, 0), tzinfo=UTC),
+            "available_at": decision_at,
+            "close": 100.0 + sessions.index(session),
+        })
+    decision_at = datetime.combine(sessions[-1], time(21, 5), tzinfo=UTC)
+
+    regimes = regime_breakdown(
+        [{
+            "decision_at": decision_at.isoformat(), "rank_ic": 0.1,
+            "expected_count": 4, "valid_count": 4, "excluded_count": 0,
+            "exclusion_reasons": [],
+        }],
+        benchmark_rows,
+        benchmark_symbol="SPY",
+        expected_sessions=sessions,
+    )
+    unknown = next(record for record in regimes if record["regime"] == "UNKNOWN")
+
+    assert unknown["decisions"][0]["regime_reason"] == "MISSING_BENCHMARK_SESSION"
+    assert unknown["decisions"][0]["missing_benchmark_sessions"] == [missing_session.isoformat()]
 
 
 def test_sign_consistency_reports_direction_without_dropping_null_periods():
@@ -667,3 +733,27 @@ def test_moving_block_bootstrap_returns_not_tested_below_each_hard_threshold():
     assert few_finite["reason"] == "FEWER_THAN_1900_FINITE_DRAWS"
     assert few_finite["finite_draw_count"] < 1900
     assert few_finite["rank_ic"]["ci_lower"] is None
+
+
+def test_moving_block_bootstrap_fails_closed_when_paired_metric_has_too_few_finite_draws():
+    weekly = [
+        {
+            "decision_at": f"2010-04-{index + 1:02d}T21:05:00+00:00",
+            "rank_ic": 0.1,
+            "paired_rank_ic": None if index == 0 else 0.05,
+        }
+        for index in range(12)
+    ]
+
+    result = moving_block_bootstrap(weekly)
+
+    assert result["rank_ic"]["status"] == "TESTED"
+    assert result["rank_ic"]["finite_draw_count"] == 2000
+    assert result["paired_rank_ic"]["status"] == "NOT_TESTED"
+    assert result["paired_rank_ic"]["reason"] == "FEWER_THAN_1900_FINITE_PAIRED_DRAWS"
+    assert result["paired_rank_ic"]["ci_lower"] is None
+    assert result["paired_delta"]["status"] == "NOT_TESTED"
+    assert result["paired_delta"]["reason"] == "FEWER_THAN_1900_FINITE_PAIRED_DRAWS"
+    assert result["paired_delta"]["ci_lower"] is None
+    assert result["status"] == "NOT_TESTED"
+    assert result["reason"] == "FEWER_THAN_1900_FINITE_PAIRED_DRAWS"
