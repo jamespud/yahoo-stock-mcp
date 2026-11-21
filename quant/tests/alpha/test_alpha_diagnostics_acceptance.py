@@ -329,7 +329,7 @@ def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, muta
 
     assert completed.returncode != 0
     lowered = completed.stderr.lower()
-    assert any(fragment in lowered for fragment in ("protocol body", "npm test", "source commit", "ancestor"))
+    assert any(fragment in lowered for fragment in ("protocol body", "npm test", "source commit", "ancestor", "content hash"))
 
 
 @pytest.mark.parametrize("commit_kind", ["missing", "nonancestor"])
