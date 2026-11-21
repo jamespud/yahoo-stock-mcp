@@ -370,7 +370,7 @@ def _common_rank_ic(
 def _comparison_bucket(
     *,
     model_summary: dict,
-    baseline_summary: dict,
+    baseline_rank_ic_mean: float | None,
     baseline_sample_count: int,
     common: dict,
     expected_session_count: int,
@@ -381,7 +381,7 @@ def _comparison_bucket(
     delta = model_mean - baseline_mean if model_mean is not None and baseline_mean is not None else None
     return {
         "model_rank_ic_mean": model_summary.get("rank_ic_mean"),
-        "baseline_rank_ic_mean": baseline_summary.get("rank_ic_mean"),
+        "baseline_rank_ic_mean": baseline_rank_ic_mean,
         "model_rank_ic_mean_on_common": model_mean,
         "baseline_rank_ic_mean_on_common": baseline_mean,
         "delta": delta,
@@ -415,6 +415,7 @@ def _baseline_comparison(
     instruments: list[str],
     daily_sessions: list[date],
     weekly_sessions: list[date],
+    validation_grid_source: str,
 ) -> dict:
     baseline_daily = evaluate_direct_signal(
         feature_rows,
@@ -436,19 +437,24 @@ def _baseline_comparison(
     daily_common = _common_rank_ic(validation, selected_predictions, daily_values, daily_sessions)
     weekly_common = _common_rank_ic(validation, selected_predictions, weekly_values, weekly_sessions)
     expected = len(instrument_set)
+    coverage_definition = (
+        "Expected instruments x mapped validation sessions; common samples are an intersection "
+        "and do not replace either signal's fixed coverage denominator."
+        if validation_grid_source == "mapped_validation_sessions"
+        else "Expected instruments x validation_rows_fallback sessions; common samples are an intersection "
+        "and do not replace either signal's fixed coverage denominator."
+    )
     return {
         "schema_version": BASELINE_COMPARISON_VERSION,
         "comparison": "model_minus_baseline_on_common_samples",
         "baseline_signal": spec.model_dump(mode="json"),
         "baseline_signal_hash": signal_spec_hash(spec),
         "same_validation_opportunity_grid": True,
-        "coverage_definition": (
-            "Expected instruments x mapped validation sessions; common samples are an intersection "
-            "and do not replace either signal's fixed coverage denominator."
-        ),
+        "validation_grid_source": validation_grid_source,
+        "coverage_definition": coverage_definition,
         "daily": _comparison_bucket(
             model_summary=selected_daily,
-            baseline_summary=baseline_daily["summary"],
+            baseline_rank_ic_mean=baseline_daily["summary"]["rank_ic_mean"],
             baseline_sample_count=baseline_daily["coverage"]["valid_matched_opportunities"],
             common=daily_common,
             expected_session_count=len(daily_sessions),
@@ -456,7 +462,7 @@ def _baseline_comparison(
         ),
         "weekly": _comparison_bucket(
             model_summary=selected_weekly,
-            baseline_summary=baseline_weekly["summary"],
+            baseline_rank_ic_mean=baseline_weekly["summary"]["weekly_rank_ic_mean"],
             baseline_sample_count=baseline_weekly["summary"]["weekly_coverage"]["valid_matched_opportunities"],
             common=weekly_common,
             expected_session_count=len(weekly_sessions),
@@ -590,6 +596,7 @@ def train_validation_only(
             instruments=expected_instruments,
             daily_sessions=daily_sessions,
             weekly_sessions=weekly_sessions,
+            validation_grid_source=validation_grid_source,
         )
     importance = booster.feature_importance(importance_type="gain", iteration=selected_iteration)
     environment_hash = _environment_hash()

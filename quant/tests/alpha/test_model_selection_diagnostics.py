@@ -256,6 +256,14 @@ def test_direct_baseline_comparison_has_positive_and_negative_deltas_and_keeps_d
     assert positive["comparison"] == "model_minus_baseline_on_common_samples"
     assert positive["daily"]["delta"] > 0
     assert negative["daily"]["delta"] < 0
+    assert positive["weekly"]["model_rank_ic_mean"] is not None
+    assert positive["weekly"]["baseline_rank_ic_mean"] is not None
+    assert positive["weekly"]["model_rank_ic_mean_on_common"] is not None
+    assert positive["weekly"]["baseline_rank_ic_mean_on_common"] is not None
+    assert positive["weekly"]["delta"] == pytest.approx(
+        positive["weekly"]["model_rank_ic_mean_on_common"]
+        - positive["weekly"]["baseline_rank_ic_mean_on_common"]
+    )
     assert positive["weekly"]["common_sample_count"] > 0
     assert negative["weekly"]["common_sample_count"] > 0
     assert positive["daily"]["common_sample_count"] == negative["daily"]["common_sample_count"]
@@ -270,6 +278,9 @@ def test_direct_baseline_comparison_has_positive_and_negative_deltas_and_keeps_d
     assert positive["weekly"]["model_coverage"] == negative["weekly"]["model_coverage"]
     assert positive["daily"]["common_sample_count"] <= positive["daily"]["model_sample_count"]
     assert positive["weekly"]["common_sample_count"] <= positive["weekly"]["model_sample_count"]
+    assert positive["validation_grid_source"] == "validation_rows_fallback"
+    assert "validation_rows_fallback" in positive["coverage_definition"]
+    assert "mapped validation sessions" not in positive["coverage_definition"].lower()
 
 
 def test_weekly_selection_uses_supplied_actual_session_grid_without_friday_fallback(tmp_path):
@@ -284,11 +295,17 @@ def test_weekly_selection_uses_supplied_actual_session_grid_without_friday_fallb
         current += timedelta(days=1)
     manifest = _train(
         tmp_path,
-        request.model_copy(update={"selection_metric": "weekly_rank_ic"}),
+        request.model_copy(update={
+            "selection_metric": "weekly_rank_ic",
+            "baseline_signal": DirectSignalSpec(
+                factor_name="f1", score_multiplier=1, version="direct-factor-v1",
+            ),
+        }),
         labels,
         validation_sessions=validation_sessions,
     )
     diagnostics = manifest.selection_diagnostics
+    baseline_comparison = manifest.baseline_comparison
 
     assert "2024-03-14" in diagnostics["validation_grid"]["weekly_decision_dates"]
     assert "2024-03-15" not in diagnostics["validation_grid"]["weekly_decision_dates"]
@@ -296,6 +313,8 @@ def test_weekly_selection_uses_supplied_actual_session_grid_without_friday_fallb
     assert diagnostics["validation_grid"]["daily_decision_dates"] == [
         session.isoformat() for session in validation_sessions
     ]
+    assert baseline_comparison["validation_grid_source"] == "mapped_validation_sessions"
+    assert "mapped validation sessions" in baseline_comparison["coverage_definition"].lower()
 
 
 def test_selection_diagnostics_read_only_through_validation_cutoff(tmp_path):
