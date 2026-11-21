@@ -1,6 +1,7 @@
 """Versioned Alpha job requests. No caller-controlled filesystem paths."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_validator
@@ -8,7 +9,17 @@ from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_v
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
+from ..models.diagnostic_protocol import (
+    ProtocolMode,
+    RESERVED_TEST_END,
+    validate_frozen_fold_binding,
+    validate_frozen_signal_binding,
+    validate_frozen_training_binding,
+)
+from ..models.signal_diagnostics import DirectSignalSpec
 from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
+
+RESERVED_TEST_START = datetime(2012, 1, 1, tzinfo=timezone.utc)
 
 
 class AlphaJobBase(StrictModel):
@@ -75,6 +86,61 @@ class ComputeOptionFactorsJob(AlphaJobBase):
     underlying_price_dataset_id: Hash | None = None
 
 
+class SignalEvaluationWindow(StrictModel):
+    start: AwareDatetime
+    end: AwareDatetime
+
+    @model_validator(mode="after")
+    def utc_midnight(self):
+        start = self.start.astimezone(timezone.utc)
+        end = self.end.astimezone(timezone.utc)
+        if any((value.hour, value.minute, value.second, value.microsecond) != (0, 0, 0, 0)
+               for value in (start, end)):
+            raise ValueError("evaluation_window.start and end must be UTC midnight")
+        if start >= end:
+            raise ValueError("Expected evaluation_window.start < evaluation_window.end")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+        return self
+
+
+class EvaluateAlphaSignalJob(AlphaJobBase):
+    kind: Literal["evaluate_alpha_signal"]
+    feature_set_id: Hash
+    stock_dataset_id: Hash
+    label_name: Literal["stock_forward_return"] = "stock_forward_return"
+    target_type: Literal["stock_return"] = "stock_return"
+    horizon_days: Literal[5] = 5
+    split: ModelDevelopmentSplit
+    evaluation_window: SignalEvaluationWindow
+    signal_spec: DirectSignalSpec
+    benchmark_symbol: Identifier | None = None
+    research_protocol_hash: Hash | None = None
+    protocol_mode: ProtocolMode = "synthetic_contract"
+
+    @field_validator("benchmark_symbol")
+    @classmethod
+    def normalize_benchmark_symbol(cls, value):
+        return value.upper() if value is not None else None
+
+    @model_validator(mode="after")
+    def development_only(self):
+        if self.evaluation_window.start < self.split.train_start or self.evaluation_window.end > self.split.validation_end:
+            raise ValueError("evaluation window must stay within development split")
+        if self.protocol_mode == "frozen_v1_3" and self.split.validation_end > RESERVED_TEST_START:
+            raise ValueError("validation_end must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
+        if self.protocol_mode == "frozen_v1_3":
+            if self.research_protocol_hash is None:
+                raise ValueError("frozen_v1_3 requires research_protocol_hash")
+            validate_frozen_signal_binding(
+                protocol_hash_value=self.research_protocol_hash,
+                split=self.split,
+                evaluation_window=self.evaluation_window,
+                signal_spec=self.signal_spec,
+            )
+        return self
+
+
 class TrainAlphaModelJob(AlphaJobBase):
     kind: Literal["train_alpha_model"]
     feature_set_id: Hash
@@ -85,11 +151,15 @@ class TrainAlphaModelJob(AlphaJobBase):
     horizon_days: int = Field(default=5, ge=1, le=252)
     evaluation_mode: str = Field(default="legacy_inline_test", pattern=r"^(validation_only|legacy_inline_test)$")
     research_protocol_hash: Hash | None = None
+    protocol_mode: ProtocolMode = "synthetic_contract"
+    candidate_id: str | None = Field(default=None, pattern=r"^H0[1-6]$")
     split: TemporalSplit | ModelDevelopmentSplit
     hyperparameters: dict = Field(default_factory=dict)
     random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+    selection_metric: Literal["l2", "daily_rank_ic", "weekly_rank_ic"] = "l2"
+    baseline_signal: DirectSignalSpec | None = None
 
     _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 
@@ -97,10 +167,84 @@ class TrainAlphaModelJob(AlphaJobBase):
     def split_mode(self):
         if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
             raise ValueError("validation_only training requires ModelDevelopmentSplit")
+        if (
+            self.protocol_mode == "frozen_v1_3"
+            and
+            self.evaluation_mode == "validation_only"
+            and self.split.train_start < RESERVED_TEST_END
+            and self.split.validation_end > RESERVED_TEST_START
+        ):
+            raise ValueError("validation_only split must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
         if self.evaluation_mode == "validation_only" and not self.stock_dataset_id:
             raise ValueError("validation_only training currently requires stock_dataset_id")
         if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
             raise ValueError("legacy_inline_test training requires TemporalSplit")
+        if self.evaluation_mode == "legacy_inline_test" and self.selection_metric != "l2":
+            raise ValueError("selection metrics are validation-only")
+        if self.evaluation_mode == "legacy_inline_test" and self.baseline_signal is not None:
+            raise ValueError("baseline_signal is validation-only")
+        if self.protocol_mode == "frozen_v1_3":
+            if self.evaluation_mode != "validation_only":
+                raise ValueError("frozen_v1_3 requires validation_only evaluation")
+            validate_frozen_training_binding(
+                protocol_hash_value=self.research_protocol_hash or "",
+                split=self.split,
+                candidate_id=self.candidate_id,
+                hyperparameters=self.hyperparameters,
+                random_seed=self.random_seed,
+                resource_budget=self.resource_budget,
+                baseline_signal=self.baseline_signal,
+                min_rank_ic=self.min_rank_ic,
+            )
+        return self
+
+
+class TrainAlphaDiagnosticFoldsJob(AlphaJobBase):
+    kind: Literal["train_alpha_diagnostic_folds"]
+    research_protocol_hash: Hash
+    feature_set_id: Hash
+    stock_dataset_id: Hash
+    label_name: Literal["stock_forward_return"] = "stock_forward_return"
+    target_type: Literal["stock_return"] = "stock_return"
+    horizon_days: Literal[5] = 5
+    split: ModelDevelopmentSplit
+    split_at: AwareDatetime
+    hyperparameters: dict = Field(default_factory=dict)
+    random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
+    protocol_mode: ProtocolMode = "synthetic_contract"
+    candidate_id: str | None = Field(default=None, pattern=r"^H0[1-6]$")
+    resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+
+    _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
+
+    @model_validator(mode="after")
+    def train_only(self):
+        split_at = self.split_at.astimezone(timezone.utc)
+        if not self.split.train_start < split_at < self.split.train_end:
+            raise ValueError("split_at must be strictly inside Train")
+        if (
+            self.protocol_mode == "frozen_v1_3"
+            and (
+            (self.split.train_start < RESERVED_TEST_END and self.split.train_end > RESERVED_TEST_START)
+            or (
+                self.split.validation_start < RESERVED_TEST_END
+                and self.split.validation_end > RESERVED_TEST_START
+            )
+            or split_at >= RESERVED_TEST_START
+            and split_at < RESERVED_TEST_END
+            )
+        ):
+            raise ValueError("diagnostic folds must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
+        if self.protocol_mode == "frozen_v1_3":
+            validate_frozen_fold_binding(
+                protocol_hash_value=self.research_protocol_hash,
+                split=self.split,
+                candidate_id=self.candidate_id,
+                hyperparameters=self.hyperparameters,
+                random_seed=self.random_seed,
+                resource_budget=self.resource_budget,
+            )
+        object.__setattr__(self, "split_at", split_at)
         return self
 
 
@@ -158,13 +302,15 @@ class BacktestOptionsJob(AlphaJobBase):
 
 AlphaJobRequest = Annotated[
     PrepareStockDatasetJob | CaptureOptionChainJob | PrepareOptionsDatasetJob | ComputeFactorsJob |
-    ComputeOptionFactorsJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
+    ComputeOptionFactorsJob | EvaluateAlphaSignalJob | TrainAlphaModelJob | TrainAlphaDiagnosticFoldsJob |
+    FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
     PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
     Field(discriminator="kind"),
 ]
 ALPHA_REQUEST_ADAPTER = TypeAdapter(AlphaJobRequest)
 ALPHA_KINDS = {
     "prepare_dataset", "capture_option_chain", "prepare_options_dataset", "compute_factors",
-    "compute_option_factors", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
+    "compute_option_factors", "evaluate_alpha_signal", "train_alpha_model", "train_alpha_diagnostic_folds",
+    "freeze_alpha_selection", "evaluate_alpha_oos",
     "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
 }

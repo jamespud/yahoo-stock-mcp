@@ -50,6 +50,48 @@ export const labelSpec = z.object({
   horizon_days: z.number().int().min(1).max(252).optional(),
 }).strict();
 
+export const directSignalSpec = z.object({
+  factor_name: z.string().min(1).max(128),
+  score_multiplier: z.union([z.literal(1), z.literal(-1)]),
+  version: z.literal("direct-factor-v1"),
+}).strict();
+
+function isUtcMidnight(value: string): boolean {
+  const instant = new Date(value);
+  return instant.getUTCHours() === 0 && instant.getUTCMinutes() === 0
+    && instant.getUTCSeconds() === 0 && instant.getUTCMilliseconds() === 0;
+}
+
+const utcMidnightDateTime = z.string().datetime({offset: true})
+  .refine(isUtcMidnight, {message: "evaluation window boundaries must be UTC midnight"});
+
+export const signalEvaluationWindow = z.object({
+  start: utcMidnightDateTime,
+  end: utcMidnightDateTime,
+}).strict().refine(
+  value => new Date(value.start) < new Date(value.end),
+  {message: "evaluation_window.start must be before end"},
+);
+
+const protocolMode = z.enum(["synthetic_contract", "frozen_v1_3"]);
+const candidateId = z.enum(["H01", "H02", "H03", "H04", "H05", "H06"]);
+
+export const evaluateAlphaSignalInput = z.object({
+  feature_set_id: alphaHash,
+  stock_dataset_id: alphaHash,
+  label_name: z.literal("stock_forward_return").optional(),
+  target_type: z.literal("stock_return").optional(),
+  horizon_days: z.literal(5).optional(),
+  windows: developmentWindows,
+  evaluation_window: signalEvaluationWindow,
+  signal_spec: directSignalSpec,
+  benchmark_symbol: z.string().min(1).max(64).optional(),
+  research_protocol_hash: alphaHash.optional(),
+  protocol_mode: protocolMode.optional(),
+}).strict().describe(
+  "Direct signal diagnostics always include daily Rank IC, mapped weekly-last-session Rank IC, frozen Top20 forward-label groups, and fixed stability evidence. An optional benchmark_symbol enables explicit trailing-63-session regime grouping.",
+);
+
 export const prepareAlphaDatasetInput = z.object({
   source: z.enum(["yahoo"]),
   symbols: z.array(z.string().min(1).max(64)).min(1).max(1000),
@@ -120,6 +162,8 @@ const lightgbmHyperparameters = z.object({
 export const trainAlphaModelInputFields = z.object({
   evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
   research_protocol_hash: alphaHash.optional(),
+  protocol_mode: protocolMode.optional(),
+  candidate_id: candidateId.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
   windows: z.union([temporalWindows, developmentWindows]),
@@ -130,6 +174,8 @@ export const trainAlphaModelInputFields = z.object({
     max_rows: z.number().int().min(1).optional(),
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
+  selection_metric: z.enum(["l2", "daily_rank_ic", "weekly_rank_ic"]).optional(),
+  baseline_signal: directSignalSpec.optional(),
 }).strict();
 
 // The SDK's strict-union JSON Schema conversion advertises the typed branch,
@@ -147,6 +193,8 @@ const training = trainAlphaModelInputFields.shape;
 export const trainAlphaModelToolFields = z.object({
   evaluation_mode: auditableField(training.evaluation_mode),
   research_protocol_hash: auditableField(training.research_protocol_hash),
+  protocol_mode: auditableField(training.protocol_mode.describe("synthetic_contract is explicitly non-v1.3; frozen_v1_3 requires exact protocol binding.")),
+  candidate_id: auditableField(training.candidate_id),
   feature_set_id: auditableField(training.feature_set_id.describe("Required feature set content ID.")),
   label_spec: auditableField(training.label_spec.describe("Required label specification.")),
   windows: auditableField(training.windows.describe("Required chronological windows.")),
@@ -154,6 +202,8 @@ export const trainAlphaModelToolFields = z.object({
   random_seed: auditableField(training.random_seed),
   resource_budget: auditableField(training.resource_budget),
   min_rank_ic: auditableField(training.min_rank_ic),
+  selection_metric: auditableField(training.selection_metric.describe("Validation-only iteration selection metric.")),
+  baseline_signal: auditableField(training.baseline_signal.describe("Optional direct-factor baseline for the same validation grid.")),
 }).passthrough();
 
 // MCP permits a valid tools/call without an arguments member. Preserve the
@@ -164,7 +214,23 @@ trainAlphaModelToolFields.safeParseAsync = (data, params) =>
   parseTrainingInput(data === undefined ? {} : data, params);
 
 export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
-  if (value.evaluation_mode !== "validation_only") return;
+  if (value.evaluation_mode !== "validation_only") {
+    if (value.selection_metric !== undefined && value.selection_metric !== "l2") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selection_metric"],
+        message: "selection metrics are validation-only",
+      });
+    }
+    if (value.baseline_signal !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["baseline_signal"],
+        message: "baseline_signal is validation-only",
+      });
+    }
+    return;
+  }
   if (!value.research_protocol_hash) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -177,6 +243,52 @@ export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((valu
       code: z.ZodIssueCode.custom,
       path: ["label_spec", "stock_dataset_id"],
       message: "validation_only training currently requires stock_dataset_id",
+    });
+  }
+});
+
+export const trainAlphaDiagnosticFoldsFields = z.object({
+  research_protocol_hash: alphaHash,
+  feature_set_id: alphaHash,
+  stock_dataset_id: alphaHash,
+  label_name: z.literal("stock_forward_return").optional(),
+  target_type: z.literal("stock_return").optional(),
+  horizon_days: z.literal(5).optional(),
+  windows: developmentWindows,
+  split_at: z.string().datetime({ offset: true }),
+  hyperparameters: lightgbmHyperparameters.optional(),
+  random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
+  protocol_mode: protocolMode.optional(),
+  candidate_id: candidateId.optional(),
+  resource_budget: z.object({
+    max_seconds: z.number().int().min(1).max(86400).optional(),
+    max_rows: z.number().int().min(1).optional(),
+  }).strict().optional(),
+}).strict();
+
+export const trainAlphaDiagnosticFoldsToolFields = trainAlphaDiagnosticFoldsFields.passthrough();
+
+export const trainAlphaDiagnosticFoldsInput = trainAlphaDiagnosticFoldsFields.superRefine((value, context) => {
+  const trainStart = new Date(value.windows.train_start);
+  const trainEnd = new Date(value.windows.train_end);
+  const validationEnd = new Date(value.windows.validation_end);
+  const splitAt = new Date(value.split_at);
+  const reservedTestStart = new Date("2012-01-01T00:00:00Z");
+  if (!(trainStart < splitAt && splitAt < trainEnd)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["split_at"],
+      message: "split_at must be strictly inside Train",
+    });
+  }
+  if (
+    (value.protocol_mode ?? "synthetic_contract") === "frozen_v1_3"
+    && (trainEnd > reservedTestStart || validationEnd > reservedTestStart || splitAt >= reservedTestStart)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["split_at"],
+      message: "diagnostic folds must not enter reserved Test interval",
     });
   }
 });
