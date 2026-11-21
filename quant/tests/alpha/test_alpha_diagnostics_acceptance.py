@@ -167,6 +167,8 @@ def test_committed_evidence_is_sanitized_and_checksum_verified():
     assert evidence["commands_source_commit"] == evidence["source"]["commit"]
     assert evidence["source"]["acceptance_ran_at_commit"] is True
     assert evidence["source"]["worktree_clean_before_generation"] is True
+    assert evidence["source"]["content_hash_algorithm"] == "tracked-source-files-v1"
+    assert evidence["source"]["content_hash"] == source_content_hash(ROOT)
     subprocess.run(
         ["git", "merge-base", "--is-ancestor", evidence["source"]["commit"], "HEAD"],
         cwd=ROOT,
@@ -229,7 +231,33 @@ def test_evidence_validator_requires_truthful_non_green_npm_test_disclosure(muta
         validate_diagnostic_evidence(evidence)
 
 
-def test_evidence_validator_rejects_impossible_source_commit_provenance():
+def test_source_content_hash_is_deterministic_and_ignores_evidence_docs(tmp_path):
+    from stock_quant.alpha.models.diagnostic_protocol import source_content_hash
+
+    source = tmp_path / "src/source.py"
+    evidence = tmp_path / "docs/evidence/probe.json"
+    plan = tmp_path / "docs/superpowers/plans/probe.md"
+    for path, value in ((source, "x = 1\n"), (evidence, "evidence\n"), (plan, "plan\n")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value, encoding="utf-8")
+    paths = ["src/source.py", "docs/evidence/probe.json", "docs/superpowers/plans/probe.md"]
+    baseline = source_content_hash(tmp_path, tracked_paths=paths)
+    evidence.write_text("changed evidence\n", encoding="utf-8")
+    plan.write_text("changed plan\n", encoding="utf-8")
+    assert source_content_hash(tmp_path, tracked_paths=paths) == baseline
+    source.write_text("x = 2\n", encoding="utf-8")
+    assert source_content_hash(tmp_path, tracked_paths=paths) != baseline
+
+
+def test_python_and_node_source_content_hashes_match():
+    from stock_quant.alpha.models.diagnostic_protocol import source_content_hash
+
+    completed = _run_script("--source-content-hash")
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    assert json.loads(completed.stdout)["source_content_hash"] == source_content_hash(ROOT)
+
+
+def test_evidence_validator_accepts_missing_source_commit_when_content_matches():
     from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
 
     evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
@@ -237,7 +265,39 @@ def test_evidence_validator_rejects_impossible_source_commit_provenance():
     evidence["source"]["commit"] = impossible
     evidence["commands_source_commit"] = impossible
 
-    with pytest.raises(ValueError, match="(?i)source commit|ancestor"):
+    validate_diagnostic_evidence(evidence)
+
+
+def test_evidence_validator_accepts_nonancestor_commit_when_content_matches():
+    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
+    nonancestor = subprocess.check_output(
+        ["git", "commit-tree", tree, "-m", "provenance probe"],
+        cwd=ROOT,
+        text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Provenance Probe",
+            "GIT_AUTHOR_EMAIL": "probe@example.invalid",
+            "GIT_COMMITTER_NAME": "Provenance Probe",
+            "GIT_COMMITTER_EMAIL": "probe@example.invalid",
+        },
+    ).strip()
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    evidence["source"]["commit"] = nonancestor
+    evidence["commands_source_commit"] = nonancestor
+
+    validate_diagnostic_evidence(evidence)
+
+
+def test_evidence_validator_rejects_source_content_hash_mismatch():
+    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    evidence["source"]["content_hash"] = "sha256:" + "0" * 64
+
+    with pytest.raises(ValueError, match="(?i)content hash"):
         validate_diagnostic_evidence(evidence)
 
 
@@ -264,6 +324,7 @@ def _write_tampered_evidence(tmp_path: Path, mutation) -> Path:
             value["source"].update({"commit": "f" * 40}),
             value.update({"commands_source_commit": "f" * 40}),
         ),
+        lambda value: value["source"].update({"content_hash": "sha256:" + "0" * 64}),
     ],
 )
 def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, mutation):
@@ -341,6 +402,9 @@ def test_quant_workflow_paths_include_evidence_changes():
 
     assert "      - 'docs/evidence/**'\n" in push
     assert "      - 'docs/evidence/**'\n" in pull_request
+    checkouts = workflow.split("      - uses: actions/checkout@v4\n")
+    assert len(checkouts) == 3
+    assert all("        with:\n          fetch-depth: 0\n" in block for block in checkouts[1:])
 
 
 def test_acceptance_runner_emits_b1_to_b5_and_validates_the_attachment(tmp_path):

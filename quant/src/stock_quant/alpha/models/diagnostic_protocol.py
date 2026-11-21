@@ -31,6 +31,13 @@ EXPECTED_NPM_TEST_FAILURE_LABELS = (
     "FAIL  13. a failing Investing response yields partial without losing the Yahoo data",
 )
 PROTOCOL_DERIVED_FIELDS = frozenset({"protocol_hash", "source_protocol_hash", "symbol_count", "symbols"})
+SOURCE_CONTENT_HASH_ALGORITHM = "tracked-source-files-v1"
+SOURCE_CONTENT_EXCLUDED_PREFIXES = (
+    "docs/evidence/",
+    "docs/superpowers/",
+    ".superpowers/",
+    "reports/",
+)
 ProtocolMode = Literal["synthetic_contract", "frozen_v1_3"]
 RESERVED_TEST_START = datetime(2012, 1, 1, tzinfo=timezone.utc)
 RESERVED_TEST_END = datetime(2015, 1, 1, tzinfo=timezone.utc)
@@ -591,6 +598,52 @@ def _git_output(repo_root: Path, *args: str) -> str:
         raise ValueError("Evidence source commit cannot be verified against Git history") from error
 
 
+def _source_path_included(path: str) -> bool:
+    return not any(path.startswith(prefix) for prefix in SOURCE_CONTENT_EXCLUDED_PREFIXES)
+
+
+def source_content_hash(repo_root: Path | None = None, *, tracked_paths: list[str] | None = None) -> str:
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[5]
+    if tracked_paths is None:
+        raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
+        tracked_paths = [value.decode("utf-8") for value in raw.split(b"\0") if value]
+    paths = sorted(
+        (path for path in tracked_paths if _source_path_included(path)),
+        key=lambda path: path.encode("utf-8"),
+    )
+    digest_value = hashlib.sha256()
+    for path in paths:
+        digest_value.update(path.encode("utf-8"))
+        digest_value.update(b"\0")
+        digest_value.update((root / path).read_bytes())
+        digest_value.update(b"\0")
+    return "sha256:" + digest_value.hexdigest()
+
+
+def _commit_is_available(repo_root: Path, commit: str) -> bool:
+    try:
+        subprocess.check_output(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
+def _commit_is_ancestor(repo_root: Path, commit: str, head: str) -> bool:
+    try:
+        subprocess.check_output(
+            ["git", "merge-base", "--is-ancestor", commit, head],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
 def validate_evidence_source_provenance(evidence: dict, *, repo_root: Path | None = None) -> None:
     source = evidence.get("source")
     if not isinstance(source, dict):
@@ -605,5 +658,13 @@ def validate_evidence_source_provenance(evidence: dict, *, repo_root: Path | Non
     if source.get("worktree_clean_before_generation") is not True:
         raise ValueError("Evidence generation requires a clean source worktree")
     root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[5]
+    if source.get("content_hash_algorithm") != SOURCE_CONTENT_HASH_ALGORITHM:
+        raise ValueError("Evidence source content hash algorithm is not supported")
+    current_content_hash = source_content_hash(root)
+    if source.get("content_hash") != current_content_hash:
+        raise ValueError("Evidence source content hash does not match the current checkout")
     head = _git_output(root, "rev-parse", "HEAD")
-    _git_output(root, "merge-base", "--is-ancestor", commit, head)
+    if _commit_is_available(root, commit) and _commit_is_ancestor(root, commit, head):
+        return
+    # Squash/rebase and shallow checkouts can erase the tested commit. The
+    # content hash above remains the authoritative fallback in those cases.

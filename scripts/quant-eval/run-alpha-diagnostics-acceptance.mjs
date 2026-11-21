@@ -20,9 +20,10 @@ function parseArgs(argv) {
     else if (arg === "--synthetic-report") result.syntheticReport = resolve(argv[++index]);
     else if (arg === "--command-results") result.commandResults = resolve(argv[++index]);
     else if (arg === "--evidence-path") result.evidencePath = resolve(argv[++index]);
+    else if (arg === "--source-content-hash") result.sourceContentHash = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
-  if (!result.syntheticReport && !result.writeEvidence) result.checkEvidence = true;
+  if (!result.syntheticReport && !result.writeEvidence && !result.sourceContentHash) result.checkEvidence = true;
   assert(!(result.checkEvidence && result.writeEvidence), "Use either --check-evidence or --write-evidence");
   return result;
 }
@@ -50,6 +51,38 @@ function runPython(script, args = []) {
 
 function gitOutput(...args) {
   return execFileSync("git", args, {cwd: root, encoding: "utf8"}).trim();
+}
+
+const sourceContentExcludedPrefixes = [
+  "docs/evidence/",
+  "docs/superpowers/",
+  ".superpowers/",
+  "reports/",
+];
+
+function sourceContentHash() {
+  const raw = execFileSync("git", ["ls-files", "-z"], {cwd: root});
+  const tracked = raw.toString("utf8").split("\0").filter(Boolean);
+  const paths = tracked
+    .filter(path => !sourceContentExcludedPrefixes.some(prefix => path.startsWith(prefix)))
+    .sort((left, right) => Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")));
+  const digest = createHash("sha256");
+  for (const path of paths) {
+    digest.update(path, "utf8");
+    digest.update(Buffer.from([0]));
+    digest.update(readFileSync(resolve(root, path)));
+    digest.update(Buffer.from([0]));
+  }
+  return `sha256:${digest.digest("hex")}`;
+}
+
+function gitSucceeds(...args) {
+  try {
+    execFileSync("git", args, {cwd: root, stdio: "ignore"});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const protocol = JSON.parse(runPython(String.raw`
@@ -515,6 +548,10 @@ assert.equal(synthetic.test_oos_executions, 0);
 assert.equal(synthetic.reserved_test_reads, 0);
 
 const options = parseArgs(process.argv.slice(2));
+if (options.sourceContentHash) {
+  console.log(JSON.stringify({source_content_hash: sourceContentHash()}));
+  process.exit(0);
+}
 const activeEvidencePath = options.evidencePath || defaultEvidencePath;
 const activeChecksumPath = activeEvidencePath.endsWith(".json")
   ? `${activeEvidencePath.slice(0, -5)}.sha256`
@@ -571,7 +608,14 @@ function assertEvidenceSemantics(evidence) {
   assert.equal(evidence.commands_source_commit, source.commit, "Evidence command source commit mismatch");
   assert.equal(source.acceptance_ran_at_commit, true, "Acceptance must run at the recorded source commit");
   assert.equal(source.worktree_clean_before_generation, true, "Evidence generation requires a clean worktree");
-  gitOutput("merge-base", "--is-ancestor", source.commit, "HEAD");
+  assert.equal(source.content_hash_algorithm, "tracked-source-files-v1", "Unsupported source content hash algorithm");
+  assert.equal(source.content_hash, sourceContentHash(), "Evidence source content hash does not match the current checkout");
+  const head = gitOutput("rev-parse", "HEAD");
+  if (!(gitSucceeds("cat-file", "-e", `${source.commit}^{commit}`)
+    && gitSucceeds("merge-base", "--is-ancestor", source.commit, head))) {
+    // Squash/rebase and shallow checkouts can erase the tested commit; the
+    // matching source content hash above remains the authoritative fallback.
+  }
   assert.equal(evidence.synthetic_acceptance.report_hash, `sha256:${reportHash}`);
   assert.deepEqual(evidence.synthetic_acceptance.sections, synthetic.sections);
 }
@@ -598,6 +642,8 @@ function evidenceDocument(commandResults) {
     generated_at: new Date().toISOString(),
     source: {
       commit: commandResults.source_commit,
+      content_hash_algorithm: "tracked-source-files-v1",
+      content_hash: sourceContentHash(),
       acceptance_ran_at_commit: true,
       worktree_clean_before_generation: true,
     },
