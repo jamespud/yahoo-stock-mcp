@@ -139,7 +139,7 @@ def test_reserved_test_admission_raises_before_any_synthetic_object_is_created()
 
 
 def test_committed_evidence_is_sanitized_and_checksum_verified():
-    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+    from stock_quant.alpha.models.diagnostic_protocol import source_content_hash, validate_diagnostic_evidence
 
     evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
     validate_diagnostic_evidence(evidence)
@@ -320,10 +320,6 @@ def _write_tampered_evidence(tmp_path: Path, mutation) -> Path:
     [
         lambda value: value["protocol"]["signals"][0].update({"score_multiplier": -1}),
         lambda value: value["full_npm_test"].update({"status": "NOT_TESTED"}),
-        lambda value: (
-            value["source"].update({"commit": "f" * 40}),
-            value.update({"commands_source_commit": "f" * 40}),
-        ),
         lambda value: value["source"].update({"content_hash": "sha256:" + "0" * 64}),
     ],
 )
@@ -334,6 +330,35 @@ def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, muta
     assert completed.returncode != 0
     lowered = completed.stderr.lower()
     assert any(fragment in lowered for fragment in ("protocol body", "npm test", "source commit", "ancestor"))
+
+
+@pytest.mark.parametrize("commit_kind", ["missing", "nonancestor"])
+def test_node_checker_accepts_content_hash_fallback_for_unavailable_or_nonancestor_commit(tmp_path, commit_kind):
+    if commit_kind == "missing":
+        fallback_commit = "f" * 40
+    else:
+        tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
+        fallback_commit = subprocess.check_output(
+            ["git", "commit-tree", tree, "-m", "Node provenance probe"],
+            cwd=ROOT,
+            text=True,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Provenance Probe",
+                "GIT_AUTHOR_EMAIL": "probe@example.invalid",
+                "GIT_COMMITTER_NAME": "Provenance Probe",
+                "GIT_COMMITTER_EMAIL": "probe@example.invalid",
+            },
+        ).strip()
+
+    def use_fallback(value):
+        value["source"]["commit"] = fallback_commit
+        value["commands_source_commit"] = fallback_commit
+
+    evidence_path = _write_tampered_evidence(tmp_path, use_fallback)
+    completed = _run_check("--evidence-path", str(evidence_path))
+
+    assert completed.returncode == 0, completed.stderr + completed.stdout
 
 
 @pytest.mark.parametrize("with_command_results", [False, True])
