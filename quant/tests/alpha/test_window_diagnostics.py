@@ -309,6 +309,7 @@ def test_diagnostic_fold_excludes_label_available_exactly_at_window_end():
         (lambda value: value.update(split_at=TRAIN_END.isoformat()), "split_at must be strictly inside Train"),
         (
             lambda value: value.update(
+                protocol_mode="frozen_v1_3",
                 split={
                     "train_start": "2011-12-01T00:00:00Z",
                     "train_end": "2012-01-03T00:00:00Z",

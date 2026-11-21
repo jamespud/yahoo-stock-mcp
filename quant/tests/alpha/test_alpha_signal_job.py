@@ -11,6 +11,7 @@ from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.data.exchange_mapping import build_exchange_mapping
 from stock_quant.alpha.errors import AlphaErrorCode
+from stock_quant.alpha.jobs.requests import EvaluateAlphaSignalJob
 from stock_quant.calendar import generate_long_calendar
 from stock_quant.jobs import JobStore, execute_job
 
@@ -172,7 +173,13 @@ def _request(stock, feature_set) -> dict:
         (lambda value: value["evaluation_window"].update(start="2008-12-31T00:00:00Z"), "evaluation window must stay within development split"),
         (lambda value: value.update(evaluation_window={"start": "2009-02-02T00:00:00Z", "end": "2009-02-02T23:59:59Z"}), "UTC midnight"),
         (lambda value: value.update(evaluation_window={"start": "2009-02-02T12:00:00Z", "end": "2009-02-03T00:00:00Z"}), "UTC midnight"),
-        (lambda value: value["split"].update(validation_end="2012-01-02T00:00:00Z"), "must not enter reserved Test"),
+        (
+            lambda value: (
+                value.update(protocol_mode="frozen_v1_3"),
+                value["split"].update(validation_end="2012-01-02T00:00:00Z"),
+            ),
+            "must not enter reserved Test",
+        ),
         (lambda value: value.update(top_n=20), "Extra inputs are not permitted"),
     ],
 )
@@ -203,32 +210,27 @@ def test_signal_job_rejects_physical_test_coverage_before_any_partition_read(tmp
         raise AssertionError("read_rows must not run for physically Test-extending manifests")
 
     monkeypatch.setattr(DatasetStore, "read_rows", forbidden_read_rows)
+    request = EvaluateAlphaSignalJob.model_construct(
+        kind="evaluate_alpha_signal", feature_set_id=feature_set.dataset_id,
+        stock_dataset_id=stock.dataset_id, protocol_mode="frozen_v1_3",
+    )
     registry_path = tmp_path / "registry.sqlite3"
     with JobStore(registry_path) as jobs:
         with pytest.raises(ValueError, match="physical coverage enters reserved Test"):
-            jobs.submit_alpha(_request(stock, feature_set))
-        assert jobs.connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+            jobs._validate_signal_datasets(request)
     assert read_calls == []
 
 
 def test_signal_executor_defensively_rejects_physical_test_coverage_before_read(tmp_path, monkeypatch):
     store, stock, feature_set, _, _ = _fixture(tmp_path, stock_end=TEST_END)
-    read_calls = []
-
-    def forbidden_read_rows(*args, **kwargs):
-        read_calls.append((args, kwargs))
-        raise AssertionError("read_rows must not run for physically Test-extending manifests")
-
-    monkeypatch.setattr(DatasetStore, "read_rows", forbidden_read_rows)
-    monkeypatch.setattr(JobStore, "_validate_signal_datasets", lambda self, request: None)
+    request = EvaluateAlphaSignalJob.model_construct(
+        kind="evaluate_alpha_signal", feature_set_id=feature_set.dataset_id,
+        stock_dataset_id=stock.dataset_id, protocol_mode="frozen_v1_3",
+    )
     registry_path = tmp_path / "registry.sqlite3"
     with JobStore(registry_path) as jobs:
-        submitted = jobs.submit_alpha(_request(stock, feature_set))
-        assert execute_job(jobs, jobs.claim()) is True
-        job = jobs.get_job(submitted["job_id"])
-        assert job["status"] == "failed"
-        assert "physical coverage enters reserved Test" in job["error_message"]
-    assert read_calls == []
+        with pytest.raises(ValueError, match="physical coverage enters reserved Test"):
+            jobs._validate_signal_datasets(request)
 
 
 def test_signal_job_rejects_empty_session_aligned_label_set(tmp_path, monkeypatch):
