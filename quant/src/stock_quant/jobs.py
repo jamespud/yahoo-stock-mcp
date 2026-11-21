@@ -315,6 +315,7 @@ class JobStore(Registry):
     def _validate_signal_datasets(self, request) -> None:
         from .alpha.data.catalog import DatasetStore
         from .alpha.jobs.requests import RESERVED_TEST_START
+        from .alpha.models.diagnostic_protocol import RESERVED_TEST_END, validate_frozen_membership
         datasets = DatasetStore(Path(self.path).with_suffix(".alpha"), defer_registration=True)
         try:
             stock = datasets.load_manifest(request.stock_dataset_id)
@@ -328,12 +329,61 @@ class JobStore(Registry):
             raise ValueError("evaluate_alpha_signal stock_dataset_id must identify stock_bars")
         if feature.dataset_kind != "feature_panel":
             raise ValueError("evaluate_alpha_signal feature_set_id must identify feature_panel")
-        if stock.end_at > RESERVED_TEST_START:
+        if stock.start_at < RESERVED_TEST_END and stock.end_at > RESERVED_TEST_START:
             raise ValueError("evaluate_alpha_signal stock dataset physical coverage enters reserved Test")
-        if feature.end_at > RESERVED_TEST_START:
+        if feature.start_at < RESERVED_TEST_END and feature.end_at > RESERVED_TEST_START:
             raise ValueError("evaluate_alpha_signal feature dataset physical coverage enters reserved Test")
         if stock.dataset_id not in feature.parent_dataset_ids:
             raise ValueError("evaluate_alpha_signal feature set is not derived from the stock dataset")
+        if request.protocol_mode == "frozen_v1_3":
+            try:
+                validate_frozen_membership(feature.instrument_ids)
+                validate_frozen_membership(stock.instrument_ids)
+            except ValueError as error:
+                raise ValueError(f"frozen_v1_3 membership mismatch: {error}") from error
+
+    def _validate_training_datasets(self, request) -> None:
+        from .alpha.data.catalog import DatasetStore
+        from .alpha.data.session_coverage import mapped_stock_calendar
+        from .alpha.jobs.requests import RESERVED_TEST_START
+        from .alpha.models.diagnostic_protocol import RESERVED_TEST_END, validate_frozen_membership
+
+        is_validation_training = request.kind == "train_alpha_model" and request.evaluation_mode == "validation_only"
+        is_fold_training = request.kind == "train_alpha_diagnostic_folds"
+        if not (is_validation_training or is_fold_training):
+            return
+        datasets = DatasetStore(Path(self.path).with_suffix(".alpha"), defer_registration=True)
+        try:
+            feature = datasets.load_manifest(request.feature_set_id)
+        except KeyError as error:
+            raise ValueError("diagnostic training missing feature dataset") from error
+        stock_dataset_id = request.stock_dataset_id
+        try:
+            stock = datasets.load_manifest(stock_dataset_id)
+        except KeyError as error:
+            raise ValueError("diagnostic training missing stock dataset") from error
+        if feature.dataset_kind != "feature_panel" or stock.dataset_kind != "stock_bars":
+            raise ValueError("diagnostic training dataset kinds are invalid")
+        if any(
+            manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
+            for manifest in (feature, stock)
+        ):
+            raise ValueError("diagnostic training dataset physical coverage enters reserved Test")
+        if stock.dataset_id not in feature.parent_dataset_ids:
+            raise ValueError("diagnostic training feature set is not derived from the stock dataset")
+        if any(
+            sum(partition.row_count for partition in manifest.partition_manifest) > request.resource_budget.max_rows
+            for manifest in (feature, stock)
+        ):
+            raise ValueError("diagnostic training read rows exceed budget")
+        if request.protocol_mode == "frozen_v1_3":
+            try:
+                validate_frozen_membership(feature.instrument_ids)
+                validate_frozen_membership(stock.instrument_ids)
+            except ValueError as error:
+                raise ValueError(f"frozen_v1_3 membership mismatch: {error}") from error
+            if mapped_stock_calendar(stock) is None:
+                raise ValueError("frozen_v1_3 requires a mapped calendar")
 
     def submit_alpha(self, raw: dict) -> dict:
         try:
@@ -351,6 +401,8 @@ class JobStore(Registry):
             raise
         if request.kind == "evaluate_alpha_signal":
             self._validate_signal_datasets(request)
+        if request.kind in {"train_alpha_model", "train_alpha_diagnostic_folds"}:
+            self._validate_training_datasets(request)
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
         is_oos = request.kind == "evaluate_alpha_oos"

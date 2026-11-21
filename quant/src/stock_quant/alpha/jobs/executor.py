@@ -30,6 +30,13 @@ from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
 from ..models.feature_diagnostics import diagnose_alpha_model
+from ..models.diagnostic_protocol import (
+    RESERVED_TEST_END,
+    frozen_protocol,
+    protocol_claim,
+    validate_frozen_label_contract,
+    validate_frozen_membership,
+)
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
@@ -346,6 +353,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "daily_label_coverage": diagnostics["coverage"]["label_coverage"],
                 "top20_forward_label_summary": top20["summary"],
                 "stability_summary": stability_summary,
+                **protocol_claim(request.protocol_mode),
             }
             source_windows = {
                 "feature_start": request.evaluation_window.start.isoformat(),
@@ -393,6 +401,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "regime_lookback_sessions": 63,
                     "regime_definition": "positive/negative/flat trailing 63-session benchmark return available by decision",
                     "bootstrap_config": weekly_bootstrap["config"],
+                    "research_protocol_hash": request.research_protocol_hash,
+                    **protocol_claim(request.protocol_mode),
                     "analysis_label": ANALYSIS_LABEL,
                     "reserved_test_start": RESERVED_TEST_START.isoformat(),
                 },
@@ -403,13 +413,39 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             if request.evaluation_mode == "validation_only":
                 if not request.stock_dataset_id:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                feature_manifest = datasets.load_manifest(request.feature_set_id)
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+                if any(
+                    manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
+                    for manifest in (feature_manifest, stock_manifest)
+                ):
+                    raise AlphaError(
+                        AlphaErrorCode.DATASET_MISMATCH,
+                        "Validation-only dataset physical coverage enters reserved Test",
+                        {
+                            "feature_end": feature_manifest.end_at.isoformat(),
+                            "stock_end": stock_manifest.end_at.isoformat(),
+                        },
+                    )
+                for manifest in (feature_manifest, stock_manifest):
+                    if sum(partition.row_count for partition in manifest.partition_manifest) > request.resource_budget.max_rows:
+                        raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training read rows exceed budget")
+                if request.protocol_mode == "frozen_v1_3":
+                    try:
+                        validate_frozen_membership(feature_manifest.instrument_ids)
+                        validate_frozen_membership(stock_manifest.instrument_ids)
+                    except ValueError as error:
+                        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, str(error)) from error
                 calendar = mapped_stock_calendar(stock_manifest)
+                if request.protocol_mode == "frozen_v1_3" and calendar is None:
+                    raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 requires a mapped calendar")
                 labels = stock_forward_labels(
                     datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                     horizon=request.horizon_days,
                     calendar=calendar,
                 )
+                if request.protocol_mode == "frozen_v1_3":
+                    validate_frozen_label_contract(labels)
                 validation_sessions = (
                     expected_session_dates(
                         calendar,
@@ -436,6 +472,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 label_name=request.label_name, horizon_days=request.horizon_days,
                 target_type=request.target_type, evaluation_mode=request.evaluation_mode,
                 research_protocol_hash=request.research_protocol_hash, split=request.split,
+                protocol_mode=request.protocol_mode, candidate_id=request.candidate_id,
                 hyperparameters={key: value for key, value in request.hyperparameters.items()},
                 random_seed=request.random_seed, resource_budget=request.resource_budget,
                 min_rank_ic=request.min_rank_ic,
@@ -471,6 +508,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                               model.baseline_comparison["baseline_signal_hash"]
                               if model.baseline_comparison is not None else None
                           ),
+                          "protocol_mode": model.protocol_mode,
+                          "protocol_claim": model.protocol_claim,
+                          "frozen_validation_gate": model.frozen_validation_gate,
                       }}
         elif isinstance(request, TrainAlphaDiagnosticFoldsJob):
             feature_manifest = datasets.load_manifest(request.feature_set_id)
@@ -479,7 +519,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
             if stock_manifest.dataset_kind != "stock_bars":
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a stock_bars dataset")
-            if feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START:
+            if any(
+                manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
+                for manifest in (feature_manifest, stock_manifest)
+            ):
                 raise AlphaError(
                     AlphaErrorCode.DATASET_MISMATCH,
                     "Diagnostic fold dataset physical coverage enters reserved Test",
@@ -487,6 +530,20 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 )
             if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
+            for manifest in (feature_manifest, stock_manifest):
+                if sum(partition.row_count for partition in manifest.partition_manifest) > request.resource_budget.max_rows:
+                    raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Diagnostic fold read rows exceed budget")
+            if request.protocol_mode == "frozen_v1_3":
+                try:
+                    validate_frozen_membership(feature_manifest.instrument_ids)
+                    validate_frozen_membership(stock_manifest.instrument_ids)
+                except ValueError as error:
+                    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, str(error)) from error
+                calendar = mapped_stock_calendar(stock_manifest)
+                if calendar is None:
+                    raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 folds require a mapped calendar")
+            else:
+                calendar = mapped_stock_calendar(stock_manifest)
             bounded(.1)
             feature_rows = datasets.read_rows(
                 request.feature_set_id,
@@ -502,9 +559,11 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             labels = stock_forward_labels(
                 stock_rows,
                 horizon=request.horizon_days,
-                calendar=mapped_stock_calendar(stock_manifest),
+                calendar=calendar,
             )
             labels = [row for row in labels if row.label_name == request.label_name]
+            if request.protocol_mode == "frozen_v1_3":
+                validate_frozen_label_contract(labels)
             fold_result = diagnostic_window_importance(
                 feature_rows,
                 labels,
@@ -513,6 +572,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 hyperparameters=request.hyperparameters,
                 random_seed=request.random_seed,
                 checkpoint=bounded,
+                resource_budget=request.resource_budget,
+                max_iterations=frozen_protocol()["budgets"]["execution"]["folds"]["max_iterations"],
             )
             fold_rows = fold_result["folds"]
             tested_count = sum(fold["status"] == "TESTED" for fold in fold_rows)
@@ -553,6 +614,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "importance_rank_correlation": fold_result["importance_rank_correlation"],
                 "stability_claim": fold_result["stability_claim"],
                 "definition": fold_result["definition"],
+                **protocol_claim(request.protocol_mode),
             }
             result = {
                 "summary": summary,
@@ -580,6 +642,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "frozen_candidate_ledger_modified": False,
                     "test_or_oos_read": False,
                     "reserved_test_start": RESERVED_TEST_START.isoformat(),
+                    **protocol_claim(request.protocol_mode),
+                    "candidate_id": request.candidate_id,
+                    "resource_budget": request.resource_budget.model_dump(mode="json"),
                 },
             }
         elif isinstance(request, FreezeAlphaSelectionJob):

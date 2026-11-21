@@ -163,6 +163,15 @@ def test_committed_evidence_is_sanitized_and_checksum_verified():
     assert evidence["full_npm_test"]["failure_labels_match_saved_baseline"] is True
     assert evidence["full_npm_test"]["byte_identical_logs"] is False
     assert "not green" in evidence["full_npm_test"]["comparison_scope"].lower()
+    assert len(evidence["source"]["commit"]) == 40
+    assert evidence["commands_source_commit"] == evidence["source"]["commit"]
+    assert evidence["source"]["acceptance_ran_at_commit"] is True
+    assert evidence["source"]["worktree_clean_before_generation"] is True
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", evidence["source"]["commit"], "HEAD"],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 def test_evidence_validator_rejects_a_real_market_or_promotion_claim():
@@ -220,6 +229,18 @@ def test_evidence_validator_requires_truthful_non_green_npm_test_disclosure(muta
         validate_diagnostic_evidence(evidence)
 
 
+def test_evidence_validator_rejects_impossible_source_commit_provenance():
+    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    impossible = "f" * 40
+    evidence["source"]["commit"] = impossible
+    evidence["commands_source_commit"] = impossible
+
+    with pytest.raises(ValueError, match="(?i)source commit|ancestor"):
+        validate_diagnostic_evidence(evidence)
+
+
 def _write_tampered_evidence(tmp_path: Path, mutation) -> Path:
     evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
     mutation(evidence)
@@ -239,6 +260,10 @@ def _write_tampered_evidence(tmp_path: Path, mutation) -> Path:
     [
         lambda value: value["protocol"]["signals"][0].update({"score_multiplier": -1}),
         lambda value: value["full_npm_test"].update({"status": "NOT_TESTED"}),
+        lambda value: (
+            value["source"].update({"commit": "f" * 40}),
+            value.update({"commands_source_commit": "f" * 40}),
+        ),
     ],
 )
 def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, mutation):
@@ -246,7 +271,8 @@ def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, muta
     completed = _run_check("--evidence-path", str(evidence_path))
 
     assert completed.returncode != 0
-    assert "protocol body" in completed.stderr.lower() or "npm test" in completed.stderr.lower()
+    lowered = completed.stderr.lower()
+    assert any(fragment in lowered for fragment in ("protocol body", "npm test", "source commit", "ancestor"))
 
 
 @pytest.mark.parametrize("with_command_results", [False, True])
@@ -279,6 +305,34 @@ def test_evidence_regeneration_rejects_missing_or_not_tested_npm_results(tmp_pat
     assert target.read_text(encoding="ascii") == "sentinel\n"
     assert checksum.read_text(encoding="ascii") == "sentinel checksum\n"
     assert "npm test" in completed.stderr.lower()
+
+
+def test_evidence_regeneration_rejects_command_results_from_another_source_commit(tmp_path):
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    target = tmp_path / "target-evidence.json"
+    command_results = tmp_path / "command-results.json"
+    command_results.write_text(
+        json.dumps({
+            "source_commit": "f" * 40,
+            "commands": evidence["commands"],
+            "full_npm_test": evidence["full_npm_test"],
+            "baseline_comparison": evidence.get("baseline_comparison"),
+        }),
+        encoding="utf-8",
+    )
+
+    completed = _run_script(
+        "--write-evidence",
+        "--replace-evidence",
+        "--evidence-path",
+        str(target),
+        "--command-results",
+        str(command_results),
+    )
+
+    assert completed.returncode != 0
+    assert not target.exists()
+    assert "source commit" in completed.stderr.lower() or "worktree" in completed.stderr.lower()
 
 
 def test_quant_workflow_paths_include_evidence_changes():

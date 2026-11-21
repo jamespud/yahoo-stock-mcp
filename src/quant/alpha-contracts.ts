@@ -73,6 +73,9 @@ export const signalEvaluationWindow = z.object({
   {message: "evaluation_window.start must be before end"},
 );
 
+const protocolMode = z.enum(["synthetic_contract", "frozen_v1_3"]);
+const candidateId = z.enum(["H01", "H02", "H03", "H04", "H05", "H06"]);
+
 export const evaluateAlphaSignalInput = z.object({
   feature_set_id: alphaHash,
   stock_dataset_id: alphaHash,
@@ -83,6 +86,8 @@ export const evaluateAlphaSignalInput = z.object({
   evaluation_window: signalEvaluationWindow,
   signal_spec: directSignalSpec,
   benchmark_symbol: z.string().min(1).max(64).optional(),
+  research_protocol_hash: alphaHash.optional(),
+  protocol_mode: protocolMode.optional(),
 }).strict().describe(
   "Direct signal diagnostics always include daily Rank IC, mapped weekly-last-session Rank IC, frozen Top20 forward-label groups, and fixed stability evidence. An optional benchmark_symbol enables explicit trailing-63-session regime grouping.",
 );
@@ -157,6 +162,8 @@ const lightgbmHyperparameters = z.object({
 export const trainAlphaModelInputFields = z.object({
   evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
   research_protocol_hash: alphaHash.optional(),
+  protocol_mode: protocolMode.optional(),
+  candidate_id: candidateId.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
   windows: z.union([temporalWindows, developmentWindows]),
@@ -186,6 +193,8 @@ const training = trainAlphaModelInputFields.shape;
 export const trainAlphaModelToolFields = z.object({
   evaluation_mode: auditableField(training.evaluation_mode),
   research_protocol_hash: auditableField(training.research_protocol_hash),
+  protocol_mode: auditableField(training.protocol_mode.describe("synthetic_contract is explicitly non-v1.3; frozen_v1_3 requires exact protocol binding.")),
+  candidate_id: auditableField(training.candidate_id),
   feature_set_id: auditableField(training.feature_set_id.describe("Required feature set content ID.")),
   label_spec: auditableField(training.label_spec.describe("Required label specification.")),
   windows: auditableField(training.windows.describe("Required chronological windows.")),
@@ -249,6 +258,12 @@ export const trainAlphaDiagnosticFoldsFields = z.object({
   split_at: z.string().datetime({ offset: true }),
   hyperparameters: lightgbmHyperparameters.optional(),
   random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
+  protocol_mode: protocolMode.optional(),
+  candidate_id: candidateId.optional(),
+  resource_budget: z.object({
+    max_seconds: z.number().int().min(1).max(86400).optional(),
+    max_rows: z.number().int().min(1).optional(),
+  }).strict().optional(),
 }).strict();
 
 export const trainAlphaDiagnosticFoldsToolFields = trainAlphaDiagnosticFoldsFields.passthrough();

@@ -44,8 +44,8 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const {tools} = await client.listTools();
     const trainingSchema = tools.find(tool => tool.name === "quant_train_alpha_model").inputSchema;
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
-      "baseline_signal", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec",
-      "min_rank_ic", "random_seed", "research_protocol_hash", "resource_budget",
+      "baseline_signal", "candidate_id", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec",
+      "min_rank_ic", "protocol_mode", "random_seed", "research_protocol_hash", "resource_budget",
       "selection_metric", "windows",
     ]);
     assert.deepEqual(trainingSchema.required, ["feature_set_id", "label_spec", "windows"]);
@@ -283,10 +283,13 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     assert.ok(signalTool, "quant_evaluate_alpha_signal is advertised");
     assert.equal(Object.keys(signalTool.inputSchema.properties).some(key => key.startsWith("test") || key.endsWith("_path")), false);
     assert.ok(signalTool.inputSchema.properties.benchmark_symbol, "explicit benchmark symbol is advertised");
+    assert.ok(signalTool.inputSchema.properties.protocol_mode, "signal protocol mode is advertised");
     const foldTool = tools.find(tool => tool.name === "quant_train_alpha_diagnostic_folds");
     assert.ok(foldTool, "quant_train_alpha_diagnostic_folds is advertised");
     assert.equal(Object.keys(foldTool.inputSchema.properties).some(key => key.startsWith("test") || key.endsWith("_path")), false);
     assert.ok(foldTool.inputSchema.properties.split_at, "caller-approved Train split is advertised");
+    assert.ok(foldTool.inputSchema.properties.protocol_mode, "fold protocol mode is advertised");
+    assert.ok(foldTool.inputSchema.properties.resource_budget, "fold resource budget is advertised");
     async function call(name, args) {
       const result = await client.callTool({name, arguments: args});
       assert(!result.isError, JSON.stringify(result));

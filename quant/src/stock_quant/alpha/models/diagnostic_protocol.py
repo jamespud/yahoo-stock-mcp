@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from copy import deepcopy
 from datetime import date, datetime, time, timezone
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Literal
+
+import numpy as np
+
+from ..errors import AlphaError, AlphaErrorCode
+from .evaluation import metrics
 
 SOURCE_PROTOCOL_HASH = "sha256:eb5dfc8902172c11fd5f9ff17e76a134fc264e9faa2edef84da56231d846a45d"
 NPM_TEST_BASELINE_COMMIT = "5b4ece411348620e9b73ce4e9508b59ff5f42770"
@@ -24,6 +31,7 @@ EXPECTED_NPM_TEST_FAILURE_LABELS = (
     "FAIL  13. a failing Investing response yields partial without losing the Yahoo data",
 )
 PROTOCOL_DERIVED_FIELDS = frozenset({"protocol_hash", "source_protocol_hash", "symbol_count", "symbols"})
+ProtocolMode = Literal["synthetic_contract", "frozen_v1_3"]
 RESERVED_TEST_START = datetime(2012, 1, 1, tzinfo=timezone.utc)
 RESERVED_TEST_END = datetime(2015, 1, 1, tzinfo=timezone.utc)
 SYNTHETIC_START = datetime(2009, 1, 5, tzinfo=timezone.utc)
@@ -191,6 +199,10 @@ _FROZEN_PROTOCOL = {
             "serialized_page_rows_bytes": 2500000,
             "mcp_frame_bytes": 4194304,
         },
+        "execution": {
+            "training": {"max_seconds": 600, "max_rows": 2_000_000, "max_iterations": 150},
+            "folds": {"max_seconds": 600, "max_rows": 1_000_000, "max_iterations": 150},
+        },
     },
     "data_gates": {
         "min_observed_symbols": 50,
@@ -249,6 +261,244 @@ def protocol_body_from_evidence(protocol: dict) -> dict:
     if not isinstance(protocol, dict):
         raise ValueError("Protocol evidence must be an object")
     return {key: deepcopy(value) for key, value in protocol.items() if key not in PROTOCOL_DERIVED_FIELDS}
+
+
+def protocol_claim(mode: str) -> dict:
+    if mode not in {"synthetic_contract", "frozen_v1_3"}:
+        raise ValueError("Unknown diagnostic protocol mode")
+    return {
+        "protocol_mode": mode,
+        "v1_3_frozen": mode == "frozen_v1_3",
+        "claim_status": "FROZEN_V1_3" if mode == "frozen_v1_3" else "NON_V1_3_SYNTHETIC_CONTRACT",
+    }
+
+
+def _mapping(value, *, name: str) -> dict:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return value
+    raise ValueError(f"{name} must be an object")
+
+
+def _signal_matches(signal: dict, expected: dict) -> bool:
+    return all(signal.get(key) == expected[key] for key in ("factor_name", "score_multiplier", "version"))
+
+
+def candidate_definition(candidate_id: str) -> dict:
+    candidate = next((item for item in _FROZEN_PROTOCOL["candidates"] if item["id"] == candidate_id), None)
+    if candidate is None:
+        raise ValueError("candidate is not in the frozen protocol")
+    return candidate
+
+
+def _frozen_training_config(candidate_id: str, hyperparameters: dict, random_seed: int) -> dict:
+    candidate = candidate_definition(candidate_id)
+    normalized = dict(hyperparameters)
+    for config in candidate["configs"]:
+        expected = {key: value for key, value in config.items() if key not in {"id", "random_seed"}}
+        if normalized == expected and random_seed == config["random_seed"]:
+            return config
+    raise ValueError("candidate configuration does not match an approved frozen configuration")
+
+
+def validate_frozen_training_binding(
+    *,
+    protocol_hash_value: str,
+    split,
+    candidate_id: str | None,
+    hyperparameters: dict,
+    random_seed: int,
+    resource_budget,
+    baseline_signal,
+    min_rank_ic: float,
+) -> dict:
+    from .signal_diagnostics import DirectSignalSpec
+
+    if protocol_hash_value != PROTOCOL_HASH:
+        raise ValueError("frozen_v1_3 requires the exact protocol hash")
+    split_payload = _mapping(split, name="split")
+    expected_windows = _FROZEN_PROTOCOL["windows"]
+    expected_split = {
+        "train_start": expected_windows["train"]["start"],
+        "train_end": expected_windows["train"]["end"],
+        "validation_start": expected_windows["validation"]["start"],
+        "validation_end": expected_windows["validation"]["end"],
+        "embargo_days": expected_windows["embargo_days"],
+    }
+    if split_payload != expected_split:
+        raise ValueError("frozen_v1_3 window or embargo does not match the protocol")
+    if not candidate_id:
+        raise ValueError("frozen_v1_3 requires a candidate id")
+    config = _frozen_training_config(candidate_id, hyperparameters, random_seed)
+    budget_payload = _mapping(resource_budget, name="resource budget")
+    expected_budget = _FROZEN_PROTOCOL["budgets"]["execution"]["training"]
+    if budget_payload != {
+        "max_seconds": expected_budget["max_seconds"],
+        "max_rows": expected_budget["max_rows"],
+    }:
+        raise ValueError("frozen_v1_3 budget does not match the protocol")
+    if min_rank_ic != _FROZEN_PROTOCOL["selection"]["min_validation_rank_ic"]:
+        raise ValueError("frozen_v1_3 gate thresholds cannot be overridden")
+    if baseline_signal is None:
+        raise ValueError("frozen_v1_3 requires an approved signal identity")
+    signal = DirectSignalSpec.model_validate(baseline_signal) if isinstance(baseline_signal, dict) else baseline_signal
+    if not any(_signal_matches(signal.model_dump(mode="json"), expected) for expected in _FROZEN_PROTOCOL["signals"]):
+        raise ValueError("frozen_v1_3 signal identity or direction is not approved")
+    return {"candidate": candidate_definition(candidate_id), "config": config, "signal": signal.model_dump(mode="json")}
+
+
+def validate_frozen_fold_binding(
+    *,
+    protocol_hash_value: str,
+    split,
+    candidate_id: str | None,
+    hyperparameters: dict,
+    random_seed: int,
+    resource_budget,
+) -> dict:
+    if protocol_hash_value != PROTOCOL_HASH:
+        raise ValueError("frozen_v1_3 requires the exact protocol hash")
+    split_payload = _mapping(split, name="split")
+    expected_windows = _FROZEN_PROTOCOL["windows"]
+    expected_split = {
+        "train_start": expected_windows["train"]["start"],
+        "train_end": expected_windows["train"]["end"],
+        "validation_start": expected_windows["validation"]["start"],
+        "validation_end": expected_windows["validation"]["end"],
+        "embargo_days": expected_windows["embargo_days"],
+    }
+    if split_payload != expected_split:
+        raise ValueError("frozen_v1_3 window or embargo does not match the protocol")
+    if not candidate_id:
+        raise ValueError("frozen_v1_3 requires a candidate id")
+    config = _frozen_training_config(candidate_id, hyperparameters, random_seed)
+    budget_payload = _mapping(resource_budget, name="resource budget")
+    expected_budget = _FROZEN_PROTOCOL["budgets"]["execution"]["folds"]
+    if budget_payload != {
+        "max_seconds": expected_budget["max_seconds"],
+        "max_rows": expected_budget["max_rows"],
+    }:
+        raise ValueError("frozen_v1_3 fold budget does not match the protocol")
+    return {"candidate": candidate_definition(candidate_id), "config": config}
+
+
+def validate_frozen_signal_binding(*, protocol_hash_value: str, split, evaluation_window, signal_spec) -> dict:
+    from .signal_diagnostics import DirectSignalSpec
+
+    if protocol_hash_value != PROTOCOL_HASH:
+        raise ValueError("frozen_v1_3 requires the exact protocol hash")
+    expected_windows = _FROZEN_PROTOCOL["windows"]
+    expected_split = {
+        "train_start": expected_windows["train"]["start"],
+        "train_end": expected_windows["train"]["end"],
+        "validation_start": expected_windows["validation"]["start"],
+        "validation_end": expected_windows["validation"]["end"],
+        "embargo_days": expected_windows["embargo_days"],
+    }
+    if _mapping(split, name="split") != expected_split:
+        raise ValueError("frozen_v1_3 window or embargo does not match the protocol")
+    expected_window = {
+        "start": expected_windows["validation"]["start"],
+        "end": expected_windows["validation"]["end"],
+    }
+    if _mapping(evaluation_window, name="evaluation window") != expected_window:
+        raise ValueError("frozen_v1_3 evaluation window does not match the protocol")
+    spec = DirectSignalSpec.model_validate(signal_spec) if isinstance(signal_spec, dict) else signal_spec
+    if not any(_signal_matches(spec.model_dump(mode="json"), expected) for expected in _FROZEN_PROTOCOL["signals"]):
+        raise ValueError("frozen_v1_3 signal identity or direction is not approved")
+    return spec.model_dump(mode="json")
+
+
+def validate_frozen_membership(instrument_ids: list[str]) -> None:
+    normalized = tuple(str(value).upper() for value in instrument_ids)
+    if len(normalized) != len(SOURCE_SYMBOLS) or set(normalized) != set(SOURCE_SYMBOLS):
+        raise ValueError("frozen_v1_3 membership does not match the exact 50-symbol universe")
+
+
+def validate_frozen_label_contract(label_rows: list) -> None:
+    if not label_rows:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 requires session-aligned-v2 labels")
+    versions = {getattr(row, "label_version", None) for row in label_rows}
+    if versions != {"session-aligned-v2"}:
+        raise AlphaError(
+            AlphaErrorCode.DATA_UNAVAILABLE,
+            "frozen_v1_3 requires session-aligned-v2 labels; observed-record-v1 fallback is forbidden",
+        )
+
+
+def evaluate_frozen_validation_gate(
+    records: list[dict],
+    *,
+    expected_instruments: list[str],
+    expected_sessions: list[date | datetime],
+) -> dict:
+    instruments = sorted({str(value).upper() for value in expected_instruments})
+    sessions = sorted({_utc(value).date() for value in expected_sessions})
+    if not instruments or not sessions:
+        raise ValueError("Frozen Validation gate requires expected instruments and sessions")
+    expected_opportunities = len(instruments) * len(sessions)
+
+    def summarize(selected: list[dict], decisions: list[date]) -> dict:
+        targets = np.asarray([float(row["label_value"]) for row in selected], dtype=float)
+        predictions = np.asarray([float(row["prediction"]) for row in selected], dtype=float)
+        observed_sessions = [_utc(row["decision_at"]).date() for row in selected]
+        result = metrics(targets, predictions, observed_sessions, expected_decisions=decisions)
+        sample_count = int(result["sample_count"])
+        return {
+            **result,
+            "sample_count": sample_count,
+            "expected_opportunities": len(instruments) * len(decisions),
+            "coverage": sample_count / (len(instruments) * len(decisions)) if decisions else 0.0,
+        }
+
+    overall = summarize(records, sessions)
+    overall["expected_opportunities"] = expected_opportunities
+    thresholds = _FROZEN_PROTOCOL["selection"]
+    failures: list[str] = []
+    if overall["rank_ic_mean"] is None or overall["rank_ic_mean"] < thresholds["min_validation_rank_ic"]:
+        failures.append("RANK_IC_BELOW_0.03")
+    if overall["coverage"] < thresholds["min_prediction_coverage"]:
+        failures.append("COVERAGE_BELOW_0.8")
+    if overall["icir"] is None or overall["icir"] < thresholds["min_validation_icir"]:
+        failures.append("ICIR_BELOW_0.0")
+
+    subperiods = []
+    for index, period in enumerate(thresholds["validation_subperiods"]):
+        start = datetime.fromisoformat(period["start"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(period["end"].replace("Z", "+00:00"))
+        period_sessions = [session for session in sessions if start.date() <= session < end.date()]
+        period_records = [
+            row for row in records
+            if start.date() <= _utc(row["decision_at"]).date() < end.date()
+        ]
+        summary = summarize(period_records, period_sessions)
+        passed = summary["rank_ic_mean"] is not None and summary["rank_ic_mean"] >= period["min_rank_ic"]
+        if not passed:
+            failures.append(f"SUBPERIOD_{index + 1}_RANK_IC_BELOW_{period['min_rank_ic']}")
+        subperiods.append({
+            "start": period["start"],
+            "end": period["end"],
+            "min_rank_ic": period["min_rank_ic"],
+            "passed": passed,
+            "rank_ic_mean": summary["rank_ic_mean"],
+            "sample_count": summary["sample_count"],
+            "expected_opportunities": summary["expected_opportunities"],
+        })
+    return {
+        "status": "PASS" if not failures else "FAIL",
+        "passed": not failures,
+        "failure_reasons": failures,
+        "thresholds": {
+            "min_validation_rank_ic": thresholds["min_validation_rank_ic"],
+            "min_prediction_coverage": thresholds["min_prediction_coverage"],
+            "min_validation_icir": thresholds["min_validation_icir"],
+            "validation_subperiods": deepcopy(thresholds["validation_subperiods"]),
+        },
+        "overall": overall,
+        "subperiods": subperiods,
+        "coverage_definition": "finite matched predictions / (expected instruments x expected mapped sessions)",
+    }
 
 
 def _utc(value: date | datetime) -> datetime:
@@ -326,3 +576,34 @@ def validate_diagnostic_evidence(evidence: dict) -> None:
     comparison_scope = str(npm_test.get("comparison_scope", "")).lower()
     if "not byte-identical" not in comparison_scope or "not green" not in comparison_scope:
         raise ValueError("npm test disclosure must explicitly remain not green")
+    validate_evidence_source_provenance(evidence)
+
+
+def _git_output(repo_root: Path, *args: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", *args],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("Evidence source commit cannot be verified against Git history") from error
+
+
+def validate_evidence_source_provenance(evidence: dict, *, repo_root: Path | None = None) -> None:
+    source = evidence.get("source")
+    if not isinstance(source, dict):
+        raise ValueError("Evidence source provenance is required")
+    commit = source.get("commit")
+    if not isinstance(commit, str) or len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
+        raise ValueError("Evidence source commit must be a full lowercase Git SHA")
+    if evidence.get("commands_source_commit") != commit:
+        raise ValueError("Evidence command source commit does not match the recorded source commit")
+    if source.get("acceptance_ran_at_commit") is not True:
+        raise ValueError("Evidence must state that acceptance ran at the recorded source commit")
+    if source.get("worktree_clean_before_generation") is not True:
+        raise ValueError("Evidence generation requires a clean source worktree")
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[5]
+    head = _git_output(root, "rev-parse", "HEAD")
+    _git_output(root, "merge-base", "--is-ancestor", commit, head)

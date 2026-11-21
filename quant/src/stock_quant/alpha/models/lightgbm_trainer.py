@@ -16,8 +16,19 @@ from ...compiler import digest
 from ...contracts import StrictModel
 from ..contracts import Hash, ModelResourceBudget
 from ..data.catalog import DatasetStore
+from ..data.session_coverage import mapped_stock_calendar
 from ..errors import AlphaError, AlphaErrorCode
 from .evaluation import metrics, quantile_returns
+from .diagnostic_protocol import (
+    ProtocolMode,
+    RESERVED_TEST_END,
+    RESERVED_TEST_START,
+    evaluate_frozen_validation_gate,
+    protocol_claim,
+    validate_frozen_label_contract,
+    validate_frozen_membership,
+    validate_frozen_training_binding,
+)
 from .hyperparameters import INT32_MAX, validate_hyperparameters
 from .labels import LabelRow
 from .registry import AlphaModelRegistry
@@ -25,6 +36,7 @@ from .signal_diagnostics import (
     DirectSignalSpec,
     evaluate_direct_signal,
     evaluate_weekly_signal,
+    expected_session_dates,
     signal_spec_hash,
     weekly_last_session_dates,
 )
@@ -44,6 +56,8 @@ class TrainAlphaRequest(StrictModel):
     target_type: str = Field(pattern=r"^(stock_return|option_return|option_iv_change|stock_return_with_option_features)$")
     evaluation_mode: str = Field(default="legacy_inline_test", pattern=r"^(validation_only|legacy_inline_test)$")
     research_protocol_hash: str | None = None
+    protocol_mode: ProtocolMode = "synthetic_contract"
+    candidate_id: str | None = Field(default=None, pattern=r"^H0[1-6]$")
     split: TemporalSplit | ModelDevelopmentSplit
     hyperparameters: dict[str, StrictInt | StrictFloat] = Field(default_factory=dict)
     random_seed: int = Field(default=0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
@@ -62,12 +76,31 @@ class TrainAlphaRequest(StrictModel):
             raise ValueError("validation_only training requires research_protocol_hash")
         if self.evaluation_mode == "validation_only" and not self.label_source_dataset_id:
             raise ValueError("validation_only training requires label_source_dataset_id")
+        if (
+            self.evaluation_mode == "validation_only"
+            and self.split.train_start < RESERVED_TEST_END
+            and self.split.validation_end > RESERVED_TEST_START
+        ):
+            raise ValueError("validation_only split must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
         if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
             raise ValueError("legacy_inline_test training requires TemporalSplit")
         if self.evaluation_mode == "legacy_inline_test" and self.selection_metric != "l2":
             raise ValueError("selection metrics are validation-only")
         if self.evaluation_mode == "legacy_inline_test" and self.baseline_signal is not None:
             raise ValueError("baseline_signal is validation-only")
+        if self.protocol_mode == "frozen_v1_3":
+            if self.evaluation_mode != "validation_only":
+                raise ValueError("frozen_v1_3 requires validation_only evaluation")
+            validate_frozen_training_binding(
+                protocol_hash_value=self.research_protocol_hash or "",
+                split=self.split,
+                candidate_id=self.candidate_id,
+                hyperparameters=self.hyperparameters,
+                random_seed=self.random_seed,
+                resource_budget=self.resource_budget,
+                baseline_signal=self.baseline_signal,
+                min_rank_ic=self.min_rank_ic,
+            )
         return self
 
 
@@ -91,6 +124,9 @@ class ModelSetManifest(StrictModel):
     validation_gate_passed: bool
     evaluation_mode: str = "legacy_inline_test"
     research_protocol_hash: str | None = None
+    protocol_mode: ProtocolMode = "synthetic_contract"
+    protocol_claim: dict | None = None
+    frozen_validation_gate: dict | None = None
     is_alpha_certified: bool = False
     selection_diagnostics: dict | None = None
     baseline_comparison: dict | None = None
@@ -154,6 +190,13 @@ def _params(request: TrainAlphaRequest):
         "max_depth": int(request.hyperparameters.get("max_depth", -1)),
         "min_child_samples": int(request.hyperparameters.get("min_child_samples", 20)),
     }, int(request.hyperparameters.get("n_estimators", 100))
+
+
+def _deadline_callback(deadline: float):
+    def enforce(_env):
+        if time.monotonic() > deadline:
+            raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training time budget exceeded")
+    return enforce
 
 
 def _validation_only(request: TrainAlphaRequest) -> bool:
@@ -483,6 +526,45 @@ def train_validation_only(
     """Strict Validation-only training path; no Test feature, label, prediction, or metric is created."""
     if not isinstance(request.split, ModelDevelopmentSplit):
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training requires ModelDevelopmentSplit")
+    feature_manifest = store.load_manifest(request.feature_set_id)
+    stock_manifest = store.load_manifest(request.label_source_dataset_id)
+    if (
+        feature_manifest.start_at < RESERVED_TEST_END and feature_manifest.end_at > RESERVED_TEST_START
+    ) or (
+        stock_manifest.start_at < RESERVED_TEST_END and stock_manifest.end_at > RESERVED_TEST_START
+    ):
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Validation-only dataset physical coverage enters reserved Test",
+            {
+                "feature_end": feature_manifest.end_at.isoformat(),
+                "stock_end": stock_manifest.end_at.isoformat(),
+            },
+        )
+    calendar = None
+    if request.protocol_mode == "frozen_v1_3":
+        try:
+            validate_frozen_membership(feature_manifest.instrument_ids)
+            validate_frozen_membership(stock_manifest.instrument_ids)
+        except ValueError as error:
+            raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, str(error)) from error
+        if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
+            raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the frozen stock dataset")
+        calendar = mapped_stock_calendar(stock_manifest)
+        if calendar is None:
+            raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 requires a mapped calendar")
+        validate_frozen_label_contract(label_rows)
+        mapped_validation_sessions = expected_session_dates(
+            calendar,
+            request.split.validation_start.date(),
+            request.split.validation_end.date(),
+        )
+        if validation_sessions is None or set(validation_sessions) != set(mapped_validation_sessions):
+            raise AlphaError(
+                AlphaErrorCode.DATASET_MISMATCH,
+                "frozen_v1_3 requires the exact mapped Validation session grid",
+            )
+        validation_sessions = mapped_validation_sessions
     label_rows = [row for row in label_rows if row.label_name == request.label_name]
     if not label_rows:
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No labels match the requested label_name")
@@ -490,6 +572,15 @@ def train_validation_only(
     cutoff = request.split.validation_end
     feature_rows = store.read_rows(request.feature_set_id, start_at=request.split.train_start, end_at=cutoff)
     features, schema = _feature_frame(feature_rows)
+    if request.protocol_mode == "frozen_v1_3":
+        from .diagnostic_protocol import candidate_definition
+        expected_schema = sorted(candidate_definition(request.candidate_id)["factor_outputs"])
+        if schema != expected_schema:
+            raise AlphaError(
+                AlphaErrorCode.DATASET_MISMATCH,
+                "frozen_v1_3 feature schema does not match the approved candidate",
+                {"expected": expected_schema, "actual": schema},
+            )
     joined = _join_labels(features, schema, label_rows)
     if len(joined) > request.resource_budget.max_rows:
         raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training rows exceed budget")
@@ -514,7 +605,12 @@ def train_validation_only(
     weekly_sessions = weekly_last_session_dates(daily_sessions)
     params, num_boost_round = _params(request)
     train_data = lgb.Dataset(train[schema], label=train["label_value"], feature_name=schema, free_raw_data=False)
-    booster = lgb.train(params, train_data, num_boost_round=num_boost_round, callbacks=[lgb.log_evaluation(0)])
+    booster = lgb.train(
+        params,
+        train_data,
+        num_boost_round=num_boost_round,
+        callbacks=[lgb.log_evaluation(0), _deadline_callback(began + request.resource_budget.max_seconds)],
+    )
     candidates = []
     for iteration in range(1, num_boost_round + 1):
         iteration_predictions = booster.predict(validation[schema], num_iteration=iteration)
@@ -601,11 +697,34 @@ def train_validation_only(
     importance = booster.feature_importance(importance_type="gain", iteration=selected_iteration)
     environment_hash = _environment_hash()
     model_text = booster.model_to_string(num_iteration=selected_iteration)
-    validation_gate = (
-        validation_metrics.get("rank_ic_mean") is not None
-        and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
-        and validation_metrics["prediction_coverage"] >= 0.8
-    )
+    if request.protocol_mode == "frozen_v1_3":
+        frozen_gate = evaluate_frozen_validation_gate(
+            [
+                {
+                    "decision_at": pd.Timestamp(row["decision_at"]).to_pydatetime(),
+                    "instrument_id": row["instrument_id"],
+                    "label_value": float(row["label_value"]),
+                    "prediction": float(prediction),
+                }
+                for (_, row), prediction in zip(validation.iterrows(), predictions, strict=True)
+            ],
+            expected_instruments=stock_manifest.instrument_ids,
+            expected_sessions=daily_sessions,
+        )
+        if not frozen_gate["passed"]:
+            raise AlphaError(
+                AlphaErrorCode.INSUFFICIENT_HISTORY,
+                "Frozen v1.3 Validation gate failed",
+                frozen_gate,
+            )
+        validation_gate = True
+    else:
+        frozen_gate = None
+        validation_gate = (
+            validation_metrics.get("rank_ic_mean") is not None
+            and validation_metrics["rank_ic_mean"] >= request.min_rank_ic
+            and validation_metrics["prediction_coverage"] >= 0.8
+        )
     label_versions = sorted({row.label_version for row in label_rows})
     label_spec = {
         "label_name": request.label_name,
@@ -630,6 +749,10 @@ def train_validation_only(
         "validation_window": {"validation_start": request.split.validation_start.isoformat(), "validation_end": request.split.validation_end.isoformat()},
         "evaluation_mode": request.evaluation_mode,
         "research_protocol_hash": request.research_protocol_hash,
+        "protocol_mode": request.protocol_mode,
+        "candidate_id": request.candidate_id,
+        "protocol_claim": protocol_claim(request.protocol_mode),
+        "frozen_validation_gate": frozen_gate,
         "selected_iteration": int(selected_iteration), "hyperparameters": params, "feature_schema": schema,
         "feature_schema_hash": digest(schema), "environment_hash": environment_hash,
         "random_seed": request.random_seed, "feature_importance": dict(zip(schema, map(float, importance), strict=True)),
@@ -652,6 +775,8 @@ def train_validation_only(
         metrics={"train": train_metrics, "validation": validation_metrics},
         validation_gate_passed=validation_gate, evaluation_mode=request.evaluation_mode,
         research_protocol_hash=request.research_protocol_hash, is_alpha_certified=False,
+        protocol_mode=request.protocol_mode, protocol_claim=protocol_claim(request.protocol_mode),
+        frozen_validation_gate=frozen_gate,
         selection_diagnostics=selection_diagnostics,
         baseline_comparison=baseline_comparison,
     )

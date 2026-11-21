@@ -9,7 +9,6 @@ import {fileURLToPath} from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
 const defaultEvidencePath = resolve(root, "docs/evidence/alpha-diagnostics-v1-3.json");
-const sourceBaseCommit = "ad6f15e735249573dfa096e32c682c131a721bd2";
 
 function parseArgs(argv) {
   const result = {checkEvidence: false, writeEvidence: false};
@@ -47,6 +46,10 @@ function runPython(script, args = []) {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   }).trim();
+}
+
+function gitOutput(...args) {
+  return execFileSync("git", args, {cwd: root, encoding: "utf8"}).trim();
 }
 
 const protocol = JSON.parse(runPython(String.raw`
@@ -562,6 +565,13 @@ function assertEvidenceSemantics(evidence) {
   assert.equal(evidence.real_study.status, "NOT_EXECUTED");
   assert.equal(evidence.real_study.test_oos_executions, 0);
   assert.equal(evidence.real_study.candidate_promotions, 0);
+  const source = evidence.source;
+  assert(source && typeof source === "object", "Evidence source provenance is required");
+  assert.match(source.commit, /^[0-9a-f]{40}$/, "Evidence source commit must be a full Git SHA");
+  assert.equal(evidence.commands_source_commit, source.commit, "Evidence command source commit mismatch");
+  assert.equal(source.acceptance_ran_at_commit, true, "Acceptance must run at the recorded source commit");
+  assert.equal(source.worktree_clean_before_generation, true, "Evidence generation requires a clean worktree");
+  gitOutput("merge-base", "--is-ancestor", source.commit, "HEAD");
   assert.equal(evidence.synthetic_acceptance.report_hash, `sha256:${reportHash}`);
   assert.deepEqual(evidence.synthetic_acceptance.sections, synthetic.sections);
 }
@@ -586,7 +596,12 @@ function evidenceDocument(commandResults) {
   return {
     schema_version: "alpha-diagnostics-evidence-v1",
     generated_at: new Date().toISOString(),
-    source_base_commit: sourceBaseCommit,
+    source: {
+      commit: commandResults.source_commit,
+      acceptance_ran_at_commit: true,
+      worktree_clean_before_generation: true,
+    },
+    commands_source_commit: commandResults.source_commit,
     protocol: {
       ...document,
       protocol_hash: protocol.hash,
@@ -652,6 +667,10 @@ function writeCommittedEvidence() {
     throw new Error("Evidence regeneration requires npm test command results");
   }
   const commandResults = JSON.parse(readFileSync(options.commandResults, "utf8"));
+  const currentCommit = gitOutput("rev-parse", "HEAD");
+  const dirty = gitOutput("status", "--porcelain", "--untracked-files=normal");
+  assert(!dirty, "Evidence regeneration requires a clean source worktree");
+  assert.equal(commandResults.source_commit, currentCommit, "Evidence command results source commit mismatch");
   const evidence = evidenceDocument(commandResults);
   assertEvidenceSemantics(evidence);
   const bytes = Buffer.from(JSON.stringify(evidence, null, 2) + "\n");

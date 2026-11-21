@@ -1,6 +1,7 @@
 """Independent Train-only LightGBM fits for exploratory window importance."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -9,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+from ..contracts import ModelResourceBudget
+from ..errors import AlphaError, AlphaErrorCode
 from .hyperparameters import validate_hyperparameters
 from .labels import LabelRow
 from .registry import bytes_hash
@@ -16,6 +19,13 @@ from .temporal_split import ModelDevelopmentSplit
 
 
 DIAGNOSTIC_WINDOW_VERSION = "diagnostic-window-importance-v1"
+
+
+def _deadline_callback(deadline: float):
+    def enforce(_env):
+        if time.monotonic() > deadline:
+            raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Diagnostic fold time budget exceeded")
+    return enforce
 
 
 def _utc(value) -> datetime:
@@ -128,6 +138,8 @@ def diagnostic_window_importance(
     hyperparameters: dict | None = None,
     random_seed: int = 0,
     checkpoint: Callable[[float], None] | None = None,
+    resource_budget: ModelResourceBudget | None = None,
+    max_iterations: int | None = None,
 ) -> dict:
     """Fit two independent deterministic models over disjoint Train slices.
 
@@ -139,6 +151,26 @@ def diagnostic_window_importance(
         raise ValueError("split_at must be strictly inside Train")
     hyperparameters = validate_hyperparameters(hyperparameters or {})
     params, iteration_count = _params(hyperparameters, random_seed)
+    began = time.monotonic()
+    deadline = began + resource_budget.max_seconds if resource_budget is not None else None
+    if max_iterations is not None and iteration_count > max_iterations:
+        raise AlphaError(
+            AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED,
+            "Diagnostic fold iteration count exceeds budget",
+            {"iteration_count": iteration_count, "max_iterations": max_iterations},
+        )
+    if resource_budget is not None and (
+        len(feature_rows) > resource_budget.max_rows or len(label_rows) > resource_budget.max_rows
+    ):
+        raise AlphaError(
+            AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED,
+            "Diagnostic fold row budget exceeded",
+            {
+                "feature_rows": len(feature_rows),
+                "label_rows": len(label_rows),
+                "max_rows": resource_budget.max_rows,
+            },
+        )
     windows = (
         ("train_first", split.train_start, split_at),
         ("train_second", split_at, split.train_end),
@@ -165,6 +197,12 @@ def diagnostic_window_importance(
         features, schema = _feature_frame(fold_feature_rows)
         fold_labels = _window_labels(label_rows, start, end)
         frame = _join_labels(features, fold_labels)
+        if resource_budget is not None and len(frame) > resource_budget.max_rows:
+            raise AlphaError(
+                AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                "Diagnostic fold joined row budget exceeded",
+                {"rows": len(frame), "max_rows": resource_budget.max_rows},
+            )
         base = {
             "fold_id": fold_id,
             "window": {"start": _utc(start).isoformat(), "end": _utc(end).isoformat()},
@@ -201,12 +239,18 @@ def diagnostic_window_importance(
             feature_name=schema,
             free_raw_data=False,
         )
+        callbacks = []
+        if deadline is not None:
+            callbacks.append(_deadline_callback(deadline))
+        callbacks.append(lgb.log_evaluation(0))
         booster = lgb.train(
             params,
             dataset,
             num_boost_round=iteration_count,
-            callbacks=[lgb.log_evaluation(0)],
+            callbacks=callbacks,
         )
+        if deadline is not None and time.monotonic() > deadline:
+            raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Diagnostic fold time budget exceeded")
         model_text = booster.model_to_string(num_iteration=iteration_count)
         gains_array = booster.feature_importance(
             importance_type="gain", iteration=iteration_count,
