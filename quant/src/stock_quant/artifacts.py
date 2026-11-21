@@ -15,6 +15,8 @@ import tempfile
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from .pagination import fits_response_row
+
 SCHEMA = pa.schema([("ordinal", pa.int64()), ("time", pa.string()), ("symbol", pa.string()),
                     ("kind", pa.string()), ("payload", pa.large_string())])
 MAX_BYTES = 268435456
@@ -42,7 +44,7 @@ class ArtifactStore:
             raise ValueError("Invalid artifact identity")
         return self.root / (value[7:] + ".parquet")
 
-    def write_rows(self, rows, *, checkpoint=None) -> dict:
+    def write_rows(self, rows, *, checkpoint=None, enforce_mcp_budget=False) -> dict:
         fd, name = tempfile.mkstemp(suffix=".tmp", dir=self.root)
         os.close(fd)
         count = total = 0
@@ -59,6 +61,9 @@ class ArtifactStore:
                     total += size
                     if response_size > MAX_RESPONSE_ROW_BYTES or total > MAX_BYTES or count >= MAX_ROWS:
                         raise ValueError("RESOURCE_LIMIT_EXCEEDED: Parquet row/byte budget exceeded")
+                    if (enforce_mcp_budget
+                            and (response_size + 2 > MAX_RESPONSE_ROW_BYTES or not fits_response_row(row, response_size))):
+                        raise ValueError("RESOURCE_LIMIT_EXCEEDED: one artifact row exceeds the MCP response budget")
                     batch.append({"ordinal": count, "time": row.get("time") if isinstance(row.get("time"), str) else None,
                                   "symbol": row.get("symbol") if isinstance(row.get("symbol"), str) else None,
                                   "kind": row.get("kind") if isinstance(row.get("kind"), str) else None, "payload": payload})

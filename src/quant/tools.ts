@@ -3,14 +3,16 @@ import { z } from "zod";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { localSnapshot, type ExplicitCalendar } from "./local-data.js";
 import { isValidIsoDate } from "../validation.js";
-import { quantRequest } from "./bridge.js";
+import { checkedQuantResponse, quantFrameBytes, quantRequest } from "./bridge.js";
 import { registerAlphaTools } from "./alpha-tools.js";
 
 export function registerQuantTools(server: McpServer): void {
-  async function invoke(request: Record<string, unknown>) {
+  async function invoke(request: Record<string, unknown>, requestId?: string | number) {
     try {
-      const result = await quantRequest(request);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      const result = await quantRequest(requestId === undefined ? request : {...request,
+        mcp_overhead_bytes: quantFrameBytes({content: [{type: "text", text: ""}]}, requestId)});
+      const response = { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      return requestId === undefined ? response : checkedQuantResponse(response, requestId);
     } catch (error) {
       return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }] };
     }
@@ -31,8 +33,8 @@ export function registerQuantTools(server: McpServer): void {
   });
   server.tool("quant_compile_strategy", "Compile immutable DSL with parameter bindings, or pin a Python lifecycle plan to the operator-approved image and isolation protocol. Python artifacts do not accept DSL parameters.", { strategy_id: z.string().min(1).max(128), parameters: parameterValues, symbol: z.string().min(1).max(64).optional() }, async (args) => stored({method: "compile", ...args}));
 
-  async function stored(request: Record<string, unknown>) {
-    try { return await invoke({ ...request, registry_path: registryPath() }); }
+  async function stored(request: Record<string, unknown>, requestId?: string | number) {
+    try { return await invoke({ ...request, registry_path: registryPath() }, requestId); }
     catch (error) { return { isError: true, content: [{ type: "text" as const, text: String(error) }] }; }
   }
   const jobId = z.string().min(1).max(128);
@@ -46,15 +48,22 @@ export function registerQuantTools(server: McpServer): void {
     calendar_name: z.string().min(1).max(64), exchange: z.string().min(1).max(64),
     start_date: z.string().refine(isValidIsoDate), end_date: z.string().refine(isValidIsoDate),
   }, async (args) => invoke({method: "calendar", ...args}));
-  server.tool("quant_get_data_quality", "Inspect either a legacy immutable snapshot by symbol/timeframe/as_of OR an Alpha stock dataset by dataset_id. Alpha results include per-instrument session coverage, exchange/calendar mapping and volume NULL/zero/invalid counts.", {
-    data_snapshot_id: jobId.optional(), dataset_id: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+  const datasetId = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+  const datasetDetailSection = z.enum(["session_coverage_by_symbol", "exchange_mappings", "partition_manifest"]);
+  server.tool("quant_get_data_quality", "Inspect a legacy snapshot or an immutable Alpha dataset. Use overview for summary and integrity validation; use a detail section and next_cursor to audit all rows. Omit section for the legacy inline response when small.", {
+    data_snapshot_id: jobId.optional(), dataset_id: datasetId.optional(),
     symbol: z.string().min(1).max(64).optional(), timeframe: quantTimeframe.optional(), as_of: z.string().datetime({offset: true}).optional(),
+    section: z.union([z.literal("overview"), datasetDetailSection]).optional(),
+    limit: z.number().int().min(1).max(1000).optional(), cursor: z.string().min(1).max(2048).nullish(),
     max_staleness_seconds: z.number().int().nonnegative().optional().describe("Optional wall-clock tolerance, including overnight/weekend elapsed time"),
-  }, async (args) => {
-    if (args.dataset_id && (args.data_snapshot_id || args.symbol || args.timeframe || args.as_of)) {
+  }, async (args, extra) => {
+    if (args.dataset_id && (args.data_snapshot_id || args.timeframe || args.as_of || args.max_staleness_seconds !== undefined)) {
       return {isError: true, content: [{type: "text" as const, text: "dataset_id cannot be combined with snapshot quality fields"}]};
     }
-    if (args.dataset_id) return stored({method: "alpha_data_quality", dataset_id: args.dataset_id});
+    if (args.dataset_id) return stored({method: "alpha_data_quality", ...args}, extra.requestId);
+    if (args.section || args.limit !== undefined || args.cursor != null) {
+      return {isError: true, content: [{type: "text" as const, text: "Dataset audit fields require dataset_id"}]};
+    }
     if (!args.data_snapshot_id || !args.symbol || !args.timeframe || !args.as_of) {
       return {isError: true, content: [{type: "text" as const, text: "data_snapshot_id, symbol, timeframe and as_of are required for snapshot quality"}]};
     }
@@ -74,7 +83,7 @@ export function registerQuantTools(server: McpServer): void {
   server.tool("quant_cancel_job", "Cancel queued/running work. Terminal jobs remain terminal; cancelled workers cannot publish a result.", {job_id: jobId}, async (args) => stored({method: "cancel_job", ...args}));
   server.tool("quant_get_result", "Read a completed result section. List sections use bounded pagination with cursors tied to the job, section and result hash.", {
     job_id: jobId, section: z.enum(["artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades"]).default("summary"), limit: z.number().int().min(1).max(1000).default(100), cursor: z.string().max(2048).optional(),
-  }, async (args) => stored({method: "get_result", ...args}));
+  }, async (args, extra) => stored({method: "get_result", ...args}, extra.requestId));
 
   server.tool("quant_snapshot_from_local", "Snapshot local Yahoo vendor OHLC using a versioned calendar or session schedule. Price basis defaults to unverified and is refused by the broker unless the caller explicitly attests raw historical prices. Availability is modeled as bar end plus declared delay; historical publication/revision timestamps are not known. Missing timeframes fail.", {
     symbol: z.string().min(1).max(64), timeframe: z.enum(["1m", "5m", "15m", "1h", "1d"]),
@@ -89,9 +98,18 @@ export function registerQuantTools(server: McpServer): void {
     }
     catch (error) { return {isError: true, content: [{type: "text" as const, text: String(error)}]}; }
   });
-  server.resource("quant-result", new ResourceTemplate("quant://results/{job_id}/{section}", {list: undefined}), {mimeType: "application/json", description: "Completed result section, first 100 rows with pagination cursor for lists."}, async (uri, variables) => {
-    const result = await quantRequest({method: "get_result", registry_path: registryPath(), job_id: variables.job_id, section: variables.section, limit: 100});
-    return {contents: [{uri: uri.href, mimeType: "application/json", text: JSON.stringify(result)}]};
+  server.resource("quant-result", new ResourceTemplate("quant://results/{job_id}/{section}", {list: undefined}), {mimeType: "application/json", description: "Completed result section, first 100 rows with pagination cursor for lists."}, async (uri, variables, extra) => {
+    const mcp_overhead_bytes = quantFrameBytes({contents: [{uri: uri.href, mimeType: "application/json", text: ""}]}, extra.requestId);
+    const result = await quantRequest({method: "get_result", registry_path: registryPath(), job_id: variables.job_id, section: variables.section, limit: 100, mcp_overhead_bytes});
+    return checkedQuantResponse({contents: [{uri: uri.href, mimeType: "application/json", text: JSON.stringify(result)}]}, extra.requestId);
+  });
+  server.resource("quant-dataset-audit", new ResourceTemplate("quant://datasets/{dataset_id}/{section}", {list: undefined}), {
+    mimeType: "application/json", description: "First unfiltered page of an immutable dataset detail section. Use quant_get_data_quality for subsequent pages or symbol filters.",
+  }, async (uri, variables, extra) => {
+    const mcp_overhead_bytes = quantFrameBytes({contents: [{uri: uri.href, mimeType: "application/json", text: ""}]}, extra.requestId);
+    const result = await quantRequest({method: "alpha_data_quality", registry_path: registryPath(),
+      dataset_id: datasetId.parse(variables.dataset_id), section: datasetDetailSection.parse(variables.section), mcp_overhead_bytes});
+    return checkedQuantResponse({contents: [{uri: uri.href, mimeType: "application/json", text: JSON.stringify(result)}]}, extra.requestId);
   });
 
   server.tool("quant_evaluate_signal", "Evaluate a registered DSL as of a timezone-aware instant. Optional symbol binds $symbol and the alignment decision grid. Reports source and target-grid warmup separately.", {

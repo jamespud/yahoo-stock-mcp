@@ -14,7 +14,7 @@ import {
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
-  trainAlphaModelInputFields,
+  trainAlphaModelToolFields,
 } from "./alpha-contracts.js";
 import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
@@ -76,12 +76,25 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     async (args) => submit({ kind: "compute_option_factors", ...args }),
   );
 
-  server.tool(
+  server.registerTool(
     "quant_train_alpha_model",
-    "Train a deterministic CPU LightGBM regressor with chronological train/validation/test windows, label purging and frozen OOS evaluation.",
-    trainAlphaModelInputFields.shape,
+    {
+      description: "Train a deterministic CPU LightGBM regressor with chronological train/validation/test windows, label purging and frozen OOS evaluation.",
+      inputSchema: trainAlphaModelToolFields,
+    },
     async (args) => {
-      const { label_spec, windows, ...rest } = trainAlphaModelInput.parse(args);
+      const parsed = trainAlphaModelInput.safeParse(args);
+      if (!parsed.success) {
+        const fields = [...new Set(parsed.error.issues.flatMap((issue) =>
+          issue.code === "unrecognized_keys"
+            ? issue.keys.map((key) => [...issue.path, key].join("."))
+            : [issue.path.join(".") || "request"],
+        ).map((field) => field.slice(0, 128)))].sort().slice(0, 20);
+        const audit = await runtime.stored({method: "audit_training_rejection", fields});
+        const suffix = audit.isError ? "; rejection could not be recorded" : "";
+        return {isError: true, content: [{type: "text", text: `Invalid Alpha training fields: ${fields.join(", ")}${suffix}`}]};
+      }
+      const { label_spec, windows, ...rest } = parsed.data;
       const split = developmentWindows.safeParse(windows).success ? windows : temporalWindows.parse(windows);
       return submit({
         kind: "train_alpha_model", ...rest, ...label_spec, split,

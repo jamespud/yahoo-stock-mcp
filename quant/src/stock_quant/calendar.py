@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from importlib import metadata
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,6 +15,28 @@ from .contracts import StrictModel, Timeframe
 SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}
 MAX_EXPECTED = 100000
 CALENDAR_PROVIDER_VERSION = "4.13.2"
+XNYS_DAILY_BOUNDS_VERSION = "xnys-daily-bounds-v1"
+
+# New York local times from docs/evidence/alpha-calendar-xnys-v1-3.md.
+# These are daily outer bounds, not evidence of continuous intraday trading.
+_XNYS_DAILY_BOUNDS = {
+    date(1990, 12, 27): (time(11), None),
+    date(1991, 1, 17): (time(9, 31), None),
+    date(1991, 2, 25): (time(9, 31), None),
+    date(1994, 2, 11): (None, time(14, 30)),
+    date(1995, 12, 18): (time(10, 30), None),
+    date(1996, 1, 8): (time(11), time(14)),
+    date(1997, 10, 27): (None, time(15, 30)),
+    date(2001, 9, 17): (time(9, 33), None),
+    date(2002, 9, 11): (time(12), None),
+    date(2005, 6, 1): (None, time(15, 56)),
+}
+XNYS_DAILY_EARLY_CLOSES = frozenset(day for day, (_, close) in _XNYS_DAILY_BOUNDS.items() if close is not None)
+
+
+def exchange_calendar_version(*, xnys_daily_bounds: bool = False) -> str:
+    base = f"exchange_calendars:{metadata.version('exchange-calendars')}|pandas:{metadata.version('pandas')}|tzdata:{metadata.version('tzdata')}"
+    return f"{base}|{XNYS_DAILY_BOUNDS_VERSION}" if xnys_daily_bounds else base
 
 
 class TradingInterval(StrictModel):
@@ -134,13 +157,16 @@ def expected_intervals(calendar: CalendarSchedule, timeframe: Timeframe) -> tupl
     return tuple(sorted(result, key=lambda i: (i.start, i.end)))
 
 
-def generate_calendar(*, calendar_name: str, exchange: str, start_date: str | date, end_date: str | date) -> CalendarSchedule:
+def generate_calendar(*, calendar_name: str, exchange: str, start_date: str | date, end_date: str | date,
+                      xnys_daily_bounds: bool = False) -> CalendarSchedule:
     """Freeze library rules as explicit data, not historical announcement knowledge."""
-    from importlib.metadata import version
     import exchange_calendars as xc
     import pandas as pd
 
-    if version("exchange-calendars") != CALENDAR_PROVIDER_VERSION:
+    if xnys_daily_bounds and (calendar_name != "XNYS" or exchange != "XNYS"):
+        raise ValueError(f"{XNYS_DAILY_BOUNDS_VERSION} requires an exact XNYS mapping")
+    provider_version = metadata.version("exchange-calendars")
+    if provider_version != CALENDAR_PROVIDER_VERSION:
         raise ValueError("DATA_UNAVAILABLE: calendar provider version differs from accepted " + CALENDAR_PROVIDER_VERSION)
     begin = date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
     finish = date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
@@ -152,15 +178,16 @@ def generate_calendar(*, calendar_name: str, exchange: str, start_date: str | da
     # Padding permits requests consisting only of holidays/weekends. It does not
     # extend the returned declared coverage and is never used as trading data.
     try:
-        calendar = xc.get_calendar(calendar_name, start=begin - timedelta(days=7), end=finish + timedelta(days=7))
-        mapped = xc.get_calendar(exchange, start=begin - timedelta(days=7), end=finish + timedelta(days=7))
-        if mapped.name != calendar.name:
+        if xc.resolve_alias(exchange) != xc.resolve_alias(calendar_name):
             raise ValueError("Calendar name does not resolve to the requested exchange")
+        calendar = xc.get_calendar(calendar_name, start=begin - timedelta(days=7), end=finish + timedelta(days=7))
     except (ValueError, OverflowError) as error:
         raise ValueError("DATA_UNAVAILABLE: provider cannot generate the requested exchange calendar") from error
     sessions = []
+    zone = ZoneInfo(str(calendar.tz)) if xnys_daily_bounds else None
     for label, row in calendar.schedule.iterrows():
-        if not begin <= label.date() <= finish:
+        day = label.date()
+        if not begin <= day <= finish:
             continue
         breaks = (row["break_start"], row["break_end"])
         if pd.isna(breaks[0]) != pd.isna(breaks[1]):
@@ -170,46 +197,102 @@ def generate_calendar(*, calendar_name: str, exchange: str, start_date: str | da
         else:
             intervals = [{"start": row["open"].to_pydatetime(), "end": breaks[0].to_pydatetime()},
                          {"start": breaks[1].to_pydatetime(), "end": row["close"].to_pydatetime()}]
-        sessions.append({"date": label.date(), "intervals": intervals})
+        if zone is not None and day in _XNYS_DAILY_BOUNDS:
+            open_time, close_time = _XNYS_DAILY_BOUNDS[day]
+            if open_time is not None:
+                intervals[0]["start"] = datetime.combine(day, open_time, zone)
+            if close_time is not None:
+                intervals[-1]["end"] = datetime.combine(day, close_time, zone)
+        sessions.append({"date": day, "intervals": intervals})
     return CalendarSchedule(exchange=exchange, timezone=str(calendar.tz),
-                            version=f"exchange_calendars:{version('exchange-calendars')}|pandas:{version('pandas')}|tzdata:{version('tzdata')}",
-                            provider="exchange_calendars", provider_version=version("exchange-calendars"), calendar_name=calendar.name,
+                            version=exchange_calendar_version(xnys_daily_bounds=xnys_daily_bounds),
+                            provider="exchange_calendars", provider_version=provider_version, calendar_name=calendar.name,
                             start_date=begin, end_date=finish, sessions=tuple(sessions))
 
 
-def generate_long_calendar(*, calendar_name: str, exchange: str, start_date: str | date, end_date: str | date) -> CalendarSchedule:
-    """Prepare >10-year research ranges as deterministic, non-overlapping calendar shards."""
+@dataclass(frozen=True)
+class CalendarShardManifest:
+    """Ordered, validated schedules; the aggregate is not a CalendarSchedule."""
+
+    shards: tuple[CalendarSchedule, ...]
+
+    def __post_init__(self):
+        if not self.shards:
+            raise ValueError("Calendar shard manifest cannot be empty")
+        def identity(shard):
+            return (shard.exchange, shard.timezone, shard.version, shard.provider, shard.provider_version, shard.calendar_name)
+        if any(identity(shard) != identity(self.shards[0]) for shard in self.shards):
+            raise ValueError("Calendar shard identity differs")
+        for left, right in zip(self.shards, self.shards[1:]):
+            if left.end_date + timedelta(days=1) != right.start_date:
+                raise ValueError("Calendar shards must be contiguous and non-overlapping")
+        previous = None
+        for shard in self.shards:
+            for session in shard.sessions:
+                if previous and previous.intervals[-1].end > session.intervals[0].start:
+                    raise ValueError("Trading sessions overlap across calendar shards")
+                previous = session
+
+    @property
+    def start_date(self): return self.shards[0].start_date
+
+    @property
+    def end_date(self): return self.shards[-1].end_date
+
+    @property
+    def exchange(self): return self.shards[0].exchange
+
+    @property
+    def calendar_name(self): return self.shards[0].calendar_name
+
+    @property
+    def version(self): return self.shards[0].version
+
+    @property
+    def provider(self): return self.shards[0].provider
+
+    @property
+    def provider_version(self): return self.shards[0].provider_version
+
+    @property
+    def sessions(self):
+        return tuple(session for shard in self.shards for session in shard.sessions)
+
+    @property
+    def long_calendar_shards(self):
+        return tuple({"calendar_id": shard.id, "calendar_name": shard.calendar_name, "exchange": shard.exchange,
+                      "start": shard.start_date.isoformat(), "end": shard.end_date.isoformat(),
+                      "provider_version": shard.provider_version, "session_count": len(shard.sessions)}
+                     for shard in self.shards)
+
+    @property
+    def calendar_validation_status(self): return "MULTI_SHARD_VERIFIED"
+
+    @property
+    def id(self):
+        return digest({"schema": "calendar-shard-manifest-v1", "shards": self.long_calendar_shards})
+
+
+def calendar_shard_ranges(begin: date, finish: date):
+    if not begin <= finish or begin.year < 1900 or finish.year > 2100:
+        raise ValueError("RESOURCE_LIMIT_EXCEEDED: calendar coverage must be ordered within 1900..2100")
+    if (finish - begin).days <= 3660:
+        yield begin, finish
+        return
+    for year in range(begin.year, finish.year + 1):
+        yield max(begin, date(year, 1, 1)), min(finish, date(year, 12, 31))
+
+
+def generate_long_calendar(*, calendar_name: str, exchange: str, start_date: str | date, end_date: str | date,
+                           xnys_daily_bounds: bool = False) -> CalendarSchedule | CalendarShardManifest:
+    """Prepare long research ranges as deterministic, bounded calendar shards."""
     begin = date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
     finish = date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
-    if not begin <= finish:
-        raise ValueError("Calendar coverage must be ordered")
-    if (finish - begin).days <= 3660:
-        calendar = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=begin, end_date=finish)
-        shards = ({"calendar_name": calendar_name, "exchange": exchange, "start": begin.isoformat(), "end": finish.isoformat(), "provider_version": calendar.provider_version},)
+    schedules = tuple(generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=left, end_date=right,
+                                        xnys_daily_bounds=xnys_daily_bounds)
+                      for left, right in calendar_shard_ranges(begin, finish))
+    if len(schedules) == 1:
+        calendar = schedules[0]
+        shards = ({"calendar_name": calendar.calendar_name, "exchange": exchange, "start": begin.isoformat(), "end": finish.isoformat(), "provider_version": calendar.provider_version},)
         return calendar.model_copy(update={"long_calendar_shards": shards, "calendar_validation_status": "SINGLE_SHARD_VERIFIED"})
-    shards: list[dict] = []
-    sessions: list[TradingSession] = []
-    current = begin
-    provider_version = None
-    while current <= finish:
-        # Deterministic natural-year chunks avoid rolling provider state and
-        # keep later inspections independently reproducible.
-        chunk_end = min(date(current.year, 12, 31), finish)
-        shard = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=current, end_date=chunk_end)
-        provider_version = shard.provider_version
-        sessions.extend(shard.sessions)
-        shards.append({"calendar_name": calendar_name, "exchange": exchange,
-                       "start": shard.start_date.isoformat(), "end": shard.end_date.isoformat(),
-                       "provider_version": shard.provider_version})
-        current = date(current.year + 1, 1, 1)
-    sorted_sessions = tuple(sorted(sessions, key=lambda s: s.date))
-    if len({session.date for session in sorted_sessions}) != len(sorted_sessions):
-        raise ValueError("Long calendar merge created duplicate trading sessions")
-    first = generate_calendar(calendar_name=calendar_name, exchange=exchange, start_date=begin, end_date=begin)
-    return first.model_copy(update={
-        "start_date": begin,
-        "end_date": finish,
-        "sessions": sorted_sessions,
-        "long_calendar_shards": tuple(shards),
-        "calendar_validation_status": "MULTI_SHARD_MERGED",
-    })
+    return CalendarShardManifest(schedules)

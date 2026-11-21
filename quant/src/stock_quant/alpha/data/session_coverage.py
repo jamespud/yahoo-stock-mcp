@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import date, datetime
 from typing import Iterable
 
-from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
+from ...calendar import CALENDAR_PROVIDER_VERSION, XNYS_DAILY_BOUNDS_VERSION, CalendarShardManifest, generate_long_calendar
 from ..errors import AlphaError, AlphaErrorCode
 
 
@@ -131,12 +131,31 @@ def mapped_stock_calendar(manifest):
     evidence = mapping.get("mapping_evidence") or {}
     if not calendar_name or evidence.get("provider_version") != CALENDAR_PROVIDER_VERSION:
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar provider version is not executable")
-    calendar = generate_long_calendar(
-        calendar_name=calendar_name,
-        exchange=calendar_name,
-        start_date=manifest.start_at.date(),
-        end_date=manifest.end_at.date(),
-    )
+    xnys_daily_bounds = isinstance(calendar_version, str) and calendar_version.endswith(f"|{XNYS_DAILY_BOUNDS_VERSION}")
+    if xnys_daily_bounds and (calendar_name != "XNYS" or statuses != {"VERIFIED"}):
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, f"{XNYS_DAILY_BOUNDS_VERSION} requires an exact XNYS mapping")
+    shards = manifest.data_quality.get("calendar_shards")
+    start, end, exchange = manifest.start_at.date(), manifest.end_at.date(), calendar_name
+    if shards is not None:
+        if not isinstance(shards, list) or not shards or any(not isinstance(shard, dict) for shard in shards):
+            raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Invalid stock dataset calendar shard manifest")
+        start, end, exchange = shards[0].get("start"), shards[-1].get("end"), shards[0].get("exchange")
+        if not all(isinstance(value, str) for value in (start, end, exchange)):
+            raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Invalid stock dataset calendar shard bounds or exchange")
+    try:
+        calendar = generate_long_calendar(calendar_name=calendar_name, exchange=exchange, start_date=start,
+                                          end_date=end, xnys_daily_bounds=xnys_daily_bounds)
+    except ValueError as error:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Cannot rebuild stock dataset calendar") from error
     if calendar.version != calendar_version:
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar version does not match its mapping")
+    if xnys_daily_bounds and (
+        manifest.calendar_version != calendar.version or manifest.data_quality.get("calendar_id") != calendar.id
+    ):
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar identity does not match its manifest")
+    if xnys_daily_bounds and isinstance(calendar, CalendarShardManifest) and shards is None:
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar shard manifest is missing")
+    if shards is not None and (shards != list(calendar.long_calendar_shards)
+                               or manifest.data_quality.get("calendar_id") != calendar.id):
+        raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Stock dataset calendar shards do not match their manifest")
     return calendar

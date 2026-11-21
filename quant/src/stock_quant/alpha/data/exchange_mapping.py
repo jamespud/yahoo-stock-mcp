@@ -4,11 +4,14 @@ from __future__ import annotations
 import hashlib
 import warnings
 from datetime import date
+from functools import lru_cache
 from importlib.metadata import version
 from typing import Iterable
 
 import exchange_calendars as xc
 from pandas.errors import Pandas4Warning
+
+from ...calendar import XNYS_DAILY_EARLY_CLOSES, calendar_shard_ranges, exchange_calendar_version
 
 MAPPING_VERSION = "exchange-calendar-mapping-v1"
 _PROVIDER_VERSION = version("exchange-calendars")
@@ -35,10 +38,6 @@ _SOURCE_CANONICAL = {
 }
 
 
-def _calendar_version() -> str:
-    return f"exchange_calendars:{_PROVIDER_VERSION}|pandas:{version('pandas')}|tzdata:{version('tzdata')}"
-
-
 def _normalise_source_exchange(value: str | None) -> str:
     return " ".join(str(value or "").strip().split())
 
@@ -51,6 +50,22 @@ def _candidate_calendar(source_exchange: str) -> str | None:
     return compact if compact in names else None
 
 
+@lru_cache(maxsize=32)
+def _calendar_dates(name: str, start_date: date, end_date: date):
+    sessions, early_closes = [], []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", Pandas4Warning)
+        for left, right in calendar_shard_ranges(start_date, end_date):
+            # Use the same padding as generate_calendar for holiday-only shards.
+            from datetime import timedelta
+            oracle = xc.get_calendar(name, start=left - timedelta(days=7), end=right + timedelta(days=7))
+            sessions.extend(str(day.date()) for day in oracle.sessions if left <= day.date() <= right)
+            early_closes.extend(str(day.date()) for day in oracle.early_closes if left <= day.date() <= right)
+    if any(a >= b for a, b in zip(sessions, sessions[1:])):
+        raise ValueError("Calendar shard session dates must increase strictly")
+    return tuple(sessions), tuple(early_closes)
+
+
 def build_exchange_mapping(
     instrument_id: str,
     source_exchange: str | None,
@@ -59,6 +74,7 @@ def build_exchange_mapping(
     end_date: date,
     historical_exchanges: Iterable[str] | None = None,
     transition_evidence: dict | None = None,
+    xnys_daily_bounds: bool = False,
 ) -> dict:
     """Map a source exchange without erasing identity or alias uncertainty."""
     source = _normalise_source_exchange(source_exchange)
@@ -67,7 +83,7 @@ def build_exchange_mapping(
         "source_exchange": source,
         "exchange_identity_status": "UNVERIFIED",
         "calendar_name": None,
-        "calendar_version": _calendar_version(),
+        "calendar_version": exchange_calendar_version(),
         "calendar_mapping_status": "UNVERIFIED",
         "mapping_version": MAPPING_VERSION,
         "mapping_source": "exchange_calendars",
@@ -92,10 +108,7 @@ def build_exchange_mapping(
         base["calendar_mapping_status"] = "UNSUPPORTED"
         base["mapping_evidence"].update({"requested_calendar_name": candidate, "reason": "RESOLVED_CALENDAR_UNAVAILABLE"})
         return base
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", Pandas4Warning)
-        oracle = xc.get_calendar(resolved_name, start=start_date.isoformat(), end=end_date.isoformat())
-        early_closes = oracle.early_closes
+    sessions, early_closes = _calendar_dates(resolved_name, start_date, end_date)
     alias_resolved = candidate != resolved_name
     base_status = "PROXY_ONLY" if alias_resolved else "VERIFIED"
     history = [str(value) for value in (historical_exchanges or [])]
@@ -108,21 +121,25 @@ def build_exchange_mapping(
     else:
         mapping_status = base_status
         identity_status = base_status
+    if xnys_daily_bounds and candidate == resolved_name == "XNYS" and mapping_status == "VERIFIED":
+        extra_closes = {day.isoformat() for day in XNYS_DAILY_EARLY_CLOSES}
+        early_closes = tuple(sorted(set(early_closes) | (extra_closes & set(sessions))))
+        base["calendar_version"] = exchange_calendar_version(xnys_daily_bounds=True)
     base.update({
         "exchange_identity_status": identity_status,
-        "calendar_name": oracle.name,
+        "calendar_name": resolved_name,
         "calendar_mapping_status": mapping_status,
         "mapping_source": "exchange_calendars_alias" if alias_resolved else "exchange_calendars_exact",
-        "session_dates": [str(session.date()) for session in oracle.sessions],
-        "early_close_dates": [str(day.date()) for day in early_closes],
+        "session_dates": list(sessions),
+        "early_close_dates": list(early_closes),
         "mapping_evidence": {
             **base["mapping_evidence"],
             "requested_calendar_name": candidate,
-            "resolved_calendar_name": oracle.name,
+            "resolved_calendar_name": resolved_name,
             "alias_resolved": alias_resolved,
-            "session_count": len(oracle.sessions),
+            "session_count": len(sessions),
             "early_close_count": len(early_closes),
-            "session_fingerprint": hashlib.sha256("|".join(str(day.date()) for day in oracle.sessions).encode()).hexdigest(),
+            "session_fingerprint": hashlib.sha256("|".join(sessions).encode()).hexdigest(),
         },
     })
     return base

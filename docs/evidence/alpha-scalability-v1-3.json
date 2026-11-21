@@ -1,0 +1,1997 @@
+{
+  "schema_version": "alpha-scalability-evidence-v1",
+  "date": "2026-11-20",
+  "compared_baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",
+  "gates": {
+    "ENGINEERING_SCALABILITY": "BLOCKED",
+    "RESEARCH_DIAGNOSTIC_READINESS": "NOT_TESTED",
+    "REAL_MARKET_TRADING_VALIDITY": "BLOCKED"
+  },
+  "baseline": {
+    "single_result_row_limit_bytes": 2500000,
+    "bridge_frame_limit_bytes": 4194304,
+    "first_80_100_stock_failure": "data_quality serialized row budget; Dataset Parquet had already been written",
+    "data": [
+      {
+        "source": "local_yahoo",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 5.3178497570334,
+        "result_serialization_seconds": 0.0735777200316079,
+        "total_parquet_bytes": 5735161,
+        "report_bytes": 1846097,
+        "mapping_bytes": 1815897,
+        "partition_manifest_bytes": 16496,
+        "manifest_bytes": 1732460,
+        "job_result_before_serialization_bytes": 5573351,
+        "job_persisted_metadata_bytes": 3727335,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 1846186,
+            "uncompressed_json_row_bytes": 1715429
+          }
+        },
+        "registered": true,
+        "symbol_count": 50,
+        "partition_bytes": [
+          136207,
+          123293,
+          107758,
+          110523,
+          105876,
+          103891,
+          105972,
+          109292,
+          123490,
+          124352,
+          112213,
+          112048,
+          128097,
+          113516,
+          99995,
+          106041,
+          115768,
+          120545,
+          136068,
+          110706,
+          105590,
+          114417,
+          114219,
+          132904,
+          121809,
+          117660,
+          114540,
+          112780,
+          103223,
+          116049,
+          122093,
+          116738,
+          107504,
+          124934,
+          130149,
+          107893,
+          130551,
+          104834,
+          108330,
+          114144,
+          106795,
+          112803,
+          107208,
+          110067,
+          107156,
+          113039,
+          132429,
+          112060,
+          101964,
+          105628
+        ],
+        "peak_rss_kib_linux": 664768,
+        "job_status": "completed",
+        "dataset_bridge_json_estimated_bytes": 3726941,
+        "error_code": null,
+        "error_message": null
+      },
+      {
+        "source": "local_yahoo",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 6.188131054979749,
+        "result_serialization_seconds": 0.0913855999824591,
+        "total_parquet_bytes": 6844937,
+        "report_bytes": 2215113,
+        "mapping_bytes": 2179075,
+        "partition_manifest_bytes": 19796,
+        "manifest_bytes": 2078616,
+        "job_result_before_serialization_bytes": 6687139,
+        "job_persisted_metadata_bytes": 4472106,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 2215202,
+            "uncompressed_json_row_bytes": 2058305
+          }
+        },
+        "registered": true,
+        "symbol_count": 60,
+        "partition_bytes": [
+          136207,
+          123293,
+          107758,
+          110523,
+          105876,
+          103891,
+          105972,
+          109292,
+          123490,
+          124352,
+          112213,
+          112048,
+          128097,
+          113516,
+          99995,
+          106041,
+          115768,
+          120545,
+          136068,
+          110706,
+          105590,
+          114417,
+          114219,
+          132904,
+          121809,
+          117660,
+          114540,
+          112780,
+          103223,
+          116049,
+          122093,
+          116738,
+          107504,
+          124934,
+          130149,
+          107893,
+          130551,
+          104834,
+          108330,
+          114144,
+          106795,
+          112803,
+          107208,
+          110067,
+          107156,
+          113039,
+          132429,
+          112060,
+          101964,
+          105628,
+          111789,
+          116845,
+          113125,
+          103694,
+          104420,
+          110426,
+          115179,
+          120001,
+          106842,
+          107455
+        ],
+        "peak_rss_kib_linux": 746392,
+        "job_status": "completed",
+        "dataset_bridge_json_estimated_bytes": 4471713,
+        "error_code": null,
+        "error_message": null
+      },
+      {
+        "source": "local_yahoo",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 7.608517770015169,
+        "result_serialization_seconds": 0.021856150997336954,
+        "total_parquet_bytes": 9099219,
+        "report_bytes": 2953113,
+        "mapping_bytes": 2905408,
+        "partition_manifest_bytes": 26395,
+        "manifest_bytes": 2770893,
+        "job_result_before_serialization_bytes": 8914615,
+        "job_persisted_metadata_bytes": null,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 2953202,
+            "uncompressed_json_row_bytes": 2744025
+          }
+        },
+        "registered": false,
+        "symbol_count": 80,
+        "partition_bytes": [
+          136207,
+          123293,
+          107758,
+          110523,
+          105876,
+          103891,
+          105972,
+          109292,
+          123490,
+          124352,
+          112213,
+          112048,
+          128097,
+          113516,
+          99995,
+          106041,
+          115768,
+          120545,
+          136068,
+          110706,
+          105590,
+          114417,
+          114219,
+          132904,
+          121809,
+          117660,
+          114540,
+          112780,
+          103223,
+          116049,
+          122093,
+          116738,
+          107504,
+          124934,
+          130149,
+          107893,
+          130551,
+          104834,
+          108330,
+          114144,
+          106795,
+          112803,
+          107208,
+          110067,
+          107156,
+          113039,
+          132429,
+          112060,
+          101964,
+          105628,
+          111789,
+          116845,
+          113125,
+          103694,
+          104420,
+          110426,
+          115179,
+          120001,
+          106842,
+          107455,
+          120070,
+          107746,
+          111978,
+          110205,
+          129215,
+          111184,
+          113855,
+          116289,
+          101451,
+          125777,
+          113249,
+          107148,
+          109223,
+          106440,
+          112324,
+          112119,
+          106361,
+          124414,
+          107138,
+          108096
+        ],
+        "peak_rss_kib_linux": 907672,
+        "job_status": "failed",
+        "dataset_bridge_json_estimated_bytes": null,
+        "error_code": "EXECUTION_FAILED",
+        "error_message": "RESOURCE_LIMIT_EXCEEDED: Parquet row/byte budget exceeded"
+      },
+      {
+        "source": "synthetic",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 8.341918824007735,
+        "result_serialization_seconds": 0.027622164983768016,
+        "total_parquet_bytes": 9583842,
+        "report_bytes": 3691293,
+        "mapping_bytes": 3631700,
+        "partition_manifest_bytes": 32990,
+        "manifest_bytes": 3463536,
+        "job_result_before_serialization_bytes": 11142813,
+        "job_persisted_metadata_bytes": null,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 3691382,
+            "uncompressed_json_row_bytes": 3429925
+          }
+        },
+        "registered": false,
+        "symbol_count": 100,
+        "partition_bytes": [
+          96793,
+          96784,
+          96747,
+          96661,
+          96608,
+          96600,
+          96562,
+          96521,
+          96478,
+          96468,
+          96461,
+          96366,
+          96316,
+          96226,
+          95970,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95844,
+          95878,
+          95923,
+          95874,
+          95842,
+          95921,
+          96131,
+          96170,
+          96154,
+          96159,
+          96105,
+          96004,
+          95949,
+          95989,
+          96036,
+          95986,
+          95996,
+          96016,
+          95958,
+          95853,
+          95796,
+          95839,
+          95888,
+          95856,
+          95819,
+          95826,
+          95770,
+          95659,
+          95604,
+          95640,
+          95616,
+          95336,
+          95205,
+          95211,
+          95211,
+          95211,
+          95210,
+          95246,
+          95295,
+          95241,
+          95205,
+          95211,
+          95211,
+          95211,
+          95210,
+          95246,
+          95295,
+          95241,
+          95205,
+          95211,
+          95211,
+          95211,
+          95210
+        ],
+        "peak_rss_kib_linux": 1064380,
+        "job_status": "failed",
+        "dataset_bridge_json_estimated_bytes": null,
+        "error_code": "EXECUTION_FAILED",
+        "error_message": "RESOURCE_LIMIT_EXCEEDED: Parquet row/byte budget exceeded"
+      },
+      {
+        "source": "synthetic",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 4.836193471972365,
+        "result_serialization_seconds": 0.07580718700774014,
+        "total_parquet_bytes": 4803342,
+        "report_bytes": 1846141,
+        "mapping_bytes": 1815850,
+        "partition_manifest_bytes": 16490,
+        "manifest_bytes": 1732584,
+        "job_result_before_serialization_bytes": 5573557,
+        "job_persisted_metadata_bytes": 3727496,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 1846230,
+            "uncompressed_json_row_bytes": 1715473
+          }
+        },
+        "registered": true,
+        "symbol_count": 50,
+        "partition_bytes": [
+          96793,
+          96784,
+          96747,
+          96661,
+          96608,
+          96600,
+          96562,
+          96521,
+          96478,
+          96468,
+          96461,
+          96366,
+          96316,
+          96226,
+          95970,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95844,
+          95878,
+          95923
+        ],
+        "peak_rss_kib_linux": 658628,
+        "job_status": "completed",
+        "dataset_bridge_json_estimated_bytes": 3727103,
+        "error_code": null,
+        "error_message": null
+      },
+      {
+        "source": "synthetic",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 5.701481445983518,
+        "result_serialization_seconds": 0.09564858098747209,
+        "total_parquet_bytes": 5763651,
+        "report_bytes": 2215171,
+        "mapping_bytes": 2179020,
+        "partition_manifest_bytes": 19790,
+        "manifest_bytes": 2078774,
+        "job_result_before_serialization_bytes": 6687407,
+        "job_persisted_metadata_bytes": 4472316,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 2215260,
+            "uncompressed_json_row_bytes": 2058363
+          }
+        },
+        "registered": true,
+        "symbol_count": 60,
+        "partition_bytes": [
+          96793,
+          96784,
+          96747,
+          96661,
+          96608,
+          96600,
+          96562,
+          96521,
+          96478,
+          96468,
+          96461,
+          96366,
+          96316,
+          96226,
+          95970,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95844,
+          95878,
+          95923,
+          95874,
+          95842,
+          95921,
+          96131,
+          96170,
+          96154,
+          96159,
+          96105,
+          96004,
+          95949
+        ],
+        "peak_rss_kib_linux": 739956,
+        "job_status": "completed",
+        "dataset_bridge_json_estimated_bytes": 4471923,
+        "error_code": null,
+        "error_message": null
+      },
+      {
+        "source": "synthetic",
+        "window": [
+          "2002-01-01",
+          "2012-01-01"
+        ],
+        "execution_seconds": 7.087373384973034,
+        "result_serialization_seconds": 0.021353834017645568,
+        "total_parquet_bytes": 7679339,
+        "report_bytes": 2953231,
+        "mapping_bytes": 2905360,
+        "partition_manifest_bytes": 26390,
+        "manifest_bytes": 2771154,
+        "job_result_before_serialization_bytes": 8915107,
+        "job_persisted_metadata_bytes": null,
+        "result_list_sections": {
+          "data_quality": {
+            "max_row_bytes": 2953320,
+            "uncompressed_json_row_bytes": 2744143
+          }
+        },
+        "registered": false,
+        "symbol_count": 80,
+        "partition_bytes": [
+          96793,
+          96784,
+          96747,
+          96661,
+          96608,
+          96600,
+          96562,
+          96521,
+          96478,
+          96468,
+          96461,
+          96366,
+          96316,
+          96226,
+          95970,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95842,
+          95878,
+          95923,
+          95874,
+          95844,
+          95878,
+          95923,
+          95874,
+          95842,
+          95921,
+          96131,
+          96170,
+          96154,
+          96159,
+          96105,
+          96004,
+          95949,
+          95989,
+          96036,
+          95986,
+          95996,
+          96016,
+          95958,
+          95853,
+          95796,
+          95839,
+          95888,
+          95856,
+          95819,
+          95826,
+          95770,
+          95659,
+          95604,
+          95640,
+          95616,
+          95336,
+          95205
+        ],
+        "peak_rss_kib_linux": 901192,
+        "job_status": "failed",
+        "dataset_bridge_json_estimated_bytes": null,
+        "error_code": "EXECUTION_FAILED",
+        "error_message": "RESOURCE_LIMIT_EXCEEDED: Parquet row/byte budget exceeded"
+      }
+    ]
+  },
+  "engineering_mcp_run": {
+    "scope": "engineering_only",
+    "universe_matches_frozen_research_protocol": false,
+    "symbol_count": 80,
+    "producer": "yahoo_local_sqlite_read_only",
+    "period": {
+      "start": "2002-01-01T00:00:00Z",
+      "end": "2012-01-01T00:00:00Z"
+    },
+    "test_reads": 0,
+    "training_jobs": 0,
+    "jobs": [
+      {
+        "name": "prepare",
+        "job_id": "alpha_e8ef4c5653e24190a370dacdeb27395d",
+        "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "row_count": 201520,
+        "partition_count": 80,
+        "elapsed_ms": 9464,
+        "dataset_kind": "stock_bars",
+        "source": "yahoo",
+        "source_version": "yahoo-local-sqlite-v2-null-volume",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161368,
+          "started_at": 1795161368,
+          "finished_at": 1795161375
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 9099219,
+        "manifest_file_sha256": "sha256:09ad20bc53d4bf6571429a4e41bb45d6b940d3849463bd8b32ecdf3ef2657e1e",
+        "request_hash": "sha256:afd2e15265663d5d2477c48d44dcb2c712d41e67a64319bcfaf2cf1bb7e53426",
+        "manifest_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd",
+        "calendar_id": "sha256:60c724478b0bbf858f6156b908e1629f1dfc5bc5fe98ee519c9632859c99b737"
+      },
+      {
+        "name": "H01",
+        "job_id": "alpha_97bdccc59cff490ea4eb5bcc7e6bea0c",
+        "dataset_id": "sha256:a710f828755bfc20ce5022275aed78f7f688a153ab696c50706fc7c831a004fd",
+        "row_count": 604560,
+        "partition_count": 3,
+        "elapsed_ms": 6558,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:69ed40cb83ee26dcf3bd723120fe72cfb2290f665e83a190678bf4a752044fd7",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161377,
+          "started_at": 1795161378,
+          "finished_at": 1795161383
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 5336141,
+        "manifest_file_sha256": "sha256:c08b609ada415406c57a2eaf718b523dc85de651619f445ce16d8390e087bca9",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb",
+        "source_factor_request_sha256": "sha256:881ac5004fe21f3c271f766c39e07e31bf95923cb90ac4ed2ac37df7cf7d08c9"
+      },
+      {
+        "name": "H02",
+        "job_id": "alpha_b3864511188841989d1b73e6afcee61e",
+        "dataset_id": "sha256:718bfdffa1fa2e931b9fcde99d12ca793fdb5d94c9e3823429bc96c6c2e3001e",
+        "row_count": 604560,
+        "partition_count": 3,
+        "elapsed_ms": 6630,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:35625739b6b1813739f8823c9b051d3e9d956af5ff7cb04986f8cd9d51d59680",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161384,
+          "started_at": 1795161384,
+          "finished_at": 1795161389
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 5324941,
+        "manifest_file_sha256": "sha256:cab035d24eab4e0e6e9ea02d5dd1c64e3baa840bdadfb6eda33ef96fd2c5422c",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56",
+        "source_factor_request_sha256": "sha256:e3f1d8388011e0a118f6009d95fcda6204677d698386a25189fdd89c7c44d7b6"
+      },
+      {
+        "name": "H03",
+        "job_id": "alpha_ce470adc2b5240aa89d20b3ec3ad4540",
+        "dataset_id": "sha256:99a4b1a088026d441467f3c896e3075432f204c9f1fbc64927fc12a743fdfd1a",
+        "row_count": 403040,
+        "partition_count": 2,
+        "elapsed_ms": 6610,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:4d4f51f32dd5e7bcdb486b02d9878b71a726af061f21a6ebd66c666f9d4ed76a",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161391,
+          "started_at": 1795161391,
+          "finished_at": 1795161395
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 3606337,
+        "manifest_file_sha256": "sha256:65ee3a7b637616905d95f23572e9c4ea04003a4b62030050f75017d4e4c58591",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb",
+        "source_factor_request_sha256": "sha256:6fadbaa4083c5664812350bfc77d38c18688e7013b517edf9bd9d632f74283ad"
+      },
+      {
+        "name": "H04",
+        "job_id": "alpha_22708eeae366488aabdf557be87e146c",
+        "dataset_id": "sha256:c738edea576877bd96fe431746ffa86eaa718f281617a5bf8def55827d0ffd18",
+        "row_count": 604560,
+        "partition_count": 3,
+        "elapsed_ms": 6453,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:bbedefb0eaea17a972f4f57a26e5b51278b44cf44319b332377edb53071c444f",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161397,
+          "started_at": 1795161397,
+          "finished_at": 1795161402
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 5389498,
+        "manifest_file_sha256": "sha256:cd159627d637eddd2c28e509094b7329e705c84300e0ca49600ac9c3f2e76c4d",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d",
+        "source_factor_request_sha256": "sha256:01e1e613e5b6f682e06233aa55e9b92e5563e14f7008db333afa1471709215d7"
+      },
+      {
+        "name": "H05",
+        "job_id": "alpha_d55fe0c4237542eeaee5fa9b9b5b4433",
+        "dataset_id": "sha256:dcdd37138fe491de079e56bd811abd2e693251427a886396cf90c0bed6c25671",
+        "row_count": 806080,
+        "partition_count": 4,
+        "elapsed_ms": 7794,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:9db06021789d820e74872ab69c8b74c55ce3cf4b89f1c65d915433fd514ebda9",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161404,
+          "started_at": 1795161404,
+          "finished_at": 1795161409
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 7262472,
+        "manifest_file_sha256": "sha256:31c6646852d0fc5d34eeb78efaeb8bf624bd72e9602206864ad95aa2a9b55d75",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac",
+        "source_factor_request_sha256": "sha256:a93daea833699e3e49be4f290202072d8dd9e767bc87ff5ce1bdbc0a25ddd345"
+      },
+      {
+        "name": "H06",
+        "job_id": "alpha_9c98346f964a44928e58ed229e87ee81",
+        "dataset_id": "sha256:2de8d40d3f03daa1e52db1223ee6ea26d0bb39070121b43267df1c05a2665e82",
+        "row_count": 1410640,
+        "partition_count": 7,
+        "elapsed_ms": 7922,
+        "dataset_kind": "feature_panel",
+        "source": "factor_engine",
+        "source_version": "sha256:bb82743c6a37f9aff52c85ec555c769b2fe41742dcb8d8f868a112458a2f70a8",
+        "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "price_basis": "price_basis_unverified",
+        "content_hash": "sha256:5626fbdfd908dd2f3b51be7962f060fbf3b728d1137a99d83ab58a80816a3d97",
+        "terminal": {
+          "status": "completed",
+          "attempts": 1,
+          "created_at": 1795161411,
+          "started_at": 1795161412,
+          "finished_at": 1795161418
+        },
+        "integrity_valid": true,
+        "parquet_bytes": 12523674,
+        "manifest_file_sha256": "sha256:28a1208367737f71faf58992c875f8b4c9ef33499a02220aeef45ee607cc0825",
+        "parent_dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+        "factor_spec_hash": "sha256:bb82743c6a37f9aff52c85ec555c769b2fe41742dcb8d8f868a112458a2f70a8",
+        "source_factor_request_sha256": "sha256:421efc546a0cfcdcabcfb7cd128740afa93671519b1266db64c4302fa55b99ea"
+      }
+    ]
+  },
+  "synthetic_pagination": {
+    "symbol_count": 100,
+    "logical_hash_version": "logical-rows-f64-v1",
+    "independent_hash_match": true,
+    "sections_reconstructed_frames": [
+      {
+        "dataset_id": "sha256:9872eecf16f69c86dad450e8fa0d96a98e5cbda68771c1a5712f0f43b1a4eff2",
+        "section": "partition_manifest",
+        "rows": 100,
+        "pageCount": 1,
+        "maxMcpBytes": 34326,
+        "contentHash": "sha256:e4b1e35b8d9434758a87af98bdc4608ce78bab39960601f4fb46419a7b6c0e51"
+      },
+      {
+        "dataset_id": "sha256:9872eecf16f69c86dad450e8fa0d96a98e5cbda68771c1a5712f0f43b1a4eff2",
+        "section": "session_coverage_by_symbol",
+        "rows": 100,
+        "pageCount": 1,
+        "maxMcpBytes": 56752,
+        "contentHash": "sha256:f252a499d1fd839d1795d2b9eaf805c0f56dcd29ec09cf87793df9d32ca58066"
+      },
+      {
+        "dataset_id": "sha256:9872eecf16f69c86dad450e8fa0d96a98e5cbda68771c1a5712f0f43b1a4eff2",
+        "section": "exchange_mappings",
+        "rows": 100,
+        "pageCount": 2,
+        "maxMcpBytes": 2644514,
+        "contentHash": "sha256:cc97dfd52b2d9755c1beb024360e8493faa2d2cb06fa5d5f39903226f94948a0"
+      }
+    ],
+    "escape_heavy_raw_stdout_frames": {
+      "wire_budget_bytes": 4194304,
+      "short_id_bytes": 4120616,
+      "long_id_tool_bytes": 2188852,
+      "long_id_resource_bytes": 2188993,
+      "long_id_last_page_bytes": 2188581
+    }
+  },
+  "calendar_comparison": {
+    "scope": "XNYS only; not Nasdaq certification",
+    "oracle": "pandas_market_calendars",
+    "status": "UNRESOLVED_SESSION_BOUNDARIES",
+    "windows": [
+      {
+        "start": "1990-01-01",
+        "end_exclusive": "2012-01-01",
+        "version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "oracle_version": "5.1.3",
+        "shards": 23,
+        "runtime_sessions": 5547,
+        "oracle_sessions": 5547,
+        "same_provider_match": true,
+        "date_difference": [],
+        "time_differences": [
+          {
+            "date": "1990-12-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:31:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "1991-01-17",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:31:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "1991-02-25",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:31:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "1994-02-11",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:30:00",
+              "19:30:00"
+            ]
+          },
+          {
+            "date": "1995-12-18",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "15:30:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "1996-01-08",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "16:00:00",
+              "19:00:00"
+            ]
+          },
+          {
+            "date": "1997-10-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:30:00",
+              "20:30:00"
+            ]
+          },
+          {
+            "date": "1999-12-31",
+            "runtime_utc": [
+              "14:30:00",
+              "18:00:00"
+            ],
+            "oracle_utc": [
+              "14:30:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2001-09-17",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:33:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2001-10-08",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:31:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2002-09-11",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "16:00:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2003-03-20",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2004-06-07",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:32:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2005-06-01",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:30:00",
+              "19:56:00"
+            ]
+          },
+          {
+            "date": "2006-12-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          }
+        ]
+      },
+      {
+        "start": "2002-01-01",
+        "end_exclusive": "2012-01-01",
+        "version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+        "oracle_version": "5.1.3",
+        "shards": 1,
+        "runtime_sessions": 2519,
+        "oracle_sessions": 2519,
+        "same_provider_match": true,
+        "date_difference": [],
+        "time_differences": [
+          {
+            "date": "2002-09-11",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "16:00:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2003-03-20",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2004-06-07",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:32:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2005-06-01",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:30:00",
+              "19:56:00"
+            ]
+          },
+          {
+            "date": "2006-12-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "fresh": {
+      "test:quant": {
+        "passed": 403,
+        "skipped": 25
+      },
+      "test:quant-alpha": {
+        "passed": 194
+      },
+      "test:quant-alpha-scalability": {
+        "passed": 2
+      }
+    },
+    "sandbox_skip_reason": "No trusted QUANT_SANDBOX_IMAGE configured",
+    "previous_worktree_runs": [
+      "typecheck",
+      "build",
+      "test:quant-mcp",
+      "test:quant-alpha-mcp",
+      "test:quant-alpha-e2e",
+      "test:quant-data-validity",
+      "test:quant-regression",
+      "test:skills",
+      "test:plugin",
+      "verify:pack"
+    ],
+    "npm test": {
+      "status": "FAILED_ON_WORKTREE_AND_BASELINE",
+      "same_failure_labels": [
+        "FAIL  1. syncOne --full writes the fixture data into the target tables",
+        "FAIL  2. repeated full sync is idempotent (row counts stable, no duplicates)",
+        "FAIL  3. incremental sync updates the bar set and sync_state without duplicating",
+        "FAIL  4. options snapshot replacement is atomic: a bad row rolls the whole snapshot back",
+        "FAIL  5. a failing provider endpoint yields partial results without losing good data",
+        "FAIL  6. syncAll walks a non-empty instrument list and syncs each symbol",
+        "FAIL  7. syncSectors writes the ETF and sector rows for a seeded sector",
+        "FAIL  8. a NEW process reopens the database and continues incrementally",
+        "FAIL  10. provider priority: the primary wins, the fallback only fills NULL, and repeats are idempotent",
+        "FAIL  11. syncSectors({members:true}) writes real sector_members rows with DECIMAL weights",
+        "FAIL  13. a failing Investing response yields partial without losing the Yahoo data"
+      ],
+      "observed_upstream_http_403": [
+        "Yahoo",
+        "Investing"
+      ]
+    },
+    "a3_release": {
+      "exit_codes": {
+        "typecheck": 0,
+        "test:quant": 0,
+        "test:quant-alpha": 0,
+        "test:quant-mcp": 0,
+        "test:quant-alpha-mcp": 0,
+        "test:quant-alpha-e2e": 0,
+        "test:quant-alpha-scalability": 0,
+        "test:quant-data-validity": 0,
+        "test:quant-regression": 0,
+        "test:skills": 0,
+        "test:plugin": 0,
+        "verify:pack": 0,
+        "build": 0
+      },
+      "quant": {
+        "passed": 419,
+        "skipped": 25
+      },
+      "alpha": {
+        "passed": 210
+      },
+      "calendar_focused": {
+        "passed": 20
+      },
+      "quant_first_attempt": "418 passed, 25 skipped, 1 calendar provider mismatch guard test failed; fixed runtime metadata lookup before full rerun.",
+      "npm_test_exit": 1,
+      "npm_test_failure_labels_match_original_baseline": true
+    }
+  },
+  "calendar_comparison_revised": {
+    "scope": "Exact XNYS only; daily outer bounds, not intraday or execution attestation",
+    "policy": "xnys-daily-bounds-v1",
+    "status": "PARTIALLY_RECONCILED",
+    "unresolved_xnys_dates": [
+      "2001-10-08",
+      "2003-03-20",
+      "2004-06-07",
+      "2006-12-27"
+    ],
+    "remaining_documented_oracle_discrepancies": [
+      "1990-12-27",
+      "1999-12-31"
+    ],
+    "nasdaq_status": "UNVERIFIED",
+    "windows": [
+      {
+        "start": "1990-01-01",
+        "end_exclusive": "2012-01-01",
+        "version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6|xnys-daily-bounds-v1",
+        "oracle_version": "5.1.3",
+        "shards": 23,
+        "runtime_sessions": 5547,
+        "oracle_sessions": 5547,
+        "same_provider_match": false,
+        "date_difference": [],
+        "time_differences": [
+          {
+            "date": "1990-12-27",
+            "runtime_utc": [
+              "16:00:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:31:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "1999-12-31",
+            "runtime_utc": [
+              "14:30:00",
+              "18:00:00"
+            ],
+            "oracle_utc": [
+              "14:30:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2001-10-08",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:31:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2003-03-20",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2004-06-07",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:32:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2006-12-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          }
+        ]
+      },
+      {
+        "start": "2002-01-01",
+        "end_exclusive": "2012-01-01",
+        "version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6|xnys-daily-bounds-v1",
+        "oracle_version": "5.1.3",
+        "shards": 1,
+        "runtime_sessions": 2519,
+        "oracle_sessions": 2519,
+        "same_provider_match": false,
+        "date_difference": [],
+        "time_differences": [
+          {
+            "date": "2003-03-20",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          },
+          {
+            "date": "2004-06-07",
+            "runtime_utc": [
+              "13:30:00",
+              "20:00:00"
+            ],
+            "oracle_utc": [
+              "13:32:00",
+              "20:00:00"
+            ]
+          },
+          {
+            "date": "2006-12-27",
+            "runtime_utc": [
+              "14:30:00",
+              "21:00:00"
+            ],
+            "oracle_utc": [
+              "14:32:00",
+              "21:00:00"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "engineering_calendar_validation_runs": [
+    {
+      "venue_policy": "exact_xnys_revised",
+      "period": {
+        "start": "2002-01-01T00:00:00Z",
+        "end": "2012-01-01T00:00:00Z"
+      },
+      "listings_by_source_exchange": {
+        "NYSE": 53
+      },
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6|xnys-daily-bounds-v1",
+      "calendar_id": "sha256:52b2c4cb354923ed9cb632196f5e899ac3a437606f5d823e987e03035f908d1e",
+      "calendar_session_count": 2519,
+      "calendar_shard_count": 1,
+      "calendar_identity_rebuilt": true,
+      "stored_xnys_2005_06_01_end_utc_verified": true,
+      "manifest_file_sha256": "sha256:be56880558af9f45e0818d78bd7b60d2b64b5f34c3aeae56365494ea9b97e2eb",
+      "test_reads": 0,
+      "training_jobs": 0,
+      "jobs": [
+        {
+          "job_id": "alpha_404d9e16f4614a8faae0661fcd8ed5ad",
+          "dataset_id": "sha256:c60317b87b5437e77f5069c22c0a3921529e9a9872f04940737c85f62967b6ff",
+          "row_count": 133507,
+          "partition_count": 53,
+          "elapsed_ms": 7002,
+          "name": "prepare",
+          "integrity_valid": true,
+          "content_hash": "sha256:577bcd979b353fff9dcb56c442cf4174b3d45e5dcaf4e2b8b528ea486a3d08d1",
+          "reproducibility": {
+            "request_hash": "sha256:60da090b64d79453551faa2e207ad8554054e44d5c9e6454076f82ecebec0640",
+            "manifest_hash": "sha256:577bcd979b353fff9dcb56c442cf4174b3d45e5dcaf4e2b8b528ea486a3d08d1"
+          }
+        }
+      ]
+    },
+    {
+      "venue_policy": "exact_xnys_revised",
+      "period": {
+        "start": "1990-01-01T00:00:00Z",
+        "end": "2012-01-01T00:00:00Z"
+      },
+      "listings_by_source_exchange": {
+        "NYSE": 53
+      },
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6|xnys-daily-bounds-v1",
+      "calendar_id": "sha256:bb412482aebf51982cde81f3800ed4b8c4aaf250f4498e7d3bf5b91266a78848",
+      "calendar_session_count": 5547,
+      "calendar_shard_count": 23,
+      "calendar_identity_rebuilt": true,
+      "stored_xnys_2005_06_01_end_utc_verified": true,
+      "manifest_file_sha256": "sha256:9e0b469e2b20fc8d7845eca548491e38934690b914d1c5d121e48ea9b26be7a6",
+      "test_reads": 0,
+      "training_jobs": 0,
+      "jobs": [
+        {
+          "job_id": "alpha_03840b89ede84038b35836ebe2bf1ecc",
+          "dataset_id": "sha256:c7c3fd6b9915a857fa85edbefa221ec1b3cce514146ca307c7ca65cd59a23c09",
+          "row_count": 159618,
+          "partition_count": 53,
+          "elapsed_ms": 13916,
+          "name": "prepare",
+          "integrity_valid": true,
+          "content_hash": "sha256:3dee1fe2faf18d6d886527c594e5a5b583e9a675b4de5e07cec223b5813b513a",
+          "reproducibility": {
+            "request_hash": "sha256:7c77f42463f19cb50a6d8d5b977f69fb3c917166b5b3c7626f7876c8b7e63995",
+            "manifest_hash": "sha256:3dee1fe2faf18d6d886527c594e5a5b583e9a675b4de5e07cec223b5813b513a"
+          }
+        }
+      ]
+    },
+    {
+      "venue_policy": "mixed_legacy",
+      "period": {
+        "start": "2002-01-01T00:00:00Z",
+        "end": "2012-01-01T00:00:00Z"
+      },
+      "listings_by_source_exchange": {
+        "NasdaqGS": 28,
+        "NYSE": 52
+      },
+      "calendar_version": "exchange_calendars:4.13.2|pandas:3.1.1|tzdata:2026.6",
+      "calendar_id": "sha256:60c724478b0bbf858f6156b908e1629f1dfc5bc5fe98ee519c9632859c99b737",
+      "calendar_session_count": 2519,
+      "calendar_shard_count": 1,
+      "calendar_identity_rebuilt": true,
+      "stored_xnys_2005_06_01_end_utc_verified": false,
+      "manifest_file_sha256": "sha256:5694885421c5940eb19af68b948f620d4052c34d81cbae087c56c2beec82c6ac",
+      "test_reads": 0,
+      "training_jobs": 0,
+      "jobs": [
+        {
+          "job_id": "alpha_d15d36ba38a947349391e45ea399316b",
+          "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+          "row_count": 201520,
+          "partition_count": 80,
+          "elapsed_ms": 9829,
+          "name": "prepare",
+          "integrity_valid": true,
+          "content_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd",
+          "reproducibility": {
+            "request_hash": "sha256:afd2e15265663d5d2477c48d44dcb2c712d41e67a64319bcfaf2cf1bb7e53426",
+            "manifest_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd"
+          }
+        },
+        {
+          "job_id": "alpha_fe39651ea3c54838a4d18c11dd769b7b",
+          "dataset_id": "sha256:a710f828755bfc20ce5022275aed78f7f688a153ab696c50706fc7c831a004fd",
+          "row_count": 604560,
+          "partition_count": 3,
+          "elapsed_ms": 8750,
+          "name": "H01",
+          "integrity_valid": true,
+          "content_hash": "sha256:69ed40cb83ee26dcf3bd723120fe72cfb2290f665e83a190678bf4a752044fd7",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb"
+          }
+        },
+        {
+          "job_id": "alpha_6c8bcb0085fa42a8b4bdbcf838f47cf3",
+          "dataset_id": "sha256:718bfdffa1fa2e931b9fcde99d12ca793fdb5d94c9e3823429bc96c6c2e3001e",
+          "row_count": 604560,
+          "partition_count": 3,
+          "elapsed_ms": 6497,
+          "name": "H02",
+          "integrity_valid": true,
+          "content_hash": "sha256:35625739b6b1813739f8823c9b051d3e9d956af5ff7cb04986f8cd9d51d59680",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56"
+          }
+        },
+        {
+          "job_id": "alpha_e2a21412f1f84ac5a1e9e5dad56cdbcc",
+          "dataset_id": "sha256:99a4b1a088026d441467f3c896e3075432f204c9f1fbc64927fc12a743fdfd1a",
+          "row_count": 403040,
+          "partition_count": 2,
+          "elapsed_ms": 6301,
+          "name": "H03",
+          "integrity_valid": true,
+          "content_hash": "sha256:4d4f51f32dd5e7bcdb486b02d9878b71a726af061f21a6ebd66c666f9d4ed76a",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb"
+          }
+        },
+        {
+          "job_id": "alpha_c0096917a98b4c32b556efa633cab63e",
+          "dataset_id": "sha256:c738edea576877bd96fe431746ffa86eaa718f281617a5bf8def55827d0ffd18",
+          "row_count": 604560,
+          "partition_count": 3,
+          "elapsed_ms": 6270,
+          "name": "H04",
+          "integrity_valid": true,
+          "content_hash": "sha256:bbedefb0eaea17a972f4f57a26e5b51278b44cf44319b332377edb53071c444f",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d"
+          }
+        },
+        {
+          "job_id": "alpha_7304c0b70fe245f995a69345ae824646",
+          "dataset_id": "sha256:dcdd37138fe491de079e56bd811abd2e693251427a886396cf90c0bed6c25671",
+          "row_count": 806080,
+          "partition_count": 4,
+          "elapsed_ms": 6208,
+          "name": "H05",
+          "integrity_valid": true,
+          "content_hash": "sha256:9db06021789d820e74872ab69c8b74c55ce3cf4b89f1c65d915433fd514ebda9",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac"
+          }
+        },
+        {
+          "job_id": "alpha_95f4281c2900477d837698c1b3fb8640",
+          "dataset_id": "sha256:2de8d40d3f03daa1e52db1223ee6ea26d0bb39070121b43267df1c05a2665e82",
+          "row_count": 1410640,
+          "partition_count": 7,
+          "elapsed_ms": 7562,
+          "name": "H06",
+          "integrity_valid": true,
+          "content_hash": "sha256:5626fbdfd908dd2f3b51be7962f060fbf3b728d1137a99d83ab58a80816a3d97",
+          "reproducibility": {
+            "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+            "factor_spec_hash": "sha256:bb82743c6a37f9aff52c85ec555c769b2fe41742dcb8d8f868a112458a2f70a8"
+          }
+        }
+      ]
+    }
+  ],
+  "post_review_verification": {
+    "independent_review": {
+      "initial_disposition": "REQUEST_CHANGES",
+      "no_initial_findings_in": [
+        "publication receipts",
+        "cancellation and lease isolation",
+        "cursor binding"
+      ],
+      "corrections": [
+        "Pass the full MCP training input object schema so invalid and unknown fields reach rejection audit before enqueue.",
+        "Reconstruct saved calendar date bounds and exchange; compare all rebuilt shards and persist single-shard metadata only when required.",
+        "Account for array brackets and separators without increasing Python or MCP payload budgets.",
+        "Cap MCP Job results only; share serialization across begin_publish and finish and preserve general Parquet storage limits.",
+        "Resolve aliases without constructing a second provider schedule per shard."
+      ],
+      "post_fix_disposition": "REVIEWED_CORRECTIONS_APPROVED",
+      "post_fix_review": {
+        "scope": "Final targeted re-review of the two remaining P2 findings from the post-fix pass only.",
+        "remaining_findings": [],
+        "closed_findings": [
+          "Preserve the advertised MCP training fields and required list while auditing omitted arguments and explicit empty objects before Job creation.",
+          "Preserve the short UTC XNAS/XNAS calendar replay identity without an extra provider schedule or changed session values."
+        ],
+        "historical_oracle_acceptance": "OPEN",
+        "release_scope_blocker": "Four silence-only XNYS dates and an independent full-window Nasdaq calendar remain unresolved."
+      }
+    },
+    "red_green": {
+      "focused_python_red": {
+        "failed": 6,
+        "passed": 30
+      },
+      "focused_python_green": {
+        "passed": 53,
+        "scope": "before adding direct finish path coverage"
+      },
+      "stdio_mcp_red": {
+        "failed": 1,
+        "unexpected_jobs": 1
+      },
+      "stdio_mcp_green": {
+        "passed": 1,
+        "invalid_requests_audited": 6,
+        "invalid_request_jobs": 0,
+        "valid_fixture_training_completed": true
+      },
+      "final_targeted_red": {
+        "calendar_alias_failure": {
+          "failed": 1,
+          "passed": 2,
+          "observed": "XNAS/XNAS replay returned the XNYS exchange and a different calendar ID."
+        },
+        "stdio_mcp_failure": {
+          "failed": 1,
+          "advertised_required_fields_missing": true,
+          "omitted_arguments_entered_audited_validator": false,
+          "jobs_created": 0
+        }
+      },
+      "final_targeted_green": {
+        "calendar_file": {
+          "passed": 23,
+          "failed": 0,
+          "alias_session_values_unchanged": true,
+          "alias_round_trip_identity_preserved": true
+        },
+        "stdio_mcp": {
+          "passed": 1,
+          "advertised_field_count": 9,
+          "required_fields": [
+            "feature_set_id",
+            "label_spec",
+            "windows"
+          ],
+          "omitted_and_explicit_empty_arguments_audited": 2,
+          "jobs_from_omitted_or_empty_arguments": 0,
+          "all_invalid_requests_audited": 8,
+          "valid_fixture_training_completed": true
+        }
+      }
+    },
+    "release": {
+      "exit_codes": {
+        "typecheck": 0,
+        "build": 0,
+        "test:quant": 0,
+        "test:quant-alpha": 0,
+        "test:quant-mcp": 0,
+        "test:quant-alpha-mcp": 0,
+        "test:quant-alpha-e2e": 0,
+        "test:quant-alpha-scalability": 0,
+        "test:quant-data-validity": 0,
+        "test:quant-regression": 0,
+        "test:skills": 0,
+        "test:plugin": 0,
+        "verify:pack": 0
+      },
+      "quant": {
+        "passed": 429,
+        "skipped": 25
+      },
+      "alpha": {
+        "passed": 220,
+        "skipped": 0
+      },
+      "quant_regression": {
+        "passed": 429,
+        "skipped": 25
+      },
+      "alpha_mcp": {
+        "pass": 3,
+        "fail": 0,
+        "skipped": 0
+      },
+      "alpha_e2e": {
+        "pass": 1,
+        "fail": 0,
+        "skipped": 0
+      },
+      "alpha_scalability": {
+        "pass": 2,
+        "fail": 0,
+        "skipped": 0
+      },
+      "sandbox_skip_reason": "No trusted QUANT_SANDBOX_IMAGE configured",
+      "npm_test_exit": 1,
+      "npm_test_failed_suite": "test:sqlite-sync-e2e",
+      "npm_test_baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",
+      "npm_test_failure_labels_match_saved_original_baseline": true,
+      "npm_test_failure_label_count": 11,
+      "comparison_scope": "Failure labels only; not byte-identical logs. Full npm test is not green.",
+      "npm_test_postfix_rerun_exit": 1,
+      "npm_test_postfix_rerun_failed_suite": "test:sqlite-sync-e2e",
+      "npm_test_postfix_rerun_failure_label_count": 11,
+      "npm_test_postfix_rerun_failure_labels_match_saved_original_baseline": true,
+      "npm_test_postfix_rerun_comparison_scope": "Failure labels only against the saved original baseline at 5b4ece4; not byte-identical logs. Full npm test is not green."
+    },
+    "real_mcp_reruns": {
+      "scope": "Real Yahoo-source local development data: preparation and factor materialization only.",
+      "matched_fields": [
+        "dataset_id",
+        "content_hash",
+        "row_count",
+        "partition_count",
+        "reproducibility"
+      ],
+      "all_identity_fields_matched": true,
+      "dataset_count_per_round": 9,
+      "independently_hashed_partition_count_per_round": 208,
+      "verified_partition_file_sha256_and_byte_size_in_both_rounds": true,
+      "all_prepared_calendar_ids_and_counts_rebuilt": true,
+      "training_jobs": 0,
+      "reserved_test_reads": 0,
+      "runs": [
+        {
+          "run": "xnys-only",
+          "calendar_id": "sha256:52b2c4cb354923ed9cb632196f5e899ac3a437606f5d823e987e03035f908d1e",
+          "calendar_session_count": 2519,
+          "calendar_shard_count": 1,
+          "manifest_file_sha256": "sha256:c194548e66c5e3863cf9be61c6adea2e2dacd9bbb5c58db0986c048a3a23a827",
+          "dataset_count": 1,
+          "partition_count": 53,
+          "test_reads": 0,
+          "training_jobs": 0,
+          "jobs": [
+            {
+              "job_id": "alpha_b8193b8def474311bf0b50522df24d28",
+              "dataset_id": "sha256:c60317b87b5437e77f5069c22c0a3921529e9a9872f04940737c85f62967b6ff",
+              "row_count": 133507,
+              "partition_count": 53,
+              "elapsed_ms": 6571,
+              "name": "prepare",
+              "integrity_valid": true,
+              "content_hash": "sha256:577bcd979b353fff9dcb56c442cf4174b3d45e5dcaf4e2b8b528ea486a3d08d1",
+              "reproducibility": {
+                "request_hash": "sha256:60da090b64d79453551faa2e207ad8554054e44d5c9e6454076f82ecebec0640",
+                "manifest_hash": "sha256:577bcd979b353fff9dcb56c442cf4174b3d45e5dcaf4e2b8b528ea486a3d08d1"
+              }
+            }
+          ]
+        },
+        {
+          "run": "xnys-only-long",
+          "calendar_id": "sha256:bb412482aebf51982cde81f3800ed4b8c4aaf250f4498e7d3bf5b91266a78848",
+          "calendar_session_count": 5547,
+          "calendar_shard_count": 23,
+          "manifest_file_sha256": "sha256:bda4daab4b8c58bc58ebd548c86796d0e63527e11a6592ff9758a8a11f59487d",
+          "dataset_count": 1,
+          "partition_count": 53,
+          "test_reads": 0,
+          "training_jobs": 0,
+          "jobs": [
+            {
+              "job_id": "alpha_8bcd8f5b84994c40876c38846fdba2d9",
+              "dataset_id": "sha256:c7c3fd6b9915a857fa85edbefa221ec1b3cce514146ca307c7ca65cd59a23c09",
+              "row_count": 159618,
+              "partition_count": 53,
+              "elapsed_ms": 11755,
+              "name": "prepare",
+              "integrity_valid": true,
+              "content_hash": "sha256:3dee1fe2faf18d6d886527c594e5a5b583e9a675b4de5e07cec223b5813b513a",
+              "reproducibility": {
+                "request_hash": "sha256:7c77f42463f19cb50a6d8d5b977f69fb3c917166b5b3c7626f7876c8b7e63995",
+                "manifest_hash": "sha256:3dee1fe2faf18d6d886527c594e5a5b583e9a675b4de5e07cec223b5813b513a"
+              }
+            }
+          ]
+        },
+        {
+          "run": "acceptance",
+          "calendar_id": "sha256:60c724478b0bbf858f6156b908e1629f1dfc5bc5fe98ee519c9632859c99b737",
+          "calendar_session_count": 2519,
+          "calendar_shard_count": 1,
+          "manifest_file_sha256": "sha256:0c2176a8355b5a754ece71a5b50bb6cbff7a79f6b93c7703398941abd181c677",
+          "dataset_count": 7,
+          "partition_count": 102,
+          "test_reads": 0,
+          "training_jobs": 0,
+          "jobs": [
+            {
+              "job_id": "alpha_274dba9b0fad4f629fa63d71396b09ff",
+              "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+              "row_count": 201520,
+              "partition_count": 80,
+              "elapsed_ms": 7796,
+              "name": "prepare",
+              "integrity_valid": true,
+              "content_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd",
+              "reproducibility": {
+                "request_hash": "sha256:afd2e15265663d5d2477c48d44dcb2c712d41e67a64319bcfaf2cf1bb7e53426",
+                "manifest_hash": "sha256:7a275c8521a2652c1820d684a92f71c9c3a5e3cee4f7b17f363258bd8d438fcd"
+              }
+            },
+            {
+              "job_id": "alpha_1601661587c54ee5b410c4d3758c4fc0",
+              "dataset_id": "sha256:a710f828755bfc20ce5022275aed78f7f688a153ab696c50706fc7c831a004fd",
+              "row_count": 604560,
+              "partition_count": 3,
+              "elapsed_ms": 6249,
+              "name": "H01",
+              "integrity_valid": true,
+              "content_hash": "sha256:69ed40cb83ee26dcf3bd723120fe72cfb2290f665e83a190678bf4a752044fd7",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:08e21c2e97e7e0e58433a41dd06ef2880117fc5ba43cc3b7f6d2fb5e065aa4bb"
+              }
+            },
+            {
+              "job_id": "alpha_5ba2b03b15f5494fbf1feed8ae047372",
+              "dataset_id": "sha256:718bfdffa1fa2e931b9fcde99d12ca793fdb5d94c9e3823429bc96c6c2e3001e",
+              "row_count": 604560,
+              "partition_count": 3,
+              "elapsed_ms": 6219,
+              "name": "H02",
+              "integrity_valid": true,
+              "content_hash": "sha256:35625739b6b1813739f8823c9b051d3e9d956af5ff7cb04986f8cd9d51d59680",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:73648870e7472950e6311bab720c1ad40fd495236d35339110bf3533dce0bc56"
+              }
+            },
+            {
+              "job_id": "alpha_7287a15dc55640b998148fdf4c325916",
+              "dataset_id": "sha256:99a4b1a088026d441467f3c896e3075432f204c9f1fbc64927fc12a743fdfd1a",
+              "row_count": 403040,
+              "partition_count": 2,
+              "elapsed_ms": 6271,
+              "name": "H03",
+              "integrity_valid": true,
+              "content_hash": "sha256:4d4f51f32dd5e7bcdb486b02d9878b71a726af061f21a6ebd66c666f9d4ed76a",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:89521fe39e417c69ea6b5ee223d9e69350ddd3ab2a18d978339805af4befcfeb"
+              }
+            },
+            {
+              "job_id": "alpha_65042d1a283e4bdbb2d3ab84cf67a7a9",
+              "dataset_id": "sha256:c738edea576877bd96fe431746ffa86eaa718f281617a5bf8def55827d0ffd18",
+              "row_count": 604560,
+              "partition_count": 3,
+              "elapsed_ms": 6287,
+              "name": "H04",
+              "integrity_valid": true,
+              "content_hash": "sha256:bbedefb0eaea17a972f4f57a26e5b51278b44cf44319b332377edb53071c444f",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:3f25ed2b0275a69e594d1218c15ed6ce093766a26c75c2290f7ac5c85a53530d"
+              }
+            },
+            {
+              "job_id": "alpha_08084f52c85041349adbbb231644ec66",
+              "dataset_id": "sha256:dcdd37138fe491de079e56bd811abd2e693251427a886396cf90c0bed6c25671",
+              "row_count": 806080,
+              "partition_count": 4,
+              "elapsed_ms": 6539,
+              "name": "H05",
+              "integrity_valid": true,
+              "content_hash": "sha256:9db06021789d820e74872ab69c8b74c55ce3cf4b89f1c65d915433fd514ebda9",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:9812af8235c3c1f8424857a806bb34e0bd0574f97aa70409ff312e166368afac"
+              }
+            },
+            {
+              "job_id": "alpha_da82649bce914af9b80edba7fd90ac9f",
+              "dataset_id": "sha256:2de8d40d3f03daa1e52db1223ee6ea26d0bb39070121b43267df1c05a2665e82",
+              "row_count": 1410640,
+              "partition_count": 7,
+              "elapsed_ms": 7964,
+              "name": "H06",
+              "integrity_valid": true,
+              "content_hash": "sha256:5626fbdfd908dd2f3b51be7962f060fbf3b728d1137a99d83ab58a80816a3d97",
+              "reproducibility": {
+                "dataset_id": "sha256:0a12a78381689b2031a85d98bab4d8c3ced92962e1d32791acd7877596f34f53",
+                "factor_spec_hash": "sha256:bb82743c6a37f9aff52c85ec555c769b2fe41742dcb8d8f868a112458a2f70a8"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "subagent_full_review": {
+    "reviewer_scope": "Independent review of the complete working-tree delta, including non-results, production call paths, tests, CI and evidence.",
+    "initial_verdict": "WITH_FIXES",
+    "findings": [
+      {
+        "severity": "Important",
+        "status": "CLOSED_AFTER_TARGETED_REREVIEW",
+        "summary": "Job result pages used a 3,000,000-byte budget and Job artifact admission omitted the array delimiters, violating the frozen 2,500,000-byte page budget at the exact boundary.",
+        "red": {
+          "failed": 2,
+          "passed": 1
+        },
+        "green": {
+          "passed": 3,
+          "failed": 0
+        },
+        "production_paths": [
+          "quant/src/stock_quant/jobs.py",
+          "quant/src/stock_quant/artifacts.py"
+        ],
+        "regression": "quant/tests/alpha/test_scalability.py::test_job_artifact_admission_and_result_page_share_array_budget",
+        "boundary_cases": {
+          "2499998_row_bytes": "accepted; paged array is 2500000 bytes",
+          "2499999_row_bytes": "rejected before publication",
+          "2500000_row_bytes": "rejected before publication"
+        },
+        "ordinary_artifact_storage_budget_unchanged": true
+      }
+    ],
+    "targeted_rereview": {
+      "disposition": "FINDING_CLOSED",
+      "new_findings": [],
+      "verified_by_subagent": true
+    },
+    "declined_to_judge": [
+      "Long suites were not rerun by the reviewer; release evidence was checked separately.",
+      "Yahoo real-data preparation and independent calendar oracle were not rerun.",
+      "A3 historical calendar acceptance remains BLOCKED.",
+      "PR B diagnostics correctness was not reviewed."
+    ],
+    "post_fix_release": {
+      "all_13_release_commands_exit_zero": true,
+      "quant_passed": 429,
+      "quant_skipped": 25,
+      "alpha_passed": 220,
+      "alpha_skipped": 0,
+      "alpha_e2e_pass": 1,
+      "alpha_scalability_pass": 2,
+      "npm_test_exit": 1,
+      "npm_test_failed_suite": "test:sqlite-sync-e2e",
+      "npm_test_failure_label_count": 11,
+      "npm_test_failure_labels_match_saved_original_baseline": true,
+      "comparison_scope": "Failure labels only; full npm test is not green."
+    }
+  }
+}

@@ -4,6 +4,18 @@ import { delimiter } from "node:path";
 
 let activeRequests = 0;
 const runtimePath = fileURLToPath(new URL("../../quant/src", import.meta.url));
+export const MAX_QUANT_FRAME_BYTES = 4_194_304;
+
+export function quantFrameBytes(result: unknown, id: string | number): number {
+  return Buffer.byteLength(JSON.stringify({jsonrpc: "2.0", id, result})) + 1;
+}
+
+export function checkedQuantResponse<T>(result: T, id: string | number): T {
+  if (quantFrameBytes(result, id) > MAX_QUANT_FRAME_BYTES) {
+    throw new Error("RESOURCE_LIMIT_EXCEEDED: quant MCP response exceeds 4 MiB");
+  }
+  return result;
+}
 
 /** Trusted control RPC; Python artifacts remain data until an isolated worker loads them. */
 export async function quantRequest(request: Record<string, unknown>): Promise<unknown> {
@@ -32,7 +44,7 @@ export async function quantRequest(request: Record<string, unknown>): Promise<un
     child.stdin.on("error", fail);
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 4_194_304) return fail(new Error("RESOURCE_LIMIT_EXCEEDED: quant response exceeds 4 MiB"));
+      if (size > MAX_QUANT_FRAME_BYTES) return fail(new Error("RESOURCE_LIMIT_EXCEEDED: quant response exceeds 4 MiB"));
       chunks.push(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < 4096) stderr += chunk.toString().slice(0, 4096 - stderr.length); });
