@@ -79,7 +79,7 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
 
   server.tool(
     "quant_evaluate_alpha_signal",
-    "Submit a deterministic development-only direct-factor Rank IC diagnostic. Reads stock and feature windows inside the Validation development boundary and never reads reserved Test artifacts.",
+    "Submit a deterministic development-only direct-factor diagnostic with daily Rank IC, mapped weekly-last-session Rank IC, and frozen Top20 forward-label groups. Reads only development windows and never reads reserved Test artifacts.",
     evaluateAlphaSignalInput.shape,
     async (args) => {
       const { windows, ...rest } = args;

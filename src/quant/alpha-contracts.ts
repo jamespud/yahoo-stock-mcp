@@ -82,7 +82,9 @@ export const evaluateAlphaSignalInput = z.object({
   windows: developmentWindows,
   evaluation_window: signalEvaluationWindow,
   signal_spec: directSignalSpec,
-}).strict();
+}).strict().describe(
+  "Direct signal diagnostics always include daily Rank IC, mapped weekly-last-session Rank IC, and frozen Top20 forward-label groups; there is no caller-selectable TopN.",
+);
 
 export const prepareAlphaDatasetInput = z.object({
   source: z.enum(["yahoo"]),

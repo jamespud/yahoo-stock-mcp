@@ -364,7 +364,10 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     await done(signal.job_id);
     const summary = await call("quant_get_result", {job_id: signal.job_id, section: "summary"});
     for (const key of ["signal_spec_hash", "feature_set_id", "label_version", "evaluation_window",
-      "rank_ic_by_decision", "rank_ic_mean", "icir", "coverage", "excluded_opportunities"]) {
+      "rank_ic_by_decision", "rank_ic_mean", "icir", "coverage", "excluded_opportunities",
+      "weekly_rank_ic_mean", "weekly_valid_decision_count", "weekly_sample_count",
+      "weekly_prediction_coverage", "weekly_label_coverage", "weekly_coverage",
+      "top20_forward_label_summary"]) {
       assert.ok(key in summary, key);
     }
     assert.equal(summary.feature_set_id, factorDataset.dataset_id);
@@ -378,6 +381,15 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
       job_id: signal.job_id, section: "rank_ic_by_decision", limit: 2, cursor: firstPage.next_cursor,
     });
     assert.equal(secondPage.rows.length, 2);
+    const weeklyPage = await call("quant_get_result", {job_id: signal.job_id, section: "weekly_rank_ic", limit: 1});
+    assert.equal(weeklyPage.total_count, summary.weekly_decision_count);
+    assert.equal(weeklyPage.rows.length, 1);
+    assert.ok(weeklyPage.next_cursor);
+    const top20Page = await call("quant_get_result", {job_id: signal.job_id, section: "top20_forward_labels", limit: 1});
+    assert.equal(top20Page.total_count, summary.top20_forward_label_summary.decision_count);
+    assert.equal(top20Page.rows.length, 1);
+    assert.equal(top20Page.rows[0].analysis_label, "predictive_label_analysis_not_executable_backtest");
+    assert.ok(top20Page.rows[0].exclusion_reasons.includes("INSUFFICIENT_TOP20_NAMES"));
     const misbound = await client.callTool({name: "quant_get_result", arguments: {
       job_id: signal.job_id, section: "summary", cursor: firstPage.next_cursor,
     }});
@@ -386,6 +398,8 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     assert.equal(reproducibility.signal_spec_hash, summary.signal_spec_hash);
     assert.deepEqual(reproducibility.coverage, summary.coverage);
     assert.equal(reproducibility.excluded_opportunities, summary.excluded_opportunities);
+    assert.deepEqual(reproducibility.weekly_decision_dates, summary.weekly_decision_dates);
+    assert.deepEqual(reproducibility.top20_forward_label_summary, summary.top20_forward_label_summary);
     assert.equal(reproducibility.reserved_test_start, "2012-01-01T00:00:00+00:00");
     const request = JSON.parse(execFileSync(python, ["-c",
       "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute('select request from jobs where id=?',(sys.argv[2],)).fetchone(); print(json.dumps(json.loads(row[0])))",

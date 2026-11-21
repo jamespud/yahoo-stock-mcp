@@ -173,6 +173,7 @@ def _request(stock, feature_set) -> dict:
         (lambda value: value.update(evaluation_window={"start": "2009-02-02T00:00:00Z", "end": "2009-02-02T23:59:59Z"}), "UTC midnight"),
         (lambda value: value.update(evaluation_window={"start": "2009-02-02T12:00:00Z", "end": "2009-02-03T00:00:00Z"}), "UTC midnight"),
         (lambda value: value["split"].update(validation_end="2012-01-02T00:00:00Z"), "must not enter reserved Test"),
+        (lambda value: value.update(top_n=20), "Extra inputs are not permitted"),
     ],
 )
 def test_signal_job_rejects_invalid_admission_before_enqueue(tmp_path, mutation, reason):
@@ -283,6 +284,10 @@ def test_signal_job_reads_only_development_windows_and_returns_paginated_diagnos
         assert {
             "signal_spec_hash", "feature_set_id", "label_version", "evaluation_window",
             "rank_ic_by_decision", "rank_ic_mean", "icir", "coverage", "excluded_opportunities",
+            "daily_decision_count", "daily_sample_count", "daily_prediction_coverage", "daily_label_coverage",
+            "weekly_rank_ic_mean", "weekly_valid_decision_count", "weekly_sample_count",
+            "weekly_prediction_coverage", "weekly_label_coverage", "weekly_coverage",
+            "top20_forward_label_summary",
         } <= set(summary)
         assert summary["feature_set_id"] == feature_set.dataset_id
         assert summary["stock_dataset_id"] == stock.dataset_id
@@ -292,9 +297,17 @@ def test_signal_job_reads_only_development_windows_and_returns_paginated_diagnos
             "end": _at(EVALUATION_END).isoformat(),
         }
         assert summary["decision_count"] == len(sessions)
+        assert summary["daily_decision_count"] == len(sessions)
+        assert summary["daily_sample_count"] == summary["coverage"]["valid_matched_opportunities"]
         assert summary["coverage"]["conservation_holds"] is True
         assert summary["excluded_opportunities"] == summary["coverage"]["excluded_opportunities"]
         assert all(row["rank_ic"] is not None for row in summary["rank_ic_by_decision"])
+        assert summary["weekly_decision_count"] < summary["daily_decision_count"]
+        assert summary["weekly_coverage"]["expected_date_count"] == summary["weekly_decision_count"]
+        assert summary["weekly_coverage"] is not summary["coverage"]
+        assert summary["top20_forward_label_summary"]["analysis_label"] == (
+            "predictive_label_analysis_not_executable_backtest"
+        )
 
         page = jobs.get_result(submitted["job_id"], "rank_ic_by_decision", limit=2)
         assert page["total_count"] == len(sessions)
@@ -306,6 +319,22 @@ def test_signal_job_reads_only_development_windows_and_returns_paginated_diagnos
         assert [*page["rows"], *tail["rows"]] == summary["rank_ic_by_decision"]
         assert tail["next_cursor"] is None
 
+        weekly_page = jobs.get_result(submitted["job_id"], "weekly_rank_ic", limit=1)
+        assert weekly_page["total_count"] == summary["weekly_decision_count"]
+        assert len(weekly_page["rows"]) == 1
+        assert weekly_page["next_cursor"]
+        weekly_tail = jobs.get_result(
+            submitted["job_id"], "weekly_rank_ic", limit=1000, cursor=weekly_page["next_cursor"],
+        )
+        assert len([*weekly_page["rows"], *weekly_tail["rows"]]) == summary["weekly_decision_count"]
+        assert weekly_tail["next_cursor"] is None
+
+        top20_page = jobs.get_result(submitted["job_id"], "top20_forward_labels", limit=1)
+        assert top20_page["total_count"] == summary["top20_forward_label_summary"]["decision_count"]
+        assert len(top20_page["rows"]) == 1
+        assert top20_page["rows"][0]["analysis_label"] == "predictive_label_analysis_not_executable_backtest"
+        assert "INSUFFICIENT_TOP20_NAMES" in top20_page["rows"][0]["exclusion_reasons"]
+
         reproducibility = jobs.get_result(submitted["job_id"], "reproducibility")
         assert reproducibility["signal_spec_hash"] == summary["signal_spec_hash"]
         assert reproducibility["source_windows"]["feature_end"] == _at(EVALUATION_END).isoformat()
@@ -313,6 +342,8 @@ def test_signal_job_reads_only_development_windows_and_returns_paginated_diagnos
         assert reproducibility["label_version"] == "session-aligned-v2"
         assert reproducibility["coverage"] == summary["coverage"]
         assert reproducibility["excluded_opportunities"] == summary["excluded_opportunities"]
+        assert reproducibility["weekly_decision_dates"] == summary["weekly_decision_dates"]
+        assert reproducibility["top20_forward_label_summary"] == summary["top20_forward_label_summary"]
         assert reproducibility["reserved_test_start"] == TEST_START.isoformat()
 
     feature_reads = [item for item in observed_reads if item[0] == feature_set.dataset_id]

@@ -33,7 +33,13 @@ from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
-from ..models.signal_diagnostics import evaluate_direct_signal, expected_session_dates
+from ..models.signal_diagnostics import (
+    ANALYSIS_LABEL,
+    evaluate_direct_signal,
+    evaluate_weekly_signal,
+    expected_session_dates,
+    top20_forward_diagnostics,
+)
 from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
@@ -236,6 +242,20 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 expected_sessions=expected_sessions,
                 spec=request.signal_spec,
             )
+            weekly = evaluate_weekly_signal(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
+            top20 = top20_forward_diagnostics(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
             bounded(.95)
             evaluation_window = {
                 "start": request.evaluation_window.start.isoformat(),
@@ -243,6 +263,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             }
             summary = {
                 **diagnostics["summary"],
+                **weekly["summary"],
                 "feature_set_id": request.feature_set_id,
                 "stock_dataset_id": request.stock_dataset_id,
                 "label_name": request.label_name,
@@ -250,6 +271,11 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "target_type": request.target_type,
                 "horizon_days": request.horizon_days,
                 "evaluation_window": evaluation_window,
+                "daily_decision_count": diagnostics["summary"]["decision_count"],
+                "daily_sample_count": diagnostics["coverage"]["valid_matched_opportunities"],
+                "daily_prediction_coverage": diagnostics["coverage"]["prediction_coverage"],
+                "daily_label_coverage": diagnostics["coverage"]["label_coverage"],
+                "top20_forward_label_summary": top20["summary"],
             }
             source_windows = {
                 "feature_start": request.evaluation_window.start.isoformat(),
@@ -260,6 +286,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             result = {
                 "summary": summary,
                 "rank_ic_by_decision": diagnostics["rank_ic_by_decision"],
+                "weekly_rank_ic": weekly["weekly_rank_ic"],
+                "top20_forward_labels": top20["top20_forward_labels"],
                 "reproducibility": {
                     "signal_spec": request.signal_spec.model_dump(mode="json"),
                     "signal_spec_hash": summary["signal_spec_hash"],
@@ -275,6 +303,18 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "source_windows": source_windows,
                     "coverage": diagnostics["coverage"],
                     "excluded_opportunities": summary["excluded_opportunities"],
+                    "daily_decision_count": summary["daily_decision_count"],
+                    "daily_sample_count": summary["daily_sample_count"],
+                    "daily_prediction_coverage": summary["daily_prediction_coverage"],
+                    "daily_label_coverage": summary["daily_label_coverage"],
+                    "weekly_decision_dates": summary["weekly_decision_dates"],
+                    "weekly_decision_count": summary["weekly_decision_count"],
+                    "weekly_sample_count": summary["weekly_sample_count"],
+                    "weekly_prediction_coverage": summary["weekly_prediction_coverage"],
+                    "weekly_label_coverage": summary["weekly_label_coverage"],
+                    "weekly_coverage": summary["weekly_coverage"],
+                    "top20_forward_label_summary": summary["top20_forward_label_summary"],
+                    "analysis_label": ANALYSIS_LABEL,
                     "reserved_test_start": RESERVED_TEST_START.isoformat(),
                 },
             }

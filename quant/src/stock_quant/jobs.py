@@ -582,7 +582,7 @@ class JobStore(Registry):
         return self.get_job(job_id)
 
     def get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
-        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "rank_ic_by_decision", "portfolio_metrics", "target_weights", "trades")
+        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "rank_ic_by_decision", "weekly_rank_ic", "top20_forward_labels", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
         job = self.get_job(job_id)

@@ -13,8 +13,11 @@ from stock_quant.alpha.models.labels import LabelRow
 from stock_quant.alpha.models.signal_diagnostics import (
     DirectSignalSpec,
     evaluate_direct_signal,
+    evaluate_weekly_signal,
     expected_session_dates,
     signal_spec_hash,
+    top20_forward_diagnostics,
+    weekly_last_session_dates,
 )
 
 UTC = timezone.utc
@@ -25,13 +28,17 @@ DECISION_AT = {
 }
 
 
+def _decision_at(session: date) -> datetime:
+    return DECISION_AT.get(session, datetime.combine(session, time(21, 5), tzinfo=UTC))
+
+
 def _feature(session: date, instrument: str, value: float | None, *, factor_name="mom63") -> dict:
     return {
-        "decision_at": DECISION_AT[session],
+        "decision_at": _decision_at(session),
         "instrument_id": instrument,
         "factor_name": factor_name,
         "factor_value": value,
-        "feature_available_at": DECISION_AT[session],
+        "feature_available_at": _decision_at(session),
         "eligible": value is not None,
         "quality_flags": [] if value is not None else ["NULL_FACTOR"],
         "factor_version": "fixture-v1",
@@ -45,7 +52,7 @@ def _label(
     *,
     quality: list[str] | None = None,
 ) -> LabelRow:
-    decision_at = DECISION_AT[session]
+    decision_at = _decision_at(session)
     return LabelRow(
         feature_decision_at=decision_at,
         entry_at=decision_at + timedelta(days=1),
@@ -251,3 +258,227 @@ def test_signal_spec_hash_is_stable_and_direction_sensitive():
 def test_direct_signal_spec_rejects_non_literal_multipliers(value):
     with pytest.raises(ValidationError):
         DirectSignalSpec(factor_name="mom63", score_multiplier=value, version="direct-factor-v1")
+
+
+def _spec(multiplier: int = 1) -> DirectSignalSpec:
+    return DirectSignalSpec(factor_name="mom63", score_multiplier=multiplier, version="direct-factor-v1")
+
+
+def test_weekly_last_session_dates_uses_actual_holiday_shortened_week():
+    sessions = [
+        date(2009, 6, 29),
+        date(2009, 6, 30),
+        date(2009, 7, 1),
+        date(2009, 7, 2),
+        date(2009, 7, 6),
+        date(2009, 7, 7),
+        date(2009, 7, 8),
+        date(2009, 7, 9),
+        date(2009, 7, 10),
+    ]
+
+    assert weekly_last_session_dates(sessions) == [date(2009, 7, 2), date(2009, 7, 10)]
+
+
+def test_weekly_missing_final_session_row_does_not_backfill_an_earlier_session():
+    sessions = [
+        date(2009, 7, 1), date(2009, 7, 2), date(2009, 7, 3),
+        date(2009, 7, 6), date(2009, 7, 7), date(2009, 7, 8),
+    ]
+    instruments = ["AAPL", "MSFT", "NVDA"]
+    features = []
+    labels = []
+    for session in sessions:
+        for index, instrument in enumerate(instruments):
+            labels.append(_label(session, instrument, 0.01 * (index + 1)))
+    for index, instrument in enumerate(instruments):
+        features.append(_feature(date(2009, 7, 2), instrument, float(index + 1)))
+        features.append(_feature(date(2009, 7, 8), instrument, float(index + 1)))
+
+    result = evaluate_weekly_signal(
+        features,
+        labels,
+        expected_instruments=instruments,
+        expected_sessions=sessions,
+        spec=_spec(),
+    )
+
+    records = result["weekly_rank_ic"]
+    assert [record["decision_at"] for record in records] == ["2009-07-03", "2009-07-08"]
+    assert records[0]["rank_ic"] is None
+    assert "NO_PREDICTION" in records[0]["exclusion_reasons"]
+    assert records[1]["rank_ic"] is not None
+    summary = result["summary"]
+    assert summary["weekly_decision_count"] == 2
+    assert summary["weekly_valid_decision_count"] == 1
+    assert summary["weekly_sample_count"] == 3
+    assert summary["weekly_prediction_coverage"] == pytest.approx(0.5)
+    assert summary["weekly_label_coverage"] == pytest.approx(1.0)
+    assert summary["weekly_coverage"]["expected_date_count"] == 2
+
+
+def test_weekly_denominators_are_separate_from_daily_denominators():
+    sessions = [
+        date(2009, 7, 1), date(2009, 7, 2), date(2009, 7, 3),
+        date(2009, 7, 6), date(2009, 7, 7), date(2009, 7, 8),
+    ]
+    instruments = ["AAPL", "MSFT", "NVDA"]
+    features = []
+    labels = []
+    for session in sessions:
+        for index, instrument in enumerate(instruments):
+            features.append(_feature(session, instrument, float(index + 1)))
+            labels.append(_label(session, instrument, float(index + 1) / 10))
+
+    daily = evaluate_direct_signal(
+        features,
+        labels,
+        expected_instruments=instruments,
+        expected_sessions=sessions,
+        spec=_spec(),
+    )
+    weekly = evaluate_weekly_signal(
+        features,
+        labels,
+        expected_instruments=instruments,
+        expected_sessions=sessions,
+        spec=_spec(),
+    )
+
+    assert daily["coverage"]["expected_date_count"] == 6
+    assert daily["coverage"]["expected_opportunities"] == 18
+    assert weekly["summary"]["weekly_coverage"]["expected_date_count"] == 2
+    assert weekly["summary"]["weekly_coverage"]["expected_opportunities"] == 6
+    assert weekly["summary"]["weekly_sample_count"] == 6
+    assert weekly["summary"]["weekly_decision_count"] == 2
+    assert weekly["summary"]["weekly_valid_decision_count"] == 2
+
+
+def test_top20_membership_uses_finite_signals_and_ascending_instrument_ties():
+    session = date(2009, 7, 2)
+    instruments = ["S00", *[f"S{index:02d}" for index in range(1, 21)], "S21"]
+    values = {"S00": float("nan"), "S21": 2.0}
+    values.update({f"S{index:02d}": 1.0 for index in range(1, 21)})
+    features = [_feature(session, instrument, values[instrument]) for instrument in instruments]
+    labels = [_label(session, instrument, 0.01) for instrument in instruments]
+
+    result = top20_forward_diagnostics(
+        features,
+        labels,
+        expected_instruments=instruments,
+        expected_sessions=[session],
+        spec=_spec(),
+    )
+
+    row = result["top20_forward_labels"][0]
+    assert row["top20_member_ids"] == ["S21", *[f"S{index:02d}" for index in range(1, 20)]]
+    assert row["top20_member_count"] == 20
+    assert row["top20_forward_label_mean"] == pytest.approx(0.01)
+    assert "S00" not in row["top20_member_ids"]
+
+
+def test_top20_missing_selected_labels_do_not_change_membership():
+    session = date(2009, 7, 2)
+    instruments = [f"S{index:02d}" for index in range(1, 22)]
+    values = {f"S{index:02d}": 2.0 for index in range(1, 21)} | {"S21": 1.0}
+    features = [_feature(session, instrument, values[instrument]) for instrument in instruments]
+    all_labels = [_label(session, instrument, 0.01 if instrument != "S21" else 0.10) for instrument in instruments]
+    rest_only_labels = [_label(session, "S21", 0.10)]
+
+    complete = top20_forward_diagnostics(
+        features,
+        all_labels,
+        expected_instruments=instruments,
+        expected_sessions=[session],
+        spec=_spec(),
+    )["top20_forward_labels"][0]
+    missing = top20_forward_diagnostics(
+        features,
+        rest_only_labels,
+        expected_instruments=instruments,
+        expected_sessions=[session],
+        spec=_spec(),
+    )["top20_forward_labels"][0]
+
+    assert missing["top20_member_ids"] == complete["top20_member_ids"]
+    assert missing["top20_forward_label_count"] == 0
+    assert missing["top20_forward_label_mean"] is None
+    assert missing["universe_forward_label_mean"] == pytest.approx(0.10)
+    assert missing["top20_universe_spread"] is None
+    assert missing["top20_rest_spread"] is None
+    assert "MISSING_TOP20_LABELS" in missing["exclusion_reasons"]
+
+
+def test_top20_fewer_than_20_names_keeps_decision_with_reason():
+    session = date(2009, 7, 2)
+    instruments = ["AAPL", "MSFT", "NVDA", "JPM"]
+    result = top20_forward_diagnostics(
+        [_feature(session, instrument, float(index + 1)) for index, instrument in enumerate(instruments)],
+        [_label(session, instrument, float(index + 1) / 100) for index, instrument in enumerate(instruments)],
+        expected_instruments=instruments,
+        expected_sessions=[session],
+        spec=_spec(),
+    )
+
+    row = result["top20_forward_labels"][0]
+    assert row["top20_member_ids"] == list(reversed(instruments))
+    assert row["top20_member_count"] == 4
+    assert row["top20_forward_label_mean"] is None
+    assert "INSUFFICIENT_TOP20_NAMES" in row["exclusion_reasons"]
+    assert result["summary"]["decision_count"] == 1
+    assert result["summary"]["insufficient_name_count"] == 1
+
+
+def test_top20_turnover_uses_intersection_over_complete_groups_and_is_null_otherwise():
+    weeks = [
+        [date(2009, 7, 1), date(2009, 7, 2), date(2009, 7, 3)],
+        [date(2009, 7, 6), date(2009, 7, 7), date(2009, 7, 8)],
+        [date(2009, 7, 13), date(2009, 7, 14)],
+    ]
+    instruments = [f"A{index:02d}" for index in range(1, 26)]
+    features = []
+    labels = []
+    for week_index, week in enumerate(weeks):
+        active = instruments if week_index < 2 else instruments[:19]
+        for index, instrument in enumerate(active):
+            if week_index == 0:
+                value = 2.0 if index < 20 else 1.0
+            elif week_index == 1:
+                value = 1.0 if index < 5 else 2.0
+            else:
+                value = 2.0
+            features.append(_feature(week[-1], instrument, value))
+            labels.append(_label(week[-1], instrument, 0.01))
+
+    result = top20_forward_diagnostics(
+        features,
+        labels,
+        expected_instruments=instruments,
+        expected_sessions=[session for week in weeks for session in week],
+        spec=_spec(),
+    )
+
+    rows = result["top20_forward_labels"]
+    assert rows[0]["top20_member_ids"] == instruments[:20]
+    assert rows[1]["top20_member_ids"] == instruments[5:]
+    assert rows[0]["turnover_proxy"] is None
+    assert rows[1]["turnover_proxy"] == pytest.approx(0.25)
+    assert rows[2]["turnover_proxy"] is None
+    assert "INSUFFICIENT_TOP20_NAMES" in rows[2]["exclusion_reasons"]
+    assert result["summary"]["turnover_proxy"] == pytest.approx(0.25)
+    assert result["summary"]["turnover_transition_count"] == 1
+
+
+def test_top20_analysis_label_is_present_on_every_payload():
+    session = date(2009, 7, 2)
+    instruments = [f"S{index:02d}" for index in range(1, 22)]
+    result = top20_forward_diagnostics(
+        [_feature(session, instrument, float(index)) for index, instrument in enumerate(instruments)],
+        [_label(session, instrument, float(index) / 100) for index, instrument in enumerate(instruments)],
+        expected_instruments=instruments,
+        expected_sessions=[session],
+        spec=_spec(),
+    )
+
+    payloads = [result, result["summary"], *result["top20_forward_labels"]]
+    assert all(payload["analysis_label"] == "predictive_label_analysis_not_executable_backtest" for payload in payloads)
