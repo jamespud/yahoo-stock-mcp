@@ -598,12 +598,23 @@ def _git_output(repo_root: Path, *args: str) -> str:
         raise ValueError("Evidence source commit cannot be verified against Git history") from error
 
 
+def _evidence_repo_root(repo_root: Path | None = None) -> Path:
+    """Find the Git checkout even when stock-quant is imported from site-packages."""
+    candidates = [Path(repo_root)] if repo_root is not None else []
+    candidates.extend([Path.cwd(), Path(__file__).resolve().parent])
+    for candidate in candidates:
+        for parent in (candidate, *candidate.parents):
+            if (parent / ".git").exists():
+                return parent
+    raise ValueError("Evidence source content cannot be located in a Git checkout")
+
+
 def _source_path_included(path: str) -> bool:
     return not any(path.startswith(prefix) for prefix in SOURCE_CONTENT_EXCLUDED_PREFIXES)
 
 
 def source_content_hash(repo_root: Path | None = None, *, tracked_paths: list[str] | None = None) -> str:
-    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[5]
+    root = _evidence_repo_root(repo_root)
     if tracked_paths is None:
         raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
         tracked_paths = [value.decode("utf-8") for value in raw.split(b"\0") if value]
@@ -657,7 +668,7 @@ def validate_evidence_source_provenance(evidence: dict, *, repo_root: Path | Non
         raise ValueError("Evidence must state that acceptance ran at the recorded source commit")
     if source.get("worktree_clean_before_generation") is not True:
         raise ValueError("Evidence generation requires a clean source worktree")
-    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[5]
+    root = _evidence_repo_root(repo_root)
     if source.get("content_hash_algorithm") != SOURCE_CONTENT_HASH_ALGORITHM:
         raise ValueError("Evidence source content hash algorithm is not supported")
     current_content_hash = source_content_hash(root)

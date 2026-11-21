@@ -171,6 +171,13 @@ def test_committed_evidence_is_sanitized_and_checksum_verified():
     assert evidence["source"]["content_hash"] == source_content_hash(ROOT)
 
 
+def test_evidence_provenance_resolves_the_git_checkout_from_the_callers_cwd(monkeypatch):
+    from stock_quant.alpha.models.diagnostic_protocol import _evidence_repo_root
+
+    monkeypatch.chdir(ROOT)
+    assert _evidence_repo_root() == ROOT
+
+
 def test_evidence_validator_rejects_a_real_market_or_promotion_claim():
     from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
 
