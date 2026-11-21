@@ -4,10 +4,10 @@ from __future__ import annotations
 import math
 import sqlite3
 from collections import defaultdict
-from datetime import timedelta
+from datetime import timedelta, timezone
 from pathlib import Path
 
-from ...calendar import generate_calendar
+from ...calendar import XNYS_DAILY_BOUNDS_VERSION, CalendarShardManifest, generate_long_calendar
 from ..contracts import StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
 from .exchange_mapping import build_exchange_mapping
@@ -30,13 +30,23 @@ class YahooStockAdapter:
             raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "YahooStockAdapter only serves yahoo requests")
         if not self.database_path.is_file():
             raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Local Yahoo database is unavailable")
-        calendar = generate_calendar(
+        xnys_daily_bounds = request.calendar_version == XNYS_DAILY_BOUNDS_VERSION
+        if xnys_daily_bounds and (self.calendar_name != "XNYS" or self.exchange != "XNYS"):
+            raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, f"{XNYS_DAILY_BOUNDS_VERSION} requires an exact XNYS mapping")
+        calendar = generate_long_calendar(
             calendar_name=self.calendar_name,
             exchange=self.exchange,
             start_date=request.start.date(),
             end_date=request.end.date(),
+            xnys_daily_bounds=xnys_daily_bounds,
         )
+        # The catalog normalizes timestamps to UTC. Keep the original calendar
+        # inputs only when they cannot be recovered from the stored period and mapping.
+        save_shards = (isinstance(calendar, CalendarShardManifest) or calendar.exchange != calendar.calendar_name
+                       or any(value.date() != value.astimezone(timezone.utc).date()
+                              for value in (request.start, request.end)))
         sessions = {session.date: session for session in calendar.sessions}
+        session_dates = [day.isoformat() for day in sessions]
         connection = sqlite3.connect(f"file:{self.database_path}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
         try:
@@ -60,14 +70,21 @@ class YahooStockAdapter:
                     instrument["exchange"],
                     start_date=request.start.date(),
                     end_date=request.end.date(),
+                    xnys_daily_bounds=xnys_daily_bounds,
                 )
+                if xnys_daily_bounds and mapping["calendar_version"] != calendar.version:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        f"{XNYS_DAILY_BOUNDS_VERSION} requires an exact XNYS mapping",
+                        {"symbol": symbol, "source_exchange": instrument["exchange"]},
+                    )
                 if mapping["calendar_mapping_status"] not in {"VERIFIED", "PROXY_ONLY"}:
                     raise AlphaError(
                         AlphaErrorCode.DATA_UNAVAILABLE,
                         "Source exchange cannot be mapped to a trading calendar",
                         {"symbol": symbol, "source_exchange": instrument["exchange"], "mapping_status": mapping["calendar_mapping_status"]},
                     )
-                if mapping["calendar_name"] != calendar.calendar_name or mapping["session_dates"] != [str(session.date) for session in calendar.sessions]:
+                if mapping["calendar_name"] != calendar.calendar_name or mapping["session_dates"] != session_dates:
                     raise AlphaError(
                         AlphaErrorCode.DATA_UNAVAILABLE,
                         "Per-instrument calendar differs from requested dataset calendar",
@@ -152,6 +169,7 @@ class YahooStockAdapter:
                 "corporate_action_coverage_status": "UNVERIFIED",
                 "calendar_provider": calendar.provider,
                 "calendar_provider_version": calendar.provider_version,
+                **({"calendar_shards": list(calendar.long_calendar_shards)} if save_shards else {}),
                 "calendar_mapping_status_by_symbol": {
                     symbol: mapping["calendar_mapping_status"] for symbol, mapping in sorted(exchange_mappings.items())
                 },

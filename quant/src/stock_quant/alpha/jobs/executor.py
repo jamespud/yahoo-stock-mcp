@@ -13,7 +13,9 @@ from pydantic import ValidationError
 from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
 from ...compiler import digest
 from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
-from ..data.catalog import DatasetStore
+from ...artifacts import MAX_RESPONSE_ROW_BYTES
+from ...pagination import fits_response, fits_response_row
+from ..data.catalog import DatasetStore, dataset_summary
 from ..data.corporate_actions import CorporateActionDataset
 from ..data.price_attestation import PriceAttestation
 from ..data.option_dataset import OptionSnapshotBatch, prepare_option_dataset
@@ -68,9 +70,16 @@ def _staged_rows(store, reference: str) -> list[dict]:
 
 
 def _manifest_payload(manifest: DatasetManifest) -> dict:
-    return {"dataset_id": manifest.dataset_id, "dataset_kind": manifest.dataset_kind, "content_hash": manifest.content_hash,
+    legacy = {"dataset_id": manifest.dataset_id, "dataset_kind": manifest.dataset_kind, "content_hash": manifest.content_hash,
             "partition_manifest": [part.model_dump(mode="json") for part in manifest.partition_manifest],
             "data_quality": manifest.data_quality, "dataset": manifest.model_dump(mode="json")}
+    if manifest.dataset_kind == "stock_bars":
+        row = {"dataset_id": manifest.dataset_id, **manifest.data_quality}
+        size = len(json.dumps(row, allow_nan=False).encode())
+        if (size > MAX_RESPONSE_ROW_BYTES or not fits_response_row(row, size)
+                or not fits_response({"section": "dataset", **legacy}, resource_uri="quant://results/" + "x" * 48)):
+            return dataset_summary(manifest)
+    return legacy
 
 
 def train_development_labels(label_rows, split):
@@ -105,8 +114,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                                       price_basis=request.price_basis, calendar_version=request.calendar_version)
             manifest = prepare_stock_dataset(req, store=datasets, provider=YahooStockAdapter(database), checkpoint=bounded)
             pending.append(manifest)
-            result = {"dataset": {"section": "dataset", **_manifest_payload(manifest)},
-                      "data_quality": [{"dataset_id": manifest.dataset_id, **manifest.data_quality}],
+            dataset = _manifest_payload(manifest)
+            quality = ({"dataset_id": manifest.dataset_id, **dataset["data_quality"]}
+                       if "data_quality" in dataset else dataset)
+            result = {"dataset": {"section": "dataset", **dataset}, "data_quality": [quality],
                       "reproducibility": {"request_hash": claim["config_hash"], "manifest_hash": manifest.content_hash}}
         elif isinstance(request, CaptureOptionChainJob):
             captured_rows = request.rows if request.rows is not None else _staged_rows(store, request.rows_artifact)
@@ -165,7 +176,6 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             tolerance = request.factor_spec.get("quote_tolerance_seconds", 60) if request.factor_spec else 60
             feature = compute_option_factors(manifest, store=datasets, underlying_prices=prices, pricing_config=config,
                                              selected_outputs=selected_outputs, quote_tolerance_seconds=tolerance, checkpoint=bounded)
-            pending.append(feature)
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
@@ -308,13 +318,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 if not store.heartbeat(claim, .99):
                     raise RuntimeError("OWNERSHIP_LOST during publication")
             for manifest in pending:
-                datasets.register(manifest, checkpoint=publish_checkpoint)
+                datasets.register(manifest, checkpoint=publish_checkpoint, job_path=Path(store.path))
             if staged_model is not None:
                 final_registry.commit_from(staging_registry, staged_model.model_id, checkpoint=publish_checkpoint)
             if staged_freeze is not None:
                 freeze_store, freeze_record = staged_freeze
                 staged_freeze_path = freeze_store.stage(freeze_record, checkpoint=publish_checkpoint)
-            completed = store.complete_publish(claim)
+            completed = store.complete_publish(claim, dataset_ids=[manifest.dataset_id for manifest in pending])
         except Exception as error:
             if staged_freeze_path is not None and staged_freeze_path.exists():
                 staged_freeze_path.unlink()

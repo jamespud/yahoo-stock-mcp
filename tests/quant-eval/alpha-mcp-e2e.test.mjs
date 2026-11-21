@@ -41,6 +41,24 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
   const client = new Client({name: "alpha-e2e", version: "1.0"});
   try {
     await client.connect(transport);
+    const {tools} = await client.listTools();
+    const trainingSchema = tools.find(tool => tool.name === "quant_train_alpha_model").inputSchema;
+    assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
+      "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
+      "random_seed", "research_protocol_hash", "resource_budget", "windows",
+    ]);
+    assert.deepEqual(trainingSchema.required, ["feature_set_id", "label_spec", "windows"]);
+    function advertisedType(schema, type) {
+      if (schema.$ref) {
+        return advertisedType(schema.$ref.slice(2).split("/").reduce((node, key) => node[key], trainingSchema), type);
+      }
+      if (schema.type === type) return schema;
+      return schema.anyOf?.map(branch => advertisedType(branch, type)).find(Boolean);
+    }
+    assert.equal(advertisedType(trainingSchema.properties.feature_set_id, "string").pattern, "^sha256:[0-9a-f]{64}$");
+    const parameters = advertisedType(trainingSchema.properties.hyperparameters, "object");
+    assert.equal(parameters.additionalProperties, false);
+    assert.equal(parameters.properties.num_leaves.maximum, 131072);
     async function call(name, args) {
       const result = await client.callTool({name, arguments: args});
       assert(!result.isError, JSON.stringify(result));
@@ -55,6 +73,43 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       }
       assert.fail("alpha job timed out");
     }
+    const fakeId = "sha256:" + "1".repeat(64);
+    const trainingArgs = {
+      evaluation_mode: "validation_only", feature_set_id: fakeId, research_protocol_hash: fakeId,
+      label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: fakeId},
+      windows: {train_start: "2024-01-02T00:00:00Z", train_end: "2024-03-01T00:00:00Z",
+        validation_start: "2024-03-01T00:00:00Z", validation_end: "2024-05-01T00:00:00Z"},
+      hyperparameters: {num_leaves: 7},
+    };
+    const invalidCases = [
+      [{hyperparameters: {num_leaves: 7, random_seed: 20261119}}, "hyperparameters.random_seed"],
+      [{random_sead: 20261119}, "random_sead"],
+      [{feature_set_id: "not-a-content-id"}, "feature_set_id"],
+      [{label_spec: null}, "label_spec"],
+      [{evaluation_mode: "not-a-mode"}, "evaluation_mode"],
+      [{windows: undefined}, "windows"],
+    ];
+    const outcomes = [];
+    for (const [overrides, field] of invalidCases) {
+      const rejected = await client.callTool({name: "quant_train_alpha_model", arguments: {...trainingArgs, ...overrides}});
+      outcomes.push({field, rejected: Boolean(rejected.isError), message: rejected.content[0]?.text});
+    }
+    const missingFields = ["feature_set_id", "label_spec", "windows"];
+    const emptyCalls = [];
+    for (const params of [{}, {arguments: {}}]) {
+      const rejected = await client.callTool({name: "quant_train_alpha_model", ...params});
+      emptyCalls.push({rejected: Boolean(rejected.isError), message: rejected.content[0]?.text});
+    }
+    const [count, rejectionAudit] = JSON.parse(execFileSync(env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python"), ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0],db.execute('select event_type,detail from alpha_research_audit').fetchall()]))",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}));
+    assert.deepEqual({count, outcomes, emptyCalls, audit: rejectionAudit.map(([event, detail]) => [event, JSON.parse(detail)])}, {
+      count: 0,
+      outcomes: invalidCases.map(([, field]) => ({field, rejected: true, message: `Invalid Alpha training fields: ${field}`})),
+      emptyCalls: Array.from({length: 2}, () => ({rejected: true, message: `Invalid Alpha training fields: ${missingFields.join(", ")}`})),
+      audit: [...invalidCases.map(([, field]) => [field]), missingFields, missingFields]
+        .map(fields => ["TRAINING_SUBMISSION_REJECTED", {source: "mcp", fields}]),
+    });
     const prepared = await call("quant_prepare_alpha_dataset", {source: "yahoo", symbols,
       period: {start: "2024-01-02T00:00:00Z", end: "2024-06-28T00:00:00Z"}, price_basis: "price_basis_unverified"});
     await done(prepared.job_id);
@@ -67,6 +122,28 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     assert.ok("volume_null_count" in dataQuality.data_quality);
     assert.equal(dataQuality.data_quality.session_coverage_by_symbol[0].extra_session_count, 0);
     assert.ok(dataQuality.data_quality.session_coverage_by_symbol.reduce((sum, row) => sum + row.missing_session_count, 0) >= 2);
+    const overview = await call("quant_get_data_quality", {dataset_id: dataset.dataset_id, section: "overview"});
+    assert.equal(overview.partition_count, dataset.partition_manifest.length);
+    assert.equal(overview.content_hash, dataset.content_hash);
+    assert.equal(overview.validation.valid, true);
+    assert.ok(!("data_quality" in overview));
+    const audit = {dataset_id: dataset.dataset_id, section: "session_coverage_by_symbol"};
+    const firstPage = await call("quant_get_data_quality", {...audit, limit: 1});
+    assert.equal(firstPage.rows.length, 1);
+    assert.equal(firstPage.total_count, symbols.length);
+    assert.ok(firstPage.next_cursor);
+    const rest = await call("quant_get_data_quality", {...audit, cursor: firstPage.next_cursor});
+    const expectedCoverage = [...dataQuality.data_quality.session_coverage_by_symbol]
+      .sort((a, b) => a.instrument_id < b.instrument_id ? -1 : Number(a.instrument_id > b.instrument_id));
+    assert.deepEqual([...firstPage.rows, ...rest.rows], expectedCoverage);
+    assert.equal(rest.next_cursor, null);
+    const resource = await client.readResource({uri: firstPage.resource_uri});
+    assert.deepEqual(JSON.parse(resource.contents[0].text).rows, [...firstPage.rows, ...rest.rows]);
+    const mismatch = await client.callTool({name: "quant_get_data_quality", arguments: {
+      ...audit, section: "exchange_mappings", cursor: firstPage.next_cursor,
+    }});
+    assert.ok(mismatch.isError);
+    assert.match(mismatch.content[0].text, /Invalid result cursor/);
     const factors = await call("quant_compute_factors", {dataset_id: dataset.dataset_id,
       factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [
         {id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}},

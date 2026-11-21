@@ -13,6 +13,7 @@ from .compiler import OPERATORS, CompileError, validate_strategy
 from .contracts import Strategy
 from .calendar import CalendarSchedule, generate_calendar, CALENDAR_PROVIDER_VERSION
 from .jobs import JobStore
+from .pagination import MAX_FRAME_BYTES, fits_response
 from .worker import wake_worker
 from .sandbox import PythonArtifact, SandboxSession, validate_python
 from .alpha.capabilities import AlphaCapabilities
@@ -76,25 +77,30 @@ def main():
                 registry=AlphaModelRegistry(Path(request["registry_path"]).with_suffix(".models")),
             )
         elif method == "alpha_data_quality":
-            from .alpha.data.catalog import DatasetStore
+            from .alpha.data.catalog import DatasetStore, dataset_summary
             datasets = DatasetStore(Path(request["registry_path"]).with_suffix(".alpha"))
-            manifest = datasets.load_manifest(request["dataset_id"])
-            validation = datasets.validate_dataset(request["dataset_id"])
-            result = {
-                "schema_version": "alpha-data-quality-v1",
-                "dataset_id": manifest.dataset_id,
-                "dataset_kind": manifest.dataset_kind,
-                "source": manifest.source,
-                "source_version": manifest.source_version,
-                "calendar_version": manifest.calendar_version,
-                "price_basis": manifest.price_basis,
-                "data_quality": manifest.data_quality,
-                "validation": validation.model_dump(mode="json"),
-            }
+            dataset_id, section = request["dataset_id"], request.get("section")
+            overhead = request.get("mcp_overhead_bytes")
+            if section not in (None, "overview"):
+                result = datasets.audit_dataset(dataset_id, section, request.get("limit", 100),
+                                                request.get("cursor"), request.get("symbol"),
+                                                mcp_overhead_bytes=overhead)
+            else:
+                if any(request.get(key) is not None for key in ("limit", "cursor", "symbol")):
+                    raise ValueError("Dataset pagination fields require a detail section")
+                manifest = datasets.load_manifest(dataset_id)
+                validation = datasets.validate_dataset(dataset_id)
+                metadata = {key: getattr(manifest, key) for key in (
+                    "dataset_id", "dataset_kind", "source", "source_version", "calendar_version", "price_basis",
+                )}
+                metadata["validation"] = validation.model_dump(mode="json")
+                legacy = {"schema_version": "alpha-data-quality-v1", **metadata, "data_quality": manifest.data_quality}
+                result = (legacy if section is None and fits_response(legacy, mcp_overhead_bytes=overhead) else
+                          {"schema_version": "alpha-data-quality-overview-v1", **metadata, **dataset_summary(manifest)})
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))
-        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
+        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "audit_training_rejection", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
             with JobStore(request["registry_path"]) as registry:
                 if method == "register":
                     result = registry.register(request["strategy"])
@@ -119,6 +125,11 @@ def main():
                 elif method == "submit_alpha":
                     result = registry.submit_alpha(request["job"])
                     wake_worker(request["registry_path"])
+                elif method == "audit_training_rejection":
+                    fields = request["fields"]
+                    if not isinstance(fields, list) or not 1 <= len(fields) <= 20 or any(not isinstance(field, str) for field in fields):
+                        raise ValueError("Invalid training rejection fields")
+                    result = registry.audit_training_rejection("mcp", fields)
                 elif method == "get_job":
                     result = registry.get_job(request["job_id"])
                     # Reads can restart consumers for queued or expired work, never
@@ -129,10 +140,15 @@ def main():
                 elif method == "cancel_job":
                     result = registry.cancel(request["job_id"])
                 else:
-                    result = registry.get_result(request["job_id"], request.get("section", "summary"), request.get("limit", 100), request.get("cursor"))
+                    result = registry.get_result(request["job_id"], request.get("section", "summary"),
+                                                 request.get("limit", 100), request.get("cursor"),
+                                                 mcp_overhead_bytes=request.get("mcp_overhead_bytes"))
         else:
             raise ValueError("Unsupported quant method")
-        print(json.dumps({"result": result}, allow_nan=False))
+        encoded = json.dumps({"result": result}, allow_nan=False)
+        if len(encoded.encode()) + 1 > MAX_FRAME_BYTES:
+            raise ValueError("RESOURCE_LIMIT_EXCEEDED: quant response exceeds 4 MiB")
+        print(encoded)
     except CompileError as error:
         print(json.dumps({"error": error.diagnostic}))
     except Exception as error:

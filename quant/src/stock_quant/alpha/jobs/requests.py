@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, TypeAdapter, model_validator
+from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_validator
 
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
+from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
 from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
 
 
@@ -86,9 +87,11 @@ class TrainAlphaModelJob(AlphaJobBase):
     research_protocol_hash: Hash | None = None
     split: TemporalSplit | ModelDevelopmentSplit
     hyperparameters: dict = Field(default_factory=dict)
-    random_seed: int = 0
+    random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+
+    _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 
     @model_validator(mode="after")
     def split_mode(self):
