@@ -329,10 +329,11 @@ class JobStore(Registry):
             raise ValueError("evaluate_alpha_signal stock_dataset_id must identify stock_bars")
         if feature.dataset_kind != "feature_panel":
             raise ValueError("evaluate_alpha_signal feature_set_id must identify feature_panel")
-        if stock.start_at < RESERVED_TEST_END and stock.end_at > RESERVED_TEST_START:
-            raise ValueError("evaluate_alpha_signal stock dataset physical coverage enters reserved Test")
-        if feature.start_at < RESERVED_TEST_END and feature.end_at > RESERVED_TEST_START:
-            raise ValueError("evaluate_alpha_signal feature dataset physical coverage enters reserved Test")
+        if request.protocol_mode == "frozen_v1_3":
+            if stock.start_at < RESERVED_TEST_END and stock.end_at > RESERVED_TEST_START:
+                raise ValueError("evaluate_alpha_signal stock dataset physical coverage enters reserved Test")
+            if feature.start_at < RESERVED_TEST_END and feature.end_at > RESERVED_TEST_START:
+                raise ValueError("evaluate_alpha_signal feature dataset physical coverage enters reserved Test")
         if stock.dataset_id not in feature.parent_dataset_ids:
             raise ValueError("evaluate_alpha_signal feature set is not derived from the stock dataset")
         if request.protocol_mode == "frozen_v1_3":
@@ -364,7 +365,7 @@ class JobStore(Registry):
             raise ValueError("diagnostic training missing stock dataset") from error
         if feature.dataset_kind != "feature_panel" or stock.dataset_kind != "stock_bars":
             raise ValueError("diagnostic training dataset kinds are invalid")
-        if any(
+        if request.protocol_mode == "frozen_v1_3" and any(
             manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
             for manifest in (feature, stock)
         ):

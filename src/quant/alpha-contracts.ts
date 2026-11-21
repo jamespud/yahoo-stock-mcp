@@ -281,7 +281,10 @@ export const trainAlphaDiagnosticFoldsInput = trainAlphaDiagnosticFoldsFields.su
       message: "split_at must be strictly inside Train",
     });
   }
-  if (trainEnd > reservedTestStart || validationEnd > reservedTestStart || splitAt >= reservedTestStart) {
+  if (
+    (value.protocol_mode ?? "synthetic_contract") === "frozen_v1_3"
+    && (trainEnd > reservedTestStart || validationEnd > reservedTestStart || splitAt >= reservedTestStart)
+  ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["split_at"],

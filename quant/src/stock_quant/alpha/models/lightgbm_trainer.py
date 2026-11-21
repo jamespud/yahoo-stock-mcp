@@ -77,6 +77,8 @@ class TrainAlphaRequest(StrictModel):
         if self.evaluation_mode == "validation_only" and not self.label_source_dataset_id:
             raise ValueError("validation_only training requires label_source_dataset_id")
         if (
+            self.protocol_mode == "frozen_v1_3"
+            and
             self.evaluation_mode == "validation_only"
             and self.split.train_start < RESERVED_TEST_END
             and self.split.validation_end > RESERVED_TEST_START
@@ -528,11 +530,11 @@ def train_validation_only(
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training requires ModelDevelopmentSplit")
     feature_manifest = store.load_manifest(request.feature_set_id)
     stock_manifest = store.load_manifest(request.label_source_dataset_id)
-    if (
+    if request.protocol_mode == "frozen_v1_3" and ((
         feature_manifest.start_at < RESERVED_TEST_END and feature_manifest.end_at > RESERVED_TEST_START
     ) or (
         stock_manifest.start_at < RESERVED_TEST_END and stock_manifest.end_at > RESERVED_TEST_START
-    ):
+    )):
         raise AlphaError(
             AlphaErrorCode.DATASET_MISMATCH,
             "Validation-only dataset physical coverage enters reserved Test",

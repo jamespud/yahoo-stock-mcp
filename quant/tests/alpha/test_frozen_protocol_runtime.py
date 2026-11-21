@@ -10,7 +10,12 @@ from pydantic import ValidationError
 from stock_quant.alpha.contracts import ModelResourceBudget, StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
-from stock_quant.alpha.jobs.requests import ALPHA_REQUEST_ADAPTER, TrainAlphaModelJob
+from stock_quant.alpha.jobs.requests import (
+    ALPHA_REQUEST_ADAPTER,
+    EvaluateAlphaSignalJob,
+    TrainAlphaDiagnosticFoldsJob,
+    TrainAlphaModelJob,
+)
 from stock_quant.alpha.models.diagnostic_protocol import (
     PROTOCOL_HASH,
     SOURCE_SYMBOLS,
@@ -102,11 +107,74 @@ def _training_request_model(raw: dict) -> TrainAlphaRequest:
     )
 
 
+def _synthetic_cross_range_training_request() -> dict:
+    raw = _frozen_training_request()
+    raw.update({
+        "protocol_mode": "synthetic_contract",
+        "research_protocol_hash": "sha256:" + "0" * 64,
+        "candidate_id": None,
+        "split": {
+            "train_start": "2013-07-01T00:00:00Z",
+            "train_end": "2013-10-01T00:00:00Z",
+            "validation_start": "2013-10-01T00:00:00Z",
+            "validation_end": "2014-01-02T00:00:00Z",
+            "embargo_days": 0,
+        },
+    })
+    return raw
+
+
+def test_synthetic_contract_requests_allow_cross_reserved_year_windows():
+    training = _synthetic_cross_range_training_request()
+    parsed_training = TrainAlphaModelJob.model_validate(training)
+    assert parsed_training.protocol_mode == "synthetic_contract"
+    ALPHA_REQUEST_ADAPTER.validate_python(training)
+    _training_request_model(training)
+
+    signal = {
+        "kind": "evaluate_alpha_signal",
+        "feature_set_id": FAKE_ID,
+        "stock_dataset_id": "sha256:" + "2" * 64,
+        "split": copy.deepcopy(training["split"]),
+        "evaluation_window": {
+            "start": "2013-10-01T00:00:00Z",
+            "end": "2014-01-01T00:00:00Z",
+        },
+        "signal_spec": {
+            "factor_name": "mom63",
+            "score_multiplier": 1,
+            "version": "direct-factor-v1",
+        },
+        "protocol_mode": "synthetic_contract",
+    }
+    EvaluateAlphaSignalJob.model_validate(signal)
+    ALPHA_REQUEST_ADAPTER.validate_python(signal)
+
+    folds = {
+        "kind": "train_alpha_diagnostic_folds",
+        "research_protocol_hash": "sha256:" + "0" * 64,
+        "feature_set_id": FAKE_ID,
+        "stock_dataset_id": "sha256:" + "2" * 64,
+        "split": copy.deepcopy(training["split"]),
+        "split_at": "2013-08-15T00:00:00Z",
+        "hyperparameters": {"num_leaves": 7, "min_child_samples": 1, "n_estimators": 2},
+        "random_seed": 7,
+        "protocol_mode": "synthetic_contract",
+        "resource_budget": {"max_seconds": 30, "max_rows": 1000},
+    }
+    TrainAlphaDiagnosticFoldsJob.model_validate(folds)
+    ALPHA_REQUEST_ADAPTER.validate_python(folds)
+
+    with pytest.raises(ValidationError):
+        TrainAlphaModelJob.model_validate({**training, "protocol_mode": "frozen_v1_3"})
+    with pytest.raises(ValidationError):
+        EvaluateAlphaSignalJob.model_validate({**signal, "protocol_mode": "frozen_v1_3"})
+    with pytest.raises(ValidationError):
+        TrainAlphaDiagnosticFoldsJob.model_validate({**folds, "protocol_mode": "frozen_v1_3"})
+
+
 def test_validation_only_rejects_reserved_test_ranges_at_both_contract_layers():
     raw = _frozen_training_request()
-    raw["protocol_mode"] = "synthetic_contract"
-    raw["research_protocol_hash"] = "sha256:" + "0" * 64
-    raw["candidate_id"] = None
     raw["split"]["validation_end"] = "2012-01-02T00:00:00Z"
 
     with pytest.raises(ValidationError, match="reserved Test"):
@@ -205,6 +273,7 @@ def _physical_test_store(tmp_path):
 
 def test_validation_only_rejects_test_manifest_before_any_partition_read(tmp_path, monkeypatch):
     store, request, labels = _physical_test_store(tmp_path)
+    request = request.model_copy(update={"protocol_mode": "frozen_v1_3"})
     reads = []
 
     def forbidden_partition_read(*args, **kwargs):

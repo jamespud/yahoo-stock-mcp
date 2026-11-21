@@ -115,6 +115,36 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       audit: [...invalidCases.map(([, field]) => [field]), missingFields, missingFields]
         .map(fields => ["TRAINING_SUBMISSION_REJECTED", {source: "mcp", fields}]),
     });
+    const crossYearWindows = {
+      train_start: "2013-07-01T00:00:00Z", train_end: "2013-10-01T00:00:00Z",
+      validation_start: "2013-10-01T00:00:00Z", validation_end: "2014-01-02T00:00:00Z",
+    };
+    const syntheticTraining = await client.callTool({name: "quant_train_alpha_model", arguments: {
+      ...trainingArgs, protocol_mode: "synthetic_contract", windows: crossYearWindows,
+    }});
+    assert.equal(syntheticTraining.isError, true);
+    assert.doesNotMatch(syntheticTraining.content[0].text, /reserved Test/);
+    assert.match(syntheticTraining.content[0].text, /missing feature dataset/);
+    const syntheticSignal = await client.callTool({name: "quant_evaluate_alpha_signal", arguments: {
+      feature_set_id: fakeId, stock_dataset_id: fakeId, windows: crossYearWindows,
+      evaluation_window: {start: "2013-10-01T00:00:00Z", end: "2014-01-01T00:00:00Z"},
+      signal_spec: {factor_name: "mom63", score_multiplier: 1, version: "direct-factor-v1"},
+      protocol_mode: "synthetic_contract",
+    }});
+    assert.equal(syntheticSignal.isError, true);
+    assert.doesNotMatch(syntheticSignal.content[0].text, /reserved Test/);
+    const syntheticFolds = await client.callTool({name: "quant_train_alpha_diagnostic_folds", arguments: {
+      research_protocol_hash: fakeId, feature_set_id: fakeId, stock_dataset_id: fakeId,
+      windows: crossYearWindows, split_at: "2013-08-15T00:00:00Z",
+      protocol_mode: "synthetic_contract",
+    }});
+    assert.equal(syntheticFolds.isError, true);
+    assert.doesNotMatch(syntheticFolds.content[0].text, /reserved Test/);
+    const frozenConflict = await client.callTool({name: "quant_train_alpha_model", arguments: {
+      ...trainingArgs, protocol_mode: "frozen_v1_3", windows: crossYearWindows,
+    }});
+    assert.equal(frozenConflict.isError, true);
+    assert.doesNotMatch(frozenConflict.content[0].text, /missing feature dataset/);
     const prepared = await call("quant_prepare_alpha_dataset", {source: "yahoo", symbols,
       period: {start: "2024-01-02T00:00:00Z", end: "2024-06-28T00:00:00Z"}, price_basis: "price_basis_unverified"});
     await done(prepared.job_id);

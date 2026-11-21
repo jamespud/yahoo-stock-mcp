@@ -207,7 +207,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
             if stock_manifest.dataset_kind != "stock_bars":
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a stock_bars dataset")
-            if feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START:
+            if request.protocol_mode == "frozen_v1_3" and (
+                feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START
+            ):
                 raise AlphaError(
                     AlphaErrorCode.DATASET_MISMATCH,
                     "Signal dataset physical coverage enters reserved Test",
@@ -415,7 +417,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
                 feature_manifest = datasets.load_manifest(request.feature_set_id)
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
-                if any(
+                if request.protocol_mode == "frozen_v1_3" and any(
                     manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
                     for manifest in (feature_manifest, stock_manifest)
                 ):
@@ -519,7 +521,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
             if stock_manifest.dataset_kind != "stock_bars":
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a stock_bars dataset")
-            if any(
+            if request.protocol_mode == "frozen_v1_3" and any(
                 manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
                 for manifest in (feature_manifest, stock_manifest)
             ):

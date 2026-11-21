@@ -16,6 +16,7 @@ import {
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
   trainAlphaModelInputFields,
+  trainAlphaDiagnosticFoldsInput,
   developmentWindows,
   evaluateAlphaSignalInput,
 } from "../../dist/quant/alpha-contracts.js";
@@ -129,4 +130,20 @@ test("Validation-only training contract is explicit and rejects Test windows", (
     },
   }));
   assert.throws(() => developmentWindows.parse({...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"}));
+});
+
+test("Diagnostic fold date isolation applies only to frozen v1.3", () => {
+  const input = {
+    research_protocol_hash: "sha256:" + "0".repeat(64),
+    feature_set_id: "sha256:" + "1".repeat(64),
+    stock_dataset_id: "sha256:" + "2".repeat(64),
+    windows: {
+      train_start: "2013-07-01T00:00:00Z", train_end: "2013-10-01T00:00:00Z",
+      validation_start: "2013-10-01T00:00:00Z", validation_end: "2014-01-02T00:00:00Z",
+    },
+    split_at: "2013-08-15T00:00:00Z",
+    protocol_mode: "synthetic_contract",
+  };
+  assert.ok(trainAlphaDiagnosticFoldsInput.parse(input));
+  assert.throws(() => trainAlphaDiagnosticFoldsInput.parse({...input, protocol_mode: "frozen_v1_3"}));
 });

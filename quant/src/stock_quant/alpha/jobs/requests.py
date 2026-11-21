@@ -127,7 +127,7 @@ class EvaluateAlphaSignalJob(AlphaJobBase):
     def development_only(self):
         if self.evaluation_window.start < self.split.train_start or self.evaluation_window.end > self.split.validation_end:
             raise ValueError("evaluation window must stay within development split")
-        if self.split.validation_end > RESERVED_TEST_START:
+        if self.protocol_mode == "frozen_v1_3" and self.split.validation_end > RESERVED_TEST_START:
             raise ValueError("validation_end must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
         if self.protocol_mode == "frozen_v1_3":
             if self.research_protocol_hash is None:
@@ -168,6 +168,8 @@ class TrainAlphaModelJob(AlphaJobBase):
         if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
             raise ValueError("validation_only training requires ModelDevelopmentSplit")
         if (
+            self.protocol_mode == "frozen_v1_3"
+            and
             self.evaluation_mode == "validation_only"
             and self.split.train_start < RESERVED_TEST_END
             and self.split.validation_end > RESERVED_TEST_START
@@ -221,6 +223,8 @@ class TrainAlphaDiagnosticFoldsJob(AlphaJobBase):
         if not self.split.train_start < split_at < self.split.train_end:
             raise ValueError("split_at must be strictly inside Train")
         if (
+            self.protocol_mode == "frozen_v1_3"
+            and (
             (self.split.train_start < RESERVED_TEST_END and self.split.train_end > RESERVED_TEST_START)
             or (
                 self.split.validation_start < RESERVED_TEST_END
@@ -228,6 +232,7 @@ class TrainAlphaDiagnosticFoldsJob(AlphaJobBase):
             )
             or split_at >= RESERVED_TEST_START
             and split_at < RESERVED_TEST_END
+            )
         ):
             raise ValueError("diagnostic folds must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
         if self.protocol_mode == "frozen_v1_3":
