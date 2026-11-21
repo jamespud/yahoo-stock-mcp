@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from typing import Callable
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -26,6 +27,8 @@ MATURITY_REASONS = {"INSUFFICIENT_FUTURE_HISTORY", "LABEL_NOT_MATURE", "NO_ENTRY
 def _utc(value) -> datetime:
     if isinstance(value, str):
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return datetime.combine(value, time.min, tzinfo=timezone.utc)
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -44,27 +47,32 @@ def attribute_evaluation_coverage(
     expected_instruments: list[str],
     expected_decisions: list,
     eligible_universe: list[str] | None = None,
+    decision_key: Callable[[datetime], object] | None = None,
 ) -> CoverageAttribution:
+    def normalize_decision(value):
+        decision = _utc(value)
+        return decision if decision_key is None else decision_key(decision)
+
     instruments = sorted(set(str(value).upper() for value in expected_instruments))
-    decisions = sorted({_utc(value) for value in expected_decisions})
+    decisions = sorted({normalize_decision(value) for value in expected_decisions})
     eligible = set(instruments) if eligible_universe is None else {str(value).upper() for value in eligible_universe}
     prediction_map = {}
     for row in predictions:
-        key = (_utc(row["decision_at"]), str(row["instrument_id"]).upper())
+        key = (normalize_decision(row["decision_at"]), str(row["instrument_id"]).upper())
         if key in prediction_map:
             raise ValueError(f"Duplicate prediction opportunity: {key}")
         prediction_map[key] = row
     label_map = {}
     for row in labels:
-        key = (_utc(row.feature_decision_at), str(row.instrument_id).upper())
+        key = (normalize_decision(row.feature_decision_at), str(row.instrument_id).upper())
         if key in label_map:
             raise ValueError(f"Duplicate label opportunity: {key}")
         label_map[key] = row
 
-    excluded: dict[tuple[datetime, str], tuple[str, list[str]]] = {}
-    candidates: dict[datetime, list[dict]] = defaultdict(list)
+    excluded: dict[tuple[object, str], tuple[str, list[str]]] = {}
+    candidates: dict[object, list[dict]] = defaultdict(list)
     finite_matched_count = 0
-    date_observations: dict[datetime, dict[str, int]] = defaultdict(lambda: {"prediction": 0, "label": 0})
+    date_observations: dict[object, dict[str, int]] = defaultdict(lambda: {"prediction": 0, "label": 0})
 
     def exclude(decision, instrument, reason, secondary=None):
         excluded[(decision, instrument)] = (reason, list(secondary or []))
@@ -142,7 +150,7 @@ def attribute_evaluation_coverage(
                         exclude(decision, row["instrument_id"], "INVALID_LABEL", ["NONFINITE_CORRELATION"])
                     exclusion_reasons = ["INVALID_LABEL"]
         ic_records.append({
-            "decision_at": decision.isoformat(),
+            "decision_at": decision.isoformat() if hasattr(decision, "isoformat") else decision,
             "rank_ic": rank_ic,
             "valid_pair_count": len(values) if rank_ic is not None else 0,
             "eligible_count": len(values),

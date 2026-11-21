@@ -224,3 +224,143 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     rmSync(tmp, {recursive: true, force: true});
   }
 });
+
+test("Direct factor signal diagnostics stay inside development through stdio MCP", {timeout: 120000}, async () => {
+  const tmp = mkdtempSync(resolve(tmpdir(), "alpha-signal-e2e-"));
+  const db = resolve(tmp, "data.db");
+  const seed = openDatabase(db);
+  applySqliteMigrations(seed);
+  const symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "XOM"];
+  const holidays = new Set(["2009-01-01", "2009-01-19", "2009-02-16", "2009-04-10", "2009-05-25", "2009-07-03"]);
+  const dates = [];
+  for (let day = new Date("2009-01-02T00:00:00Z"); dates.length < 160; day.setUTCDate(day.getUTCDate() + 1)) {
+    const tradeDate = day.toISOString().slice(0, 10);
+    if (![0, 6].includes(day.getUTCDay()) && !holidays.has(tradeDate)) dates.push(tradeDate);
+  }
+  seed.db.exec(symbols.map((symbol, index) => `INSERT INTO instruments(id,symbol,exchange,currency) VALUES (${index + 1},'${symbol}','NYSE','USD');`).join("\n"));
+  const bars = [];
+  for (const [index, symbol] of symbols.entries()) {
+    for (const [dayIndex, tradeDate] of dates.entries()) {
+      const close = 50 + index * 5 + dayIndex * 0.08 + Math.sin(dayIndex / 6 + index) * 1.5;
+      bars.push(`(${index + 1},'${tradeDate}','${close.toFixed(4)}','${(close + 1).toFixed(4)}','${(close - 1).toFixed(4)}','${close.toFixed(4)}',${1000 + dayIndex},'yahoo')`);
+    }
+  }
+  seed.db.exec(`INSERT INTO daily_bars(instrument_id,trade_date,open,high,low,close,volume,source) VALUES ${bars.join(",")};`);
+  seed.close();
+
+  const env = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined));
+  const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
+  const transport = new StdioClientTransport({command: process.execPath, args: [resolve(root, "dist/cli.js"), "server"],
+    env: {...env, QUANT_ENABLED: "1", QUANT_PYTHON: python,
+      QUANT_REGISTRY_PATH: resolve(tmp, "quant.db"), STOCK_MCP_DB_PATH: db}, stderr: "pipe"});
+  const client = new Client({name: "alpha-signal-e2e", version: "1.0"});
+  try {
+    await client.connect(transport);
+    const {tools} = await client.listTools();
+    const signalTool = tools.find(tool => tool.name === "quant_evaluate_alpha_signal");
+    assert.ok(signalTool, "quant_evaluate_alpha_signal is advertised");
+    assert.equal(Object.keys(signalTool.inputSchema.properties).some(key => key.startsWith("test") || key.endsWith("_path")), false);
+    async function call(name, args) {
+      const result = await client.callTool({name, arguments: args});
+      assert(!result.isError, JSON.stringify(result));
+      return JSON.parse(result.content[0].text);
+    }
+    async function done(id) {
+      for (let i = 0; i < 100; i++) {
+        const job = await call("quant_get_job", {job_id: id});
+        if (job.status === "completed") return;
+        assert(["queued", "running"].includes(job.status), JSON.stringify(job));
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.fail("signal diagnostic job timed out");
+    }
+    const fake = "sha256:" + "1".repeat(64);
+    const invalid = {
+      feature_set_id: fake,
+      stock_dataset_id: fake,
+      label_name: "stock_forward_return",
+      target_type: "stock_return",
+      horizon_days: 5,
+      windows: {
+        train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+        validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+      },
+      evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
+      signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+    };
+    const rejected = [];
+    for (const args of [
+      {...invalid, signal_spec: {...invalid.signal_spec, score_multiplier: 0}},
+      {...invalid, feature_path: "/tmp/features.parquet"},
+      {...invalid, windows: {...invalid.windows, validation_end: "2012-01-02T00:00:00Z"}},
+      {...invalid, evaluation_window: {start: "2008-12-31T00:00:00Z", end: "2009-06-01T00:00:00Z"}},
+    ]) {
+      rejected.push(Boolean((await client.callTool({name: "quant_evaluate_alpha_signal", arguments: args})).isError));
+    }
+    const [rejectedCount] = JSON.parse(execFileSync(python, ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0]]))",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}));
+    assert.deepEqual({rejected, rejectedCount}, {rejected: [true, true, true, true], rejectedCount: 0});
+
+    const prepared = await call("quant_prepare_alpha_dataset", {
+      source: "yahoo", symbols, period: {start: "2009-01-02T00:00:00Z", end: "2009-07-01T00:00:00Z"},
+      price_basis: "price_basis_unverified",
+    });
+    await done(prepared.job_id);
+    const dataset = await call("quant_get_result", {job_id: prepared.job_id, section: "dataset"});
+    const factors = await call("quant_compute_factors", {
+      dataset_id: dataset.dataset_id,
+      factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [
+        {id: "mom5", operator: "pct_change", inputs: ["close"], params: {period: 5}},
+      ], outputs: ["mom5"]},
+    });
+    await done(factors.job_id);
+    const factorDataset = await call("quant_get_result", {job_id: factors.job_id, section: "dataset"});
+
+    const signal = await call("quant_evaluate_alpha_signal", {
+      feature_set_id: factorDataset.dataset_id,
+      stock_dataset_id: dataset.dataset_id,
+      label_name: "stock_forward_return",
+      target_type: "stock_return",
+      horizon_days: 5,
+      windows: {
+        train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+        validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+      },
+      evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
+      signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+    });
+    await done(signal.job_id);
+    const summary = await call("quant_get_result", {job_id: signal.job_id, section: "summary"});
+    for (const key of ["signal_spec_hash", "feature_set_id", "label_version", "evaluation_window",
+      "rank_ic_by_decision", "rank_ic_mean", "icir", "coverage", "excluded_opportunities"]) {
+      assert.ok(key in summary, key);
+    }
+    assert.equal(summary.feature_set_id, factorDataset.dataset_id);
+    assert.equal(summary.label_version, "session-aligned-v2");
+    assert.ok(summary.evaluation_window.end <= "2012-01-01T00:00:00+00:00");
+    const firstPage = await call("quant_get_result", {job_id: signal.job_id, section: "rank_ic_by_decision", limit: 2});
+    assert.equal(firstPage.rows.length, 2);
+    assert.ok(firstPage.total_count > 2);
+    assert.ok(firstPage.next_cursor);
+    const secondPage = await call("quant_get_result", {
+      job_id: signal.job_id, section: "rank_ic_by_decision", limit: 2, cursor: firstPage.next_cursor,
+    });
+    assert.equal(secondPage.rows.length, 2);
+    const misbound = await client.callTool({name: "quant_get_result", arguments: {
+      job_id: signal.job_id, section: "summary", cursor: firstPage.next_cursor,
+    }});
+    assert.ok(misbound.isError);
+    const reproducibility = await call("quant_get_result", {job_id: signal.job_id, section: "reproducibility"});
+    assert.equal(reproducibility.signal_spec_hash, summary.signal_spec_hash);
+    assert.equal(reproducibility.reserved_test_start, "2012-01-01T00:00:00+00:00");
+    const request = JSON.parse(execFileSync(python, ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute('select request from jobs where id=?',(sys.argv[2],)).fetchone(); print(json.dumps(json.loads(row[0])))",
+      resolve(tmp, "quant.db"), signal.job_id], {encoding: "utf8"}));
+    assert.equal(Object.keys(request).some(key => key.startsWith("test") || key.endsWith("_path")), false);
+    assert.equal(request.evaluation_window.end, "2009-06-01T00:00:00Z");
+  } finally {
+    await client.close();
+    rmSync(tmp, {recursive: true, force: true});
+  }
+});

@@ -312,6 +312,24 @@ class JobStore(Registry):
             )
         return {"recorded": True}
 
+    def _validate_signal_datasets(self, request) -> None:
+        from .alpha.data.catalog import DatasetStore
+        datasets = DatasetStore(Path(self.path).with_suffix(".alpha"), defer_registration=True)
+        try:
+            stock = datasets.load_manifest(request.stock_dataset_id)
+        except KeyError as error:
+            raise ValueError("evaluate_alpha_signal missing stock dataset") from error
+        try:
+            feature = datasets.load_manifest(request.feature_set_id)
+        except KeyError as error:
+            raise ValueError("evaluate_alpha_signal missing feature dataset") from error
+        if stock.dataset_kind != "stock_bars":
+            raise ValueError("evaluate_alpha_signal stock_dataset_id must identify stock_bars")
+        if feature.dataset_kind != "feature_panel":
+            raise ValueError("evaluate_alpha_signal feature_set_id must identify feature_panel")
+        if stock.dataset_id not in feature.parent_dataset_ids:
+            raise ValueError("evaluate_alpha_signal feature set is not derived from the stock dataset")
+
     def submit_alpha(self, raw: dict) -> dict:
         try:
             from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
@@ -326,6 +344,8 @@ class JobStore(Registry):
                 self.audit_training_rejection("runtime", fields)
                 raise ValueError(f"Invalid Alpha training fields: {', '.join(fields[:20])}") from error
             raise
+        if request.kind == "evaluate_alpha_signal":
+            self._validate_signal_datasets(request)
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
         is_oos = request.kind == "evaluate_alpha_oos"
@@ -557,7 +577,7 @@ class JobStore(Registry):
         return self.get_job(job_id)
 
     def get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
-        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
+        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "rank_ic_by_decision", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
         job = self.get_job(job_id)

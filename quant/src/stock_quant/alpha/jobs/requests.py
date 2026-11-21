@@ -1,6 +1,7 @@
 """Versioned Alpha job requests. No caller-controlled filesystem paths."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_validator
@@ -8,6 +9,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_v
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
+from ..models.signal_diagnostics import DirectSignalSpec
 from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
 
 
@@ -73,6 +75,38 @@ class ComputeOptionFactorsJob(AlphaJobBase):
     factor_spec: dict = Field(default_factory=dict)
     pricing_config: dict = Field(default_factory=dict)
     underlying_price_dataset_id: Hash | None = None
+
+
+class SignalEvaluationWindow(StrictModel):
+    start: AwareDatetime
+    end: AwareDatetime
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.start >= self.end:
+            raise ValueError("Expected evaluation_window.start < evaluation_window.end")
+        return self
+
+
+class EvaluateAlphaSignalJob(AlphaJobBase):
+    kind: Literal["evaluate_alpha_signal"]
+    feature_set_id: Hash
+    stock_dataset_id: Hash
+    label_name: str = Field(default="stock_forward_return", min_length=1, max_length=128)
+    target_type: Literal["stock_return"] = "stock_return"
+    horizon_days: Literal[5] = 5
+    split: ModelDevelopmentSplit
+    evaluation_window: SignalEvaluationWindow
+    signal_spec: DirectSignalSpec
+
+    @model_validator(mode="after")
+    def development_only(self):
+        if self.evaluation_window.start < self.split.train_start or self.evaluation_window.end > self.split.validation_end:
+            raise ValueError("evaluation window must stay within development split")
+        reserved_test_start = datetime(2012, 1, 1, tzinfo=timezone.utc)
+        if self.split.validation_end > reserved_test_start:
+            raise ValueError("validation_end must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
+        return self
 
 
 class TrainAlphaModelJob(AlphaJobBase):
@@ -158,13 +192,13 @@ class BacktestOptionsJob(AlphaJobBase):
 
 AlphaJobRequest = Annotated[
     PrepareStockDatasetJob | CaptureOptionChainJob | PrepareOptionsDatasetJob | ComputeFactorsJob |
-    ComputeOptionFactorsJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
+    ComputeOptionFactorsJob | EvaluateAlphaSignalJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
     PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
     Field(discriminator="kind"),
 ]
 ALPHA_REQUEST_ADAPTER = TypeAdapter(AlphaJobRequest)
 ALPHA_KINDS = {
     "prepare_dataset", "capture_option_chain", "prepare_options_dataset", "compute_factors",
-    "compute_option_factors", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
+    "compute_option_factors", "evaluate_alpha_signal", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
     "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
 }

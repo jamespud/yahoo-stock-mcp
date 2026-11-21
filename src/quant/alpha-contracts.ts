@@ -50,6 +50,23 @@ export const labelSpec = z.object({
   horizon_days: z.number().int().min(1).max(252).optional(),
 }).strict();
 
+export const directSignalSpec = z.object({
+  factor_name: z.string().min(1).max(128),
+  score_multiplier: z.union([z.literal(1), z.literal(-1)]),
+  version: z.literal("direct-factor-v1"),
+}).strict();
+
+export const evaluateAlphaSignalInput = z.object({
+  feature_set_id: alphaHash,
+  stock_dataset_id: alphaHash,
+  label_name: z.string().min(1).max(128).optional(),
+  target_type: z.literal("stock_return").optional(),
+  horizon_days: z.literal(5).optional(),
+  windows: developmentWindows,
+  evaluation_window: alphaPeriod,
+  signal_spec: directSignalSpec,
+}).strict();
+
 export const prepareAlphaDatasetInput = z.object({
   source: z.enum(["yahoo"]),
   symbols: z.array(z.string().min(1).max(64)).min(1).max(1000),

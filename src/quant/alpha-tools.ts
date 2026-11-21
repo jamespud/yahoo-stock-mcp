@@ -10,6 +10,7 @@ import {
   captureOptionsSnapshotInput,
   computeFactorsInput,
   computeOptionFactorsInput,
+  evaluateAlphaSignalInput,
   predictAlphaInput,
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
@@ -74,6 +75,16 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     "Submit option volatility factor computation with explicit pricing configuration and PIT quote semantics.",
     computeOptionFactorsInput.shape,
     async (args) => submit({ kind: "compute_option_factors", ...args }),
+  );
+
+  server.tool(
+    "quant_evaluate_alpha_signal",
+    "Submit a deterministic development-only direct-factor Rank IC diagnostic. Reads stock and feature windows inside the Validation development boundary and never reads reserved Test artifacts.",
+    evaluateAlphaSignalInput.shape,
+    async (args) => {
+      const { windows, ...rest } = args;
+      return submit({ kind: "evaluate_alpha_signal", ...rest, split: windows });
+    },
   );
 
   server.registerTool(

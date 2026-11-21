@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
 
@@ -33,6 +33,7 @@ from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
+from ..models.signal_diagnostics import evaluate_direct_signal, expected_session_dates
 from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
@@ -40,7 +41,7 @@ from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backte
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
-    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, FreezeAlphaSelectionJob,
+    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, EvaluateAlphaSignalJob, FreezeAlphaSelectionJob,
     PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
 )
 
@@ -179,6 +180,93 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
+        elif isinstance(request, EvaluateAlphaSignalJob):
+            feature_manifest = datasets.load_manifest(request.feature_set_id)
+            if feature_manifest.dataset_kind != "feature_panel":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a feature_panel dataset")
+            stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            if stock_manifest.dataset_kind != "stock_bars":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a stock_bars dataset")
+            if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
+            calendar = mapped_stock_calendar(stock_manifest)
+            if calendar is None:
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Signal diagnostics require a mapped stock calendar")
+            expected_sessions = expected_session_dates(
+                calendar,
+                request.evaluation_window.start.date(),
+                request.evaluation_window.end.date(),
+            )
+            if not expected_sessions:
+                raise AlphaError(AlphaErrorCode.INSUFFICIENT_HISTORY, "Evaluation window contains no scheduled sessions")
+            bounded(.1)
+            feature_rows = datasets.read_rows(
+                request.feature_set_id,
+                columns=(
+                    "decision_at", "instrument_id", "factor_name", "factor_value",
+                    "feature_available_at", "eligible", "quality_flags", "factor_version",
+                ),
+                start_at=request.evaluation_window.start,
+                end_at=request.evaluation_window.end,
+            )
+            bounded(.45)
+            stock_rows = datasets.read_rows(
+                request.stock_dataset_id,
+                start_at=request.evaluation_window.start,
+                end_at=request.split.validation_end,
+            )
+            labels = stock_forward_labels(
+                stock_rows,
+                horizon=request.horizon_days,
+                calendar=calendar,
+            )
+            bounded(.75)
+            diagnostics = evaluate_direct_signal(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
+            bounded(.95)
+            evaluation_window = {
+                "start": request.evaluation_window.start.isoformat(),
+                "end": request.evaluation_window.end.isoformat(),
+            }
+            summary = {
+                **diagnostics["summary"],
+                "feature_set_id": request.feature_set_id,
+                "stock_dataset_id": request.stock_dataset_id,
+                "label_name": request.label_name,
+                "target_type": request.target_type,
+                "horizon_days": request.horizon_days,
+                "evaluation_window": evaluation_window,
+            }
+            source_windows = {
+                "feature_start": request.evaluation_window.start.isoformat(),
+                "feature_end": request.evaluation_window.end.isoformat(),
+                "stock_start": request.evaluation_window.start.isoformat(),
+                "stock_end": request.split.validation_end.isoformat(),
+            }
+            result = {
+                "summary": summary,
+                "rank_ic_by_decision": diagnostics["rank_ic_by_decision"],
+                "reproducibility": {
+                    "signal_spec": request.signal_spec.model_dump(mode="json"),
+                    "signal_spec_hash": summary["signal_spec_hash"],
+                    "feature_set_id": request.feature_set_id,
+                    "stock_dataset_id": request.stock_dataset_id,
+                    "label_name": request.label_name,
+                    "label_version": summary["label_version"],
+                    "target_type": request.target_type,
+                    "horizon_days": request.horizon_days,
+                    "calendar_version": stock_manifest.calendar_version,
+                    "calendar_id": getattr(calendar, "id", None),
+                    "evaluation_window": evaluation_window,
+                    "source_windows": source_windows,
+                    "reserved_test_start": datetime(2012, 1, 1, tzinfo=timezone.utc).isoformat(),
+                },
+            }
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
             if request.evaluation_mode == "validation_only":
