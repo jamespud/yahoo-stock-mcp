@@ -8,8 +8,7 @@ import {fileURLToPath} from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const python = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
-const evidencePath = resolve(root, "docs/evidence/alpha-diagnostics-v1-3.json");
-const checksumPath = resolve(root, "docs/evidence/alpha-diagnostics-v1-3.sha256");
+const defaultEvidencePath = resolve(root, "docs/evidence/alpha-diagnostics-v1-3.json");
 const sourceBaseCommit = "ad6f15e735249573dfa096e32c682c131a721bd2";
 
 function parseArgs(argv) {
@@ -21,6 +20,7 @@ function parseArgs(argv) {
     else if (arg === "--replace-evidence") result.replaceEvidence = true;
     else if (arg === "--synthetic-report") result.syntheticReport = resolve(argv[++index]);
     else if (arg === "--command-results") result.commandResults = resolve(argv[++index]);
+    else if (arg === "--evidence-path") result.evidencePath = resolve(argv[++index]);
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if (!result.syntheticReport && !result.writeEvidence) result.checkEvidence = true;
@@ -51,8 +51,24 @@ function runPython(script, args = []) {
 
 const protocol = JSON.parse(runPython(String.raw`
 import json
-from stock_quant.alpha.models.diagnostic_protocol import PROTOCOL_HASH, frozen_protocol
-print(json.dumps({"hash": PROTOCOL_HASH, "document": frozen_protocol()}, sort_keys=True, separators=(",", ":"), allow_nan=False))
+from stock_quant.alpha.models.diagnostic_protocol import (
+    EXPECTED_NPM_TEST_FAILURE_LABELS,
+    NPM_TEST_BASELINE_COMMIT,
+    NPM_TEST_FAILED_SUITE,
+    PROTOCOL_HASH,
+    frozen_protocol,
+    protocol_canonical_json,
+)
+print(json.dumps({
+    "hash": PROTOCOL_HASH,
+    "canonical_json": protocol_canonical_json(),
+    "document": frozen_protocol(),
+    "npm_test_baseline": {
+        "baseline_commit": NPM_TEST_BASELINE_COMMIT,
+        "failed_suite": NPM_TEST_FAILED_SUITE,
+        "failure_labels": list(EXPECTED_NPM_TEST_FAILURE_LABELS),
+    },
+}, sort_keys=True, separators=(",", ":"), allow_nan=False))
 `));
 
 const synthetic = JSON.parse(runPython(String.raw`
@@ -496,9 +512,58 @@ assert.equal(synthetic.test_oos_executions, 0);
 assert.equal(synthetic.reserved_test_reads, 0);
 
 const options = parseArgs(process.argv.slice(2));
+const activeEvidencePath = options.evidencePath || defaultEvidencePath;
+const activeChecksumPath = activeEvidencePath.endsWith(".json")
+  ? `${activeEvidencePath.slice(0, -5)}.sha256`
+  : `${activeEvidencePath}.sha256`;
 if (options.syntheticReport) {
   mkdirSync(dirname(options.syntheticReport), {recursive: true});
   writeFileSync(options.syntheticReport, JSON.stringify(synthetic, null, 2) + "\n");
+}
+
+function protocolBody(protocolRecord) {
+  const derived = new Set(["protocol_hash", "source_protocol_hash", "symbol_count", "symbols"]);
+  return Object.fromEntries(Object.entries(protocolRecord).filter(([key]) => !derived.has(key)));
+}
+
+function assertProtocolIntegrity(evidence) {
+  const body = protocolBody(evidence.protocol);
+  assert.deepEqual(body, protocol.document, "Protocol body differs from the canonical frozen diagnostics protocol");
+  assert.equal(
+    `sha256:${sha256(canonicalJson(body))}`,
+    evidence.protocol.protocol_hash,
+    "Protocol hash does not independently rehash the embedded protocol body",
+  );
+  assert.equal(evidence.protocol.protocol_hash, protocol.hash);
+  assert.deepEqual(evidence.protocol.symbols, protocol.document.source_identity.symbols);
+}
+
+function assertNpmTestDisclosure(npmTest) {
+  assert(npmTest && typeof npmTest === "object", "npm test disclosure is required");
+  const baseline = protocol.npm_test_baseline;
+  assert.equal(npmTest.status, "FAILED", "npm test must be disclosed as FAILED");
+  assert.equal(npmTest.exit_code, 1, "npm test must retain exit code 1");
+  assert.equal(npmTest.failed_suite, baseline.failed_suite, "npm test failed suite mismatch");
+  assert.equal(npmTest.failure_count, baseline.failure_labels.length, "npm test failure count mismatch");
+  assert.deepEqual(npmTest.failure_labels, baseline.failure_labels, "npm test failure labels do not match baseline");
+  assert.equal(npmTest.failure_labels_match_saved_baseline, true, "npm test baseline comparison must be true");
+  assert.equal(npmTest.baseline_commit, baseline.baseline_commit, "npm test baseline commit mismatch");
+  assert.equal(npmTest.byte_identical_logs, false, "npm test logs must not claim byte identity");
+  const scope = String(npmTest.comparison_scope || "").toLowerCase();
+  assert(scope.includes("not byte-identical") && scope.includes("not green"), "npm test must remain explicitly non-green");
+}
+
+function assertEvidenceSemantics(evidence) {
+  assertProtocolIntegrity(evidence);
+  assertNpmTestDisclosure(evidence.full_npm_test);
+  assert.equal(evidence.statuses.SYNTHETIC_CONTRACT_VALIDATION, "PASS");
+  assert.equal(evidence.statuses.RESEARCH_DIAGNOSTIC_READINESS, "NOT_TESTED");
+  assert.equal(evidence.statuses.REAL_MARKET_TRADING_VALIDITY, "BLOCKED");
+  assert.equal(evidence.real_study.status, "NOT_EXECUTED");
+  assert.equal(evidence.real_study.test_oos_executions, 0);
+  assert.equal(evidence.real_study.candidate_promotions, 0);
+  assert.equal(evidence.synthetic_acceptance.report_hash, `sha256:${reportHash}`);
+  assert.deepEqual(evidence.synthetic_acceptance.sections, synthetic.sections);
 }
 
 function syntheticAttachment() {
@@ -516,7 +581,7 @@ function syntheticAttachment() {
   };
 }
 
-function evidenceDocument(commandResults = null) {
+function evidenceDocument(commandResults) {
   const document = protocol.document;
   return {
     schema_version: "alpha-diagnostics-evidence-v1",
@@ -551,38 +616,28 @@ function evidenceDocument(commandResults = null) {
     },
     synthetic_acceptance: syntheticAttachment(),
     commands: commandResults?.commands || [],
-    full_npm_test: commandResults?.full_npm_test || {
-      status: "NOT_TESTED",
-      comparison_scope: "Not recorded yet",
-    },
-    baseline_comparison: commandResults?.baseline_comparison || null,
+    full_npm_test: commandResults.full_npm_test,
+    baseline_comparison: commandResults.baseline_comparison,
     evidence_scope: "SYNTHETIC_CONTRACT_VALIDATION_ONLY",
     claim_boundaries: document.claim_boundaries,
   };
 }
 
 function verifyCommittedEvidence() {
-  assert(existsSync(evidencePath), `Missing evidence attachment: ${evidencePath}`);
-  assert(existsSync(checksumPath), `Missing evidence checksum: ${checksumPath}`);
-  const bytes = readFileSync(evidencePath);
+  assert(existsSync(activeEvidencePath), `Missing evidence attachment: ${activeEvidencePath}`);
+  assert(existsSync(activeChecksumPath), `Missing evidence checksum: ${activeChecksumPath}`);
+  const bytes = readFileSync(activeEvidencePath);
   const evidence = JSON.parse(bytes.toString("utf8"));
-  const expectedLine = `${sha256(bytes)}  ${resolve(evidencePath).split("/").at(-1)}`;
-  assert.equal(readFileSync(checksumPath, "utf8").trim(), expectedLine, "Evidence SHA-256 mismatch");
+  const expectedLine = `${sha256(bytes)}  ${resolve(activeEvidencePath).split("/").at(-1)}`;
+  assert.equal(readFileSync(activeChecksumPath, "utf8").trim(), expectedLine, "Evidence SHA-256 mismatch");
   runPython(String.raw`
 import json, sys
 from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
 with open(sys.argv[1], encoding="utf-8") as handle:
     validate_diagnostic_evidence(json.load(handle))
-`, [evidencePath]);
-  assert.equal(evidence.protocol.protocol_hash, protocol.hash);
+`, [activeEvidencePath]);
+  assertEvidenceSemantics(evidence);
   assert.equal(evidence.protocol.symbol_count, 50);
-  assert.deepEqual(evidence.protocol.symbols, protocol.document.source_identity.symbols);
-  assert.equal(evidence.synthetic_acceptance.report_hash, `sha256:${reportHash}`);
-  assert.deepEqual(evidence.synthetic_acceptance.sections, synthetic.sections);
-  assert.equal(evidence.statuses.REAL_MARKET_TRADING_VALIDITY, "BLOCKED");
-  assert.equal(evidence.statuses.RESEARCH_DIAGNOSTIC_READINESS, "NOT_TESTED");
-  assert.equal(evidence.real_study.test_oos_executions, 0);
-  assert.equal(evidence.real_study.candidate_promotions, 0);
   const serialized = JSON.stringify(evidence);
   assert(!serialized.includes("/home/spud"), "Evidence contains a private filesystem path");
   assert(!serialized.includes("raw_bars"), "Evidence contains raw bar data");
@@ -590,17 +645,19 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 }
 
 function writeCommittedEvidence() {
-  if (existsSync(evidencePath) && !options.replaceEvidence) {
+  if (existsSync(activeEvidencePath) && !options.replaceEvidence) {
     throw new Error("Evidence already exists; pass --replace-evidence to replace it");
   }
-  const commandResults = options.commandResults
-    ? JSON.parse(readFileSync(options.commandResults, "utf8"))
-    : null;
+  if (!options.commandResults) {
+    throw new Error("Evidence regeneration requires npm test command results");
+  }
+  const commandResults = JSON.parse(readFileSync(options.commandResults, "utf8"));
   const evidence = evidenceDocument(commandResults);
+  assertEvidenceSemantics(evidence);
   const bytes = Buffer.from(JSON.stringify(evidence, null, 2) + "\n");
-  mkdirSync(dirname(evidencePath), {recursive: true});
-  writeFileSync(evidencePath, bytes);
-  writeFileSync(checksumPath, `${sha256(bytes)}  ${resolve(evidencePath).split("/").at(-1)}\n`);
+  mkdirSync(dirname(activeEvidencePath), {recursive: true});
+  writeFileSync(activeEvidencePath, bytes);
+  writeFileSync(activeChecksumPath, `${sha256(bytes)}  ${resolve(activeEvidencePath).split("/").at(-1)}\n`);
 }
 
 if (options.writeEvidence) writeCommittedEvidence();

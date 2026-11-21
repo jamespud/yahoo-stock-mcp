@@ -29,13 +29,17 @@ def _replace(value, path: tuple[object, ...], replacement):
 
 
 def _run_check(*args: str) -> subprocess.CompletedProcess[str]:
+    return _run_script("--check-evidence", *args)
+
+
+def _run_script(*args: str) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "PYTHONPATH": str(ROOT / "quant/src"),
         "QUANT_PYTHON": str(PYTHON),
     }
     return subprocess.run(
-        ["node", str(SCRIPT), "--check-evidence", *args],
+        ["node", str(SCRIPT), *args],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -63,6 +67,18 @@ def test_protocol_embeds_the_frozen_50_symbol_identity_without_external_paths():
     assert SOURCE_SYMBOLS[0] == "AAPL"
     assert SOURCE_SYMBOLS[-1] == "ORLY"
     assert "legacy" in source["universe_version_note"].lower()
+    assert protocol["selection"]["validation_subperiods"] == [
+        {
+            "start": "2008-01-14T00:00:00Z",
+            "end": "2010-01-01T00:00:00Z",
+            "min_rank_ic": 0.0,
+        },
+        {
+            "start": "2010-01-01T00:00:00Z",
+            "end": "2012-01-01T00:00:00Z",
+            "min_rank_ic": 0.0,
+        },
+    ]
     assert "/home/spud" not in json.dumps(protocol, sort_keys=True)
 
 
@@ -75,6 +91,12 @@ def test_protocol_embeds_the_frozen_50_symbol_identity_without_external_paths():
         (("candidates", 0, "configs", 0, "num_leaves"), 8),
         (("calendar", "policy_version"), "mapped-stock-calendar-v2"),
         (("selection", "metric_versions", "daily_rank_ic"), "daily-rank-ic-v2"),
+        (("selection", "validation_subperiods", 0, "start"), "2008-01-15T00:00:00Z"),
+        (("selection", "validation_subperiods", 0, "end"), "2010-01-02T00:00:00Z"),
+        (("selection", "validation_subperiods", 0, "min_rank_ic"), 0.01),
+        (("selection", "validation_subperiods", 1, "start"), "2010-01-02T00:00:00Z"),
+        (("selection", "validation_subperiods", 1, "end"), "2011-12-31T00:00:00Z"),
+        (("selection", "validation_subperiods", 1, "min_rank_ic"), 0.01),
         (("bootstrap", "draws"), 1999),
         (("budgets", "training", "max_trainings"), 11),
     ],
@@ -136,6 +158,11 @@ def test_committed_evidence_is_sanitized_and_checksum_verified():
     assert evidence["statuses"]["SYNTHETIC_CONTRACT_VALIDATION"] == "PASS"
     assert evidence["real_study"]["test_oos_executions"] == 0
     assert evidence["real_study"]["candidate_promotions"] == 0
+    assert evidence["full_npm_test"]["status"] == "FAILED"
+    assert evidence["full_npm_test"]["failure_count"] == 11
+    assert evidence["full_npm_test"]["failure_labels_match_saved_baseline"] is True
+    assert evidence["full_npm_test"]["byte_identical_logs"] is False
+    assert "not green" in evidence["full_npm_test"]["comparison_scope"].lower()
 
 
 def test_evidence_validator_rejects_a_real_market_or_promotion_claim():
@@ -151,6 +178,115 @@ def test_evidence_validator_rejects_a_real_market_or_promotion_claim():
         validate_diagnostic_evidence(inflated)
     with pytest.raises(ValueError, match="candidate promotion"):
         validate_diagnostic_evidence(promoted)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["protocol"]["signals"][0].update({"score_multiplier": -1}),
+        lambda value: value["protocol"]["source_identity"]["symbols"].__setitem__(-1, "ZZZZ"),
+        lambda value: value["protocol"]["bootstrap"].update({"draws": 1999}),
+    ],
+)
+def test_evidence_validator_independently_rehashes_and_deep_compares_protocol_body(mutation):
+    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    retained_hash = evidence["protocol"]["protocol_hash"]
+    mutation(evidence)
+    assert evidence["protocol"]["protocol_hash"] == retained_hash
+
+    with pytest.raises(ValueError, match="(?i)protocol body|protocol hash"):
+        validate_diagnostic_evidence(evidence)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["full_npm_test"].update({"status": "NOT_TESTED"}),
+        lambda value: value["full_npm_test"].update({"failure_count": 10}),
+        lambda value: value["full_npm_test"]["failure_labels"].pop(),
+        lambda value: value["full_npm_test"].update({"failure_labels_match_saved_baseline": False}),
+        lambda value: value["full_npm_test"].update({"byte_identical_logs": True}),
+    ],
+)
+def test_evidence_validator_requires_truthful_non_green_npm_test_disclosure(mutation):
+    from stock_quant.alpha.models.diagnostic_protocol import validate_diagnostic_evidence
+
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    mutation(evidence)
+
+    with pytest.raises(ValueError, match="npm test"):
+        validate_diagnostic_evidence(evidence)
+
+
+def _write_tampered_evidence(tmp_path: Path, mutation) -> Path:
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    mutation(evidence)
+    evidence_path = tmp_path / "alpha-diagnostics-v1-3.json"
+    bytes_value = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode()
+    evidence_path.write_bytes(bytes_value)
+    checksum = tmp_path / "alpha-diagnostics-v1-3.sha256"
+    checksum.write_text(
+        f"{hashlib.sha256(bytes_value).hexdigest()}  {evidence_path.name}\n",
+        encoding="ascii",
+    )
+    return evidence_path
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["protocol"]["signals"][0].update({"score_multiplier": -1}),
+        lambda value: value["full_npm_test"].update({"status": "NOT_TESTED"}),
+    ],
+)
+def test_node_checker_rejects_tampered_protocol_or_npm_disclosure(tmp_path, mutation):
+    evidence_path = _write_tampered_evidence(tmp_path, mutation)
+    completed = _run_check("--evidence-path", str(evidence_path))
+
+    assert completed.returncode != 0
+    assert "protocol body" in completed.stderr.lower() or "npm test" in completed.stderr.lower()
+
+
+@pytest.mark.parametrize("with_command_results", [False, True])
+def test_evidence_regeneration_rejects_missing_or_not_tested_npm_results(tmp_path, with_command_results):
+    target = tmp_path / "target-evidence.json"
+    target.write_text("sentinel\n", encoding="ascii")
+    checksum = tmp_path / "target-evidence.sha256"
+    checksum.write_text("sentinel checksum\n", encoding="ascii")
+    args = [
+        "--write-evidence",
+        "--replace-evidence",
+        "--evidence-path",
+        str(target),
+    ]
+    if with_command_results:
+        command_results = tmp_path / "command-results.json"
+        command_results.write_text(
+            json.dumps({
+                "commands": [],
+                "full_npm_test": {"status": "NOT_TESTED"},
+                "baseline_comparison": None,
+            }),
+            encoding="utf-8",
+        )
+        args.extend(["--command-results", str(command_results)])
+
+    completed = _run_script(*args)
+
+    assert completed.returncode != 0
+    assert target.read_text(encoding="ascii") == "sentinel\n"
+    assert checksum.read_text(encoding="ascii") == "sentinel checksum\n"
+    assert "npm test" in completed.stderr.lower()
+
+
+def test_quant_workflow_paths_include_evidence_changes():
+    workflow = (ROOT / ".github/workflows/quant-regression.yml").read_text(encoding="utf-8")
+    push, pull_request = workflow.split("  pull_request:\n", 1)
+
+    assert "      - 'docs/evidence/**'\n" in push
+    assert "      - 'docs/evidence/**'\n" in pull_request
 
 
 def test_acceptance_runner_emits_b1_to_b5_and_validates_the_attachment(tmp_path):

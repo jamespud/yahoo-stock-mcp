@@ -1,6 +1,6 @@
 {
   "schema_version": "alpha-diagnostics-evidence-v1",
-  "generated_at": "2026-11-21T07:09:30.536Z",
+  "generated_at": "2026-11-21T07:56:20.950Z",
   "source_base_commit": "ad6f15e735249573dfa096e32c682c131a721bd2",
   "protocol": {
     "bootstrap": {
@@ -289,6 +289,18 @@
       "min_validation_rank_ic": 0.03,
       "selection_scope": "validation_only",
       "tie_rule": "first_iteration_on_exact_tie",
+      "validation_subperiods": [
+        {
+          "end": "2010-01-01T00:00:00Z",
+          "min_rank_ic": 0,
+          "start": "2008-01-14T00:00:00Z"
+        },
+        {
+          "end": "2012-01-01T00:00:00Z",
+          "min_rank_ic": 0,
+          "start": "2010-01-01T00:00:00Z"
+        }
+      ],
       "version": "frozen-validation-selection-v1.2"
     },
     "signals": [
@@ -391,7 +403,7 @@
         "start": "2008-01-14T00:00:00Z"
       }
     },
-    "protocol_hash": "sha256:b1e38c59d2a9154158871f284943b81f06e6f8a1d1cafdf10a885afea45741bc",
+    "protocol_hash": "sha256:4c823752eebe6043b2db1794b61e318de3c3110f6c7fe0612c04e44710d7caa7",
     "source_protocol_hash": "sha256:eb5dfc8902172c11fd5f9ff17e76a134fc264e9faa2edef84da56231d846a45d",
     "symbol_count": 50,
     "symbols": [
@@ -470,7 +482,7 @@
   "synthetic_acceptance": {
     "status": "PASS",
     "scope": "RESEARCH_DIAGNOSTIC_READINESS_SYNTHETIC_CONTRACT_VALIDATION",
-    "report_hash": "sha256:eb0ee08ecc5ad10c7d7bfc120d279af0a2a9c6b6e22afcd54da0f1e8e82f6104",
+    "report_hash": "sha256:928f28774c358626affe1fe1a724600f5607df15dca044e909c44aeda90b9214",
     "fixture": {
       "end": "2009-03-30",
       "kind": "deterministic_synthetic_development_fixture",
@@ -623,18 +635,18 @@
     {
       "command": "npm run test:quant",
       "exit_code": 0,
-      "duration_seconds": 92,
+      "duration_seconds": 98,
       "status": "PASS",
-      "summary": "514 passed, 25 skipped",
-      "log_sha256": "sha256:b66507a7106cb8fbb1db7df885981caa9eb9b02b0ed253179c44bd78232aff4a"
+      "summary": "533 passed, 25 skipped",
+      "log_sha256": "sha256:e9fe54dc1ae0aec209cf3722a7379f2ea1756d3c26d608fc4b1178d38d3cae9b"
     },
     {
       "command": "npm run test:quant-alpha",
       "exit_code": 0,
-      "duration_seconds": 76,
+      "duration_seconds": 83,
       "status": "PASS",
-      "summary": "305 passed",
-      "log_sha256": "sha256:06fe46aae62925cb396b964620fae008cc62403d647654c4e8a44d30dac68bdc"
+      "summary": "324 passed",
+      "log_sha256": "sha256:ba317dfe7e666ec5ee811d240a1d96cf14cfdf9a1984076c82923a405cf59d14"
     },
     {
       "command": "npm run test:quant-mcp",
@@ -647,26 +659,26 @@
     {
       "command": "npm run test:quant-alpha-mcp",
       "exit_code": 0,
-      "duration_seconds": 0,
+      "duration_seconds": 1,
       "status": "PASS",
       "summary": "4 tests passed, 0 failed",
-      "log_sha256": "sha256:0106ca10824ebee57df29501532b19da22341cf3c599d2e2bd7e8343dffc52f8"
+      "log_sha256": "sha256:590d1eccdb752242b709bca132bb5134a9b92bad9d0d5203b6eb76d8b7e1c743"
     },
     {
       "command": "npm run test:quant-alpha-e2e",
       "exit_code": 0,
-      "duration_seconds": 36,
+      "duration_seconds": 35,
       "status": "PASS",
       "summary": "2 tests passed, 0 failed",
-      "log_sha256": "sha256:35575b731ca992d4745103f2864df72f74df98fa07b07fd0a9827f8fe5e1cadf"
+      "log_sha256": "sha256:87fddffe77b2a78b4cf806686f1df6dce6379197044bc9016e39b036249b4573"
     },
     {
       "command": "npm run test:quant-alpha-diagnostics",
       "exit_code": 0,
-      "duration_seconds": 3,
+      "duration_seconds": 9,
       "status": "PASS",
-      "summary": "13 acceptance tests passed; real synthetic LightGBM B4; B1-B5 PASS; evidence checksum verified",
-      "log_sha256": "sha256:c911b9538346227f4555bb7b6ddde90fd10ebf4a601dbc45d46dc39db1f82d85"
+      "summary": "32 acceptance tests passed; protocol body rehash, npm disclosure, B1-B5, checksum verified",
+      "log_sha256": "sha256:a35b018d0b28067843d4c4ea8259a64d74859c786178ce661f032ec83241b948"
     },
     {
       "command": "npm run test:quant-alpha-scalability",
@@ -674,7 +686,7 @@
       "duration_seconds": 19,
       "status": "PASS",
       "summary": "2 tests passed, 0 failed",
-      "log_sha256": "sha256:f736d39849634458f8240de002020a3a04dcea661b751f70430a2db0be035b19"
+      "log_sha256": "sha256:9ec5961485b7491880aa5baf292c2042adef3aac0155234a12a9245cf29d411b"
     },
     {
       "command": "npm run test:quant-data-validity",
@@ -682,15 +694,15 @@
       "duration_seconds": 12,
       "status": "PASS",
       "summary": "Existing v1.2 archive command: 2 tests passed, 0 failed; DATA_QUALITY_ENGINEERING=PASS, RESEARCH_DIAGNOSTICS_READINESS=PASS, EXECUTION_ENGINEERING=PASS",
-      "log_sha256": "sha256:953cdb7ddd8af4da2c6a7714eac98d41387a7e7e58cb068b1102154e7e705e49"
+      "log_sha256": "sha256:cd1cc89d8199d13b3dd3ded893f34bc31f90a296ed048703f3df5158a04d299a"
     },
     {
       "command": "npm run test:quant-regression",
       "exit_code": 0,
-      "duration_seconds": 101,
+      "duration_seconds": 107,
       "status": "PASS",
       "summary": "status=PASSED; windows=4; candidates=4; evaluations=36",
-      "log_sha256": "sha256:5c9eecd2e137199b3fe173eb86276422e55b39b68dc72a315112e58e79b79f60"
+      "log_sha256": "sha256:fc308716aa0a41a33794143ed57a4f1dcb3b95debe7b3d73a5b08ad44c7a9b71"
     },
     {
       "command": "npm run test:skills",
@@ -738,11 +750,12 @@
     "failure_labels_match_saved_baseline": true,
     "baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",
     "comparison_scope": "Failure labels only; not byte-identical logs. Full npm test is not green.",
+    "byte_identical_logs": false,
     "observed_upstream_http_403": [
       "Yahoo",
       "Investing"
     ],
-    "log_sha256": "sha256:c240b272c76aa8ebd19c60cf574cda50c18a79c5c61d063f99ca59a5dc02e085"
+    "log_sha256": "sha256:f8c972519a44cc47235216d12c61df157f9ca066555c4e77959692e1a32fcac8"
   },
   "baseline_comparison": {
     "baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",

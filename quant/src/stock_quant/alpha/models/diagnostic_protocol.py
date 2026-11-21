@@ -1,14 +1,29 @@
 """Frozen Alpha v1.3 diagnostics protocol and claim-boundary validation."""
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from datetime import date, datetime, time, timezone
 from typing import Callable
 
-from ...compiler import digest
-
-
 SOURCE_PROTOCOL_HASH = "sha256:eb5dfc8902172c11fd5f9ff17e76a134fc264e9faa2edef84da56231d846a45d"
+NPM_TEST_BASELINE_COMMIT = "5b4ece411348620e9b73ce4e9508b59ff5f42770"
+NPM_TEST_FAILED_SUITE = "test:sqlite-sync-e2e"
+EXPECTED_NPM_TEST_FAILURE_LABELS = (
+    "FAIL  1. syncOne --full writes the fixture data into the target tables",
+    "FAIL  2. repeated full sync is idempotent (row counts stable, no duplicates)",
+    "FAIL  3. incremental sync updates the bar set and sync_state without duplicating",
+    "FAIL  4. options snapshot replacement is atomic: a bad row rolls the whole snapshot back",
+    "FAIL  5. a failing provider endpoint yields partial results without losing good data",
+    "FAIL  6. syncAll walks a non-empty instrument list and syncs each symbol",
+    "FAIL  7. syncSectors writes the ETF and sector rows for a seeded sector",
+    "FAIL  8. a NEW process reopens the database and continues incrementally",
+    "FAIL  10. provider priority: the primary wins, the fallback only fills NULL, and repeats are idempotent",
+    "FAIL  11. syncSectors({members:true}) writes real sector_members rows with DECIMAL weights",
+    "FAIL  13. a failing Investing response yields partial without losing the Yahoo data",
+)
+PROTOCOL_DERIVED_FIELDS = frozenset({"protocol_hash", "source_protocol_hash", "symbol_count", "symbols"})
 RESERVED_TEST_START = datetime(2012, 1, 1, tzinfo=timezone.utc)
 RESERVED_TEST_END = datetime(2015, 1, 1, tzinfo=timezone.utc)
 SYNTHETIC_START = datetime(2009, 1, 5, tzinfo=timezone.utc)
@@ -103,6 +118,18 @@ _FROZEN_PROTOCOL = {
         "min_validation_rank_ic": 0.03,
         "min_prediction_coverage": 0.8,
         "min_validation_icir": 0.0,
+        "validation_subperiods": [
+            {
+                "start": "2008-01-14T00:00:00Z",
+                "end": "2010-01-01T00:00:00Z",
+                "min_rank_ic": 0.0,
+            },
+            {
+                "start": "2010-01-01T00:00:00Z",
+                "end": "2012-01-01T00:00:00Z",
+                "min_rank_ic": 0.0,
+            },
+        ],
         "tie_rule": "first_iteration_on_exact_tie",
         "max_finalists": 1,
         "selection_scope": "validation_only",
@@ -190,11 +217,38 @@ def frozen_protocol() -> dict:
     return deepcopy(_FROZEN_PROTOCOL)
 
 
+def _canonical_protocol_value(value):
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _canonical_protocol_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_canonical_protocol_value(item) for item in value]
+    return value
+
+
+def protocol_canonical_json(protocol: dict | None = None) -> str:
+    value = _FROZEN_PROTOCOL if protocol is None else protocol
+    return json.dumps(
+        _canonical_protocol_value(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
 def protocol_hash(protocol: dict) -> str:
-    return digest(protocol)
+    return "sha256:" + hashlib.sha256(protocol_canonical_json(protocol).encode()).hexdigest()
 
 
 PROTOCOL_HASH = protocol_hash(_FROZEN_PROTOCOL)
+
+
+def protocol_body_from_evidence(protocol: dict) -> dict:
+    """Strip evidence-only derived fields without trusting their stored values."""
+    if not isinstance(protocol, dict):
+        raise ValueError("Protocol evidence must be an object")
+    return {key: deepcopy(value) for key, value in protocol.items() if key not in PROTOCOL_DERIVED_FIELDS}
 
 
 def _utc(value: date | datetime) -> datetime:
@@ -236,8 +290,13 @@ def validate_diagnostic_evidence(evidence: dict) -> None:
     if real_study.get("candidate_promotions") != 0:
         raise ValueError("candidate promotion is forbidden")
     protocol = evidence.get("protocol", {})
+    body = protocol_body_from_evidence(protocol)
+    if body != _FROZEN_PROTOCOL or protocol_canonical_json(body) != protocol_canonical_json(_FROZEN_PROTOCOL):
+        raise ValueError("Protocol body does not match the canonical frozen diagnostics protocol")
+    if protocol_hash(body) != protocol.get("protocol_hash"):
+        raise ValueError("Protocol hash does not independently rehash the embedded protocol body")
     if protocol.get("protocol_hash") != PROTOCOL_HASH:
-        raise ValueError("Protocol hash does not match the frozen diagnostics protocol")
+        raise ValueError("Protocol hash does not match the canonical frozen diagnostics protocol")
     if protocol.get("source_protocol_hash") != SOURCE_PROTOCOL_HASH:
         raise ValueError("Source protocol identity mismatch")
     if protocol.get("symbol_count") != 50 or protocol.get("symbols") != list(SOURCE_SYMBOLS):
@@ -247,3 +306,23 @@ def validate_diagnostic_evidence(evidence: dict) -> None:
         raise ValueError("Synthetic acceptance must contain exactly B1 through B5")
     if any(section.get("status") != "PASS" for section in sections.values()):
         raise ValueError("Every synthetic acceptance section must pass")
+    npm_test = evidence.get("full_npm_test")
+    if not isinstance(npm_test, dict):
+        raise ValueError("npm test disclosure is required")
+    if npm_test.get("status") != "FAILED" or npm_test.get("exit_code") != 1:
+        raise ValueError("npm test disclosure must record a FAILED exit 1")
+    if npm_test.get("failed_suite") != NPM_TEST_FAILED_SUITE:
+        raise ValueError("npm test disclosure has the wrong failed suite")
+    if npm_test.get("failure_count") != len(EXPECTED_NPM_TEST_FAILURE_LABELS):
+        raise ValueError("npm test disclosure has the wrong failure count")
+    if npm_test.get("failure_labels") != list(EXPECTED_NPM_TEST_FAILURE_LABELS):
+        raise ValueError("npm test failure labels do not match the saved baseline")
+    if npm_test.get("failure_labels_match_saved_baseline") is not True:
+        raise ValueError("npm test baseline comparison must be explicitly true")
+    if npm_test.get("baseline_commit") != NPM_TEST_BASELINE_COMMIT:
+        raise ValueError("npm test disclosure has the wrong baseline commit")
+    if npm_test.get("byte_identical_logs") is not False:
+        raise ValueError("npm test disclosure must state that logs are not byte-identical")
+    comparison_scope = str(npm_test.get("comparison_scope", "")).lower()
+    if "not byte-identical" not in comparison_scope or "not green" not in comparison_scope:
+        raise ValueError("npm test disclosure must explicitly remain not green")

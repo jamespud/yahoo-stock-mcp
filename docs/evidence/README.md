@@ -25,9 +25,11 @@ From this directory verify the sanitized attachment with `sha256sum -c alpha-sca
 
 ## Alpha diagnostics v1.3
 
-`alpha-diagnostics-v1-3.json` freezes the independent diagnostics protocol and records deterministic synthetic B1-B5 contract evidence. Its embedded 50-symbol membership and source protocol identity come from the v1.2 frozen protocol; the repository does not read that external path at runtime. The protocol hash covers the symbols, windows, D01 `+mom63` / D02 `-ret5` directions, candidate configurations, calendar policy, metric versions, bootstrap settings, environment and budgets.
+`alpha-diagnostics-v1-3.json` freezes the independent diagnostics protocol and records deterministic synthetic B1-B5 contract evidence. Its embedded 50-symbol membership and source protocol identity come from the v1.2 frozen protocol; the repository does not read that external path at runtime. The protocol hash covers the symbols, windows, both frozen Validation subperiod gates, D01 `+mom63` / D02 `-ret5` directions, candidate configurations, calendar policy, metric versions, bootstrap settings, environment and budgets.
 
 The attachment distinguishes `SYNTHETIC_CONTRACT_VALIDATION: PASS` from the real-study gate. Real diagnostics were not executed because PR A's historical calendar gate is still `BLOCKED`, so `RESEARCH_DIAGNOSTIC_READINESS` remains `NOT_TESTED`, `REAL_MARKET_TRADING_VALIDITY` remains `BLOCKED`, and Test/OOS execution and candidate promotion remain zero.
+
+Validation independently rehashes and deep-compares the embedded protocol body. It also requires the full `npm test` disclosure to remain `FAILED` with the exact 11 saved baseline-compatible labels, `failure_labels_match_saved_baseline: true`, and `byte_identical_logs: false`; regeneration fails if that evidence is missing or claims the suite is green.
 
 Run and verify the synthetic acceptance contract with:
 
