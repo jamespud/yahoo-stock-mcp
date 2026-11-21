@@ -88,9 +88,12 @@ jobs:
       - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
-      - run: npm run test:quant-alpha-diagnostics
+      - name: Run Alpha diagnostics acceptance
         env:
           QUANT_PYTHON: python
+        run: |
+          python -m pytest quant/tests/alpha/test_alpha_diagnostics_acceptance.py -q
+          QUANT_PYTHON=python node scripts/quant-eval/run-alpha-diagnostics-acceptance.mjs --check-evidence
       - run: npm run test:quant-alpha-scalability
         env:
           QUANT_PYTHON: python
@@ -136,9 +139,12 @@ jobs:
       - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
-      - run: npm run test:quant-alpha-diagnostics
+      - name: Run Alpha diagnostics acceptance
         env:
           QUANT_PYTHON: python
+        run: |
+          python -m pytest quant/tests/alpha/test_alpha_diagnostics_acceptance.py -q
+          QUANT_PYTHON=python node scripts/quant-eval/run-alpha-diagnostics-acceptance.mjs --check-evidence
       - run: npm run test:quant-alpha-scalability
         env:
           QUANT_PYTHON: python

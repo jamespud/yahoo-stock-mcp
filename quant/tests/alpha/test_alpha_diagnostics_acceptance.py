@@ -432,6 +432,9 @@ def test_quant_workflow_paths_include_evidence_changes():
     checkouts = workflow.split("      - uses: actions/checkout@v4\n")
     assert len(checkouts) == 3
     assert all("        with:\n          fetch-depth: 0\n" in block for block in checkouts[1:])
+    assert "npm run test:quant-alpha-diagnostics" not in workflow
+    assert "python -m pytest quant/tests/alpha/test_alpha_diagnostics_acceptance.py -q" in workflow
+    assert "node scripts/quant-eval/run-alpha-diagnostics-acceptance.mjs --check-evidence" in workflow
 
 
 def test_acceptance_runner_emits_b1_to_b5_and_validates_the_attachment(tmp_path):
