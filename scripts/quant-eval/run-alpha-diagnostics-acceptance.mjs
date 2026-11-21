@@ -667,6 +667,8 @@ function writeCommittedEvidence() {
     throw new Error("Evidence regeneration requires npm test command results");
   }
   const commandResults = JSON.parse(readFileSync(options.commandResults, "utf8"));
+  const evidence = evidenceDocument(commandResults);
+  assertEvidenceSemantics(evidence);
   const currentCommit = gitOutput("rev-parse", "HEAD");
   const dirty = gitOutput("status", "--porcelain", "--untracked-files=normal");
   const allowedEvidencePaths = new Set([
@@ -674,12 +676,10 @@ function writeCommittedEvidence() {
     "docs/evidence/alpha-diagnostics-v1-3.sha256",
   ]);
   const unexpectedChanges = dirty
-    ? dirty.split("\n").map(line => line.slice(3).trim()).filter(path => !allowedEvidencePaths.has(path))
+    ? dirty.split("\n").map(line => line.replace(/^[ MADRCU?!]{2}\s/, "").trim()).filter(path => !allowedEvidencePaths.has(path))
     : [];
   assert.equal(unexpectedChanges.length, 0, `Evidence regeneration requires a clean source worktree: ${unexpectedChanges.join(", ")}`);
   assert.equal(commandResults.source_commit, currentCommit, "Evidence command results source commit mismatch");
-  const evidence = evidenceDocument(commandResults);
-  assertEvidenceSemantics(evidence);
   const bytes = Buffer.from(JSON.stringify(evidence, null, 2) + "\n");
   mkdirSync(dirname(activeEvidencePath), {recursive: true});
   writeFileSync(activeEvidencePath, bytes);
