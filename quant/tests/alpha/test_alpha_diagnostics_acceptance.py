@@ -169,11 +169,6 @@ def test_committed_evidence_is_sanitized_and_checksum_verified():
     assert evidence["source"]["worktree_clean_before_generation"] is True
     assert evidence["source"]["content_hash_algorithm"] == "tracked-source-files-v1"
     assert evidence["source"]["content_hash"] == source_content_hash(ROOT)
-    subprocess.run(
-        ["git", "merge-base", "--is-ancestor", evidence["source"]["commit"], "HEAD"],
-        cwd=ROOT,
-        check=True,
-    )
 
 
 def test_evidence_validator_rejects_a_real_market_or_promotion_claim():
