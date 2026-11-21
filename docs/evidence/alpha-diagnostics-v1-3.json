@@ -1,0 +1,763 @@
+{
+  "schema_version": "alpha-diagnostics-evidence-v1",
+  "generated_at": "2026-11-21T07:09:30.536Z",
+  "source_base_commit": "ad6f15e735249573dfa096e32c682c131a721bd2",
+  "protocol": {
+    "bootstrap": {
+      "block_weeks": 4,
+      "draws": 2000,
+      "interval": 0.95,
+      "minimum_finite_draws": 1900,
+      "minimum_valid_ics": 8,
+      "minimum_weeks": 8,
+      "percentile_method": "linear",
+      "rng": "PCG64",
+      "seed": 20261120,
+      "version": "weekly-moving-block-bootstrap-v1"
+    },
+    "budgets": {
+      "diagnostics": {
+        "direct_signal_count": 2,
+        "max_result_page_rows": 1000,
+        "mcp_frame_bytes": 4194304,
+        "serialized_page_rows_bytes": 2500000,
+        "top20_group_size": 20
+      },
+      "training": {
+        "count_failed_executions": true,
+        "max_configs_each": 2,
+        "max_hypotheses": 6,
+        "max_trainings": 12,
+        "planned_trainings": 12
+      }
+    },
+    "calendar": {
+      "boundary_spillover": "FORBIDDEN",
+      "decision_frequency": "1d",
+      "entry_rule": "next_eligible_session_open",
+      "exit_rule": "five_eligible_sessions_after_entry",
+      "historical_bounds_policy": "UNRESOLVED_PR_A_A3",
+      "historical_calendar_gate": "BLOCKED",
+      "label_version": "session-aligned-v2",
+      "policy_version": "mapped-stock-calendar-v1",
+      "weekly_decision_rule": "last_actual_scheduled_session_per_iso_week"
+    },
+    "candidates": [
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "mom63",
+          "mom126",
+          "skip5mom"
+        ],
+        "id": "H01",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 127
+      },
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "ret1",
+          "ret5",
+          "rsi5"
+        ],
+        "id": "H02",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 7
+      },
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "vol20",
+          "vol60"
+        ],
+        "id": "H03",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 62
+      },
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "ret1",
+          "volume_ratio",
+          "price_volume"
+        ],
+        "id": "H04",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 21
+      },
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "mom63",
+          "vol20",
+          "trend_vol",
+          "interaction"
+        ],
+        "id": "H05",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 64
+      },
+      {
+        "configs": [
+          {
+            "id": "C1",
+            "learning_rate": 0.03,
+            "max_depth": 3,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 7,
+            "random_seed": 20261120
+          },
+          {
+            "id": "C2",
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "min_child_samples": 100,
+            "n_estimators": 150,
+            "num_leaves": 15,
+            "random_seed": 20261120
+          }
+        ],
+        "factor_outputs": [
+          "ret1",
+          "ret5",
+          "mom63",
+          "mom126",
+          "vol20",
+          "volume_ratio",
+          "trend_vol"
+        ],
+        "id": "H06",
+        "model_version": "validation-only-lightgbm-v1",
+        "promotion_allowed": false,
+        "warmup_observations": 127
+      }
+    ],
+    "claim_boundaries": [
+      "Yahoo price basis remains unverified",
+      "corporate actions are incomplete",
+      "historical revisions and PIT membership unavailable",
+      "predictive label groups are not executable backtests",
+      "no candidate promotion from diagnostic output",
+      "REAL_MARKET_TRADING_VALIDITY remains BLOCKED"
+    ],
+    "data_gates": {
+      "max_missing_symbols": 0,
+      "max_nonfinite_features": 0,
+      "max_unexpected_factor_missing": 0,
+      "max_unexpected_session_anomalies": 0,
+      "min_observed_symbols": 50,
+      "require_session_coverage_report": true,
+      "volume_missingness_must_be_reported": true
+    },
+    "environment": {
+      "dependencies": {
+        "lightgbm": ">=4.5,<5",
+        "numpy": ">=2.3,<3",
+        "pandas": ">=2.2,<4",
+        "pydantic": ">=2.12,<3",
+        "scipy": ">=1.13,<2"
+      },
+      "deterministic_execution": {
+        "bootstrap_rng": "PCG64",
+        "lightgbm_deterministic": true,
+        "lightgbm_force_col_wise": true,
+        "lightgbm_num_threads": 1
+      },
+      "node": "22",
+      "python": {
+        "ci": "3.12",
+        "requires": ">=3.12",
+        "scheduled_compatibility": "3.14"
+      },
+      "quant_package": "yahoo-stock-quant==0.1.0"
+    },
+    "frozen_at": "2026-11-20T00:00:00Z",
+    "protocol_version": "alpha-diagnostics-v1.3",
+    "schema_version": "alpha-diagnostic-protocol-v1",
+    "selection": {
+      "candidate_promotion": "FORBIDDEN_IN_DIAGNOSTICS",
+      "max_finalists": 1,
+      "metric_versions": {
+        "daily_rank_ic": "validation-daily-rank-ic-v1",
+        "l2": "validation-l2-rmse-v1",
+        "weekly_rank_ic": "validation-weekly-rank-ic-v1"
+      },
+      "min_prediction_coverage": 0.8,
+      "min_validation_icir": 0,
+      "min_validation_rank_ic": 0.03,
+      "selection_scope": "validation_only",
+      "tie_rule": "first_iteration_on_exact_tie",
+      "version": "frozen-validation-selection-v1.2"
+    },
+    "signals": [
+      {
+        "factor_name": "mom63",
+        "id": "D01",
+        "score_multiplier": 1,
+        "version": "direct-factor-v1"
+      },
+      {
+        "factor_name": "ret5",
+        "id": "D02",
+        "score_multiplier": -1,
+        "version": "direct-factor-v1"
+      }
+    ],
+    "source_identity": {
+      "kind": "alpha-v1.2-frozen-protocol",
+      "protocol_hash": "sha256:eb5dfc8902172c11fd5f9ff17e76a134fc264e9faa2edef84da56231d846a45d",
+      "protocol_name": "us-alpha-v1.2-walkforward-2002-2015-v4",
+      "symbol_count": 50,
+      "symbols": [
+        "AAPL",
+        "NVDA",
+        "MSFT",
+        "AMZN",
+        "AMD",
+        "MU",
+        "WMT",
+        "COST",
+        "CSCO",
+        "INTC",
+        "AMAT",
+        "LLY",
+        "LRCX",
+        "TXN",
+        "BRK-B",
+        "AMGN",
+        "LIN",
+        "JPM",
+        "GILD",
+        "KLAC",
+        "PEP",
+        "XOM",
+        "ADI",
+        "QCOM",
+        "JNJ",
+        "VRTX",
+        "SBUX",
+        "ADP",
+        "BKNG",
+        "CVX",
+        "WDC",
+        "MAR",
+        "ASML",
+        "CSX",
+        "REGN",
+        "ADBE",
+        "PG",
+        "KO",
+        "MRK",
+        "UNH",
+        "CMCSA",
+        "INTU",
+        "CTAS",
+        "CDNS",
+        "SNPS",
+        "MNST",
+        "BAC",
+        "HD",
+        "GE",
+        "ORLY"
+      ],
+      "universe_version_label": "voo-qqq-top80-pre2000-current-weights-v1",
+      "universe_version_note": "The v1.2 universe_version label is legacy; the authoritative frozen membership is 50 symbols."
+    },
+    "windows": {
+      "dataset": {
+        "end": "2015-01-01T00:00:00Z",
+        "start": "2002-01-01T00:00:00Z"
+      },
+      "development_end": "2012-01-01T00:00:00Z",
+      "embargo_days": 14,
+      "interval_semantics": "left-closed-right-open",
+      "reserved_test": {
+        "end": "2015-01-01T00:00:00Z",
+        "start": "2012-01-01T00:00:00Z"
+      },
+      "source_test": {
+        "end": "2015-01-01T00:00:00Z",
+        "start": "2012-01-15T00:00:00Z"
+      },
+      "timezone": "UTC",
+      "train": {
+        "end": "2008-01-01T00:00:00Z",
+        "start": "2003-01-01T00:00:00Z"
+      },
+      "validation": {
+        "end": "2012-01-01T00:00:00Z",
+        "start": "2008-01-14T00:00:00Z"
+      }
+    },
+    "protocol_hash": "sha256:b1e38c59d2a9154158871f284943b81f06e6f8a1d1cafdf10a885afea45741bc",
+    "source_protocol_hash": "sha256:eb5dfc8902172c11fd5f9ff17e76a134fc264e9faa2edef84da56231d846a45d",
+    "symbol_count": 50,
+    "symbols": [
+      "AAPL",
+      "NVDA",
+      "MSFT",
+      "AMZN",
+      "AMD",
+      "MU",
+      "WMT",
+      "COST",
+      "CSCO",
+      "INTC",
+      "AMAT",
+      "LLY",
+      "LRCX",
+      "TXN",
+      "BRK-B",
+      "AMGN",
+      "LIN",
+      "JPM",
+      "GILD",
+      "KLAC",
+      "PEP",
+      "XOM",
+      "ADI",
+      "QCOM",
+      "JNJ",
+      "VRTX",
+      "SBUX",
+      "ADP",
+      "BKNG",
+      "CVX",
+      "WDC",
+      "MAR",
+      "ASML",
+      "CSX",
+      "REGN",
+      "ADBE",
+      "PG",
+      "KO",
+      "MRK",
+      "UNH",
+      "CMCSA",
+      "INTU",
+      "CTAS",
+      "CDNS",
+      "SNPS",
+      "MNST",
+      "BAC",
+      "HD",
+      "GE",
+      "ORLY"
+    ]
+  },
+  "statuses": {
+    "SYNTHETIC_CONTRACT_VALIDATION": "PASS",
+    "RESEARCH_DIAGNOSTIC_READINESS": "NOT_TESTED",
+    "REAL_MARKET_TRADING_VALIDITY": "BLOCKED"
+  },
+  "real_study": {
+    "status": "NOT_EXECUTED",
+    "reason": "PR A historical calendar gate remains BLOCKED; real diagnostics are not authorized",
+    "real_diagnostic_jobs": 0,
+    "features_labels_predictions_created_from_real_data": 0,
+    "test_oos_executions": 0,
+    "candidate_promotions": 0
+  },
+  "exclusions": {
+    "reserved_test_start": "2012-01-01T00:00:00Z",
+    "reserved_test_end": "2015-01-01T00:00:00Z",
+    "reserved_test_rows_read": 0,
+    "oos_artifacts_read": 0,
+    "candidate_ledger_mutated": false
+  },
+  "synthetic_acceptance": {
+    "status": "PASS",
+    "scope": "RESEARCH_DIAGNOSTIC_READINESS_SYNTHETIC_CONTRACT_VALIDATION",
+    "report_hash": "sha256:eb0ee08ecc5ad10c7d7bfc120d279af0a2a9c6b6e22afcd54da0f1e8e82f6104",
+    "fixture": {
+      "end": "2009-03-30",
+      "kind": "deterministic_synthetic_development_fixture",
+      "label_version": "session-aligned-v2",
+      "price_basis": "synthetic_only",
+      "session_count": 60,
+      "start": "2009-01-05",
+      "symbol_count": 24
+    },
+    "section_hashes": {
+      "B1": "sha256:34ffa60c85760f4f33e7d6489d5ad097af1e2c0673c4f694ce9246b6101be9fb",
+      "B2": "sha256:f8c05d596521b98c1bd37ffd7383aae10756db4c82e21561f5c61f728b77666e",
+      "B3": "sha256:9a4febf3e355bc85a0fcd300a7466d6d32d70faad6603cfcb99df613c9f36176",
+      "B4": "sha256:9df7f8c3ed21d7688519658dd2089860d7579bb0e38ba4c6e95d9e36e9d396d7",
+      "B5": "sha256:bbd6f4c18d741f42b4bf3fb18fb7c7ea2599b66c75321fc7b7a2df40322906e4"
+    },
+    "sections": {
+      "B1": {
+        "decision_count": 60,
+        "icir": {
+          "D01": 19.735905651158358,
+          "D02": 1.8566436414730603
+        },
+        "rank_ic_mean": {
+          "D01": 0.8695072463768115,
+          "D02": 0.4229266832089288
+        },
+        "scipy_oracle_max_abs_delta": 0,
+        "signals": [
+          "D01",
+          "D02"
+        ],
+        "status": "PASS"
+      },
+      "B2": {
+        "actual_last_session_that_week": "2009-02-05",
+        "daily_decision_count": 60,
+        "daily_frequency": "daily_observed_sessions",
+        "missing_friday": "2009-02-06",
+        "status": "PASS",
+        "weekly_actual_session_rule": true,
+        "weekly_decision_count": 13,
+        "weekly_frequency": "weekly_last_trading_session"
+      },
+      "B3": {
+        "analysis_label": "predictive_label_analysis_not_executable_backtest",
+        "complete_selection_count": 13,
+        "decision_count": 13,
+        "status": "PASS",
+        "top20_size": 20,
+        "turnover_proxy_count": 12,
+        "turnover_proxy_first": 0.19999999999999996
+      },
+      "B4": {
+        "candidate_iteration_count": 4,
+        "candidate_iteration_end": 4,
+        "candidate_iteration_start": 1,
+        "equal_candidate_budget": true,
+        "model_hash_equal": true,
+        "same_tree_path": true,
+        "selected_iteration": {
+          "daily_rank_ic": 4,
+          "l2": 4
+        },
+        "status": "PASS",
+        "tie_rule": "first_iteration_on_exact_tie",
+        "validation_only": true
+      },
+      "B5": {
+        "annual_period_count": 2,
+        "bootstrap": {
+          "config": {
+            "block_weeks": 4,
+            "draws": 2000,
+            "interval": 0.95,
+            "percentile_method": "linear",
+            "rng": "PCG64",
+            "seed": 20261120
+          },
+          "definition": "Current-week decision ICs; four-consecutive-week blocks sampled with replacement.",
+          "draw_alignment": "one shared moving-block index matrix for all paired metrics",
+          "finite_draw_count": 2000,
+          "paired_delta": {
+            "ci_lower": 0.03833333333333334,
+            "ci_upper": 0.04666666666666667,
+            "excluded_draw_count": 0,
+            "finite_draw_count": 2000,
+            "observed_mean": 0.04,
+            "reason": null,
+            "status": "TESTED"
+          },
+          "paired_rank_ic": {
+            "ci_lower": -0.012500000000000002,
+            "ci_upper": -0.012499999999999999,
+            "excluded_draw_count": 0,
+            "finite_draw_count": 2000,
+            "observed_mean": -0.012499999999999999,
+            "reason": null,
+            "status": "TESTED"
+          },
+          "rank_ic": {
+            "ci_lower": 0.025833333333333333,
+            "ci_upper": 0.03416666666666667,
+            "excluded_draw_count": 0,
+            "finite_draw_count": 2000,
+            "observed_mean": 0.0275,
+            "reason": null,
+            "status": "TESTED"
+          },
+          "reason": null,
+          "schema_version": "weekly-moving-block-bootstrap-v1",
+          "status": "TESTED",
+          "thresholds": {
+            "minimum_finite_draws": 1900,
+            "minimum_valid_ics": 8,
+            "minimum_weeks": 8
+          },
+          "valid_ic_count": 12,
+          "week_count": 12
+        },
+        "deterministic_equal": true,
+        "regime_names": [
+          "UP",
+          "DOWN",
+          "FLAT",
+          "UNKNOWN"
+        ],
+        "status": "PASS",
+        "up_regime_decision_count": 1
+      }
+    }
+  },
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "duration_seconds": 1,
+      "status": "PASS",
+      "summary": "TypeScript typecheck passed",
+      "log_sha256": "sha256:3c1b70deb30c0793f65ad4469b178af949d0664cb7910ba50f940bb4df1e6edb"
+    },
+    {
+      "command": "npm run build",
+      "exit_code": 0,
+      "duration_seconds": 2,
+      "status": "PASS",
+      "summary": "TypeScript build passed",
+      "log_sha256": "sha256:83ffb68178025ca24c5ffd5ed6511bf029decfebafa3509622121a1fa1dbaef6"
+    },
+    {
+      "command": "npm run test:quant",
+      "exit_code": 0,
+      "duration_seconds": 92,
+      "status": "PASS",
+      "summary": "514 passed, 25 skipped",
+      "log_sha256": "sha256:b66507a7106cb8fbb1db7df885981caa9eb9b02b0ed253179c44bd78232aff4a"
+    },
+    {
+      "command": "npm run test:quant-alpha",
+      "exit_code": 0,
+      "duration_seconds": 76,
+      "status": "PASS",
+      "summary": "305 passed",
+      "log_sha256": "sha256:06fe46aae62925cb396b964620fae008cc62403d647654c4e8a44d30dac68bdc"
+    },
+    {
+      "command": "npm run test:quant-mcp",
+      "exit_code": 0,
+      "duration_seconds": 32,
+      "status": "PASS",
+      "summary": "Quant stdio acceptance passed",
+      "log_sha256": "sha256:03baedeb0935f8b7d28e305f4fd98371c522629c9ec5bd015214e64394d0df10"
+    },
+    {
+      "command": "npm run test:quant-alpha-mcp",
+      "exit_code": 0,
+      "duration_seconds": 0,
+      "status": "PASS",
+      "summary": "4 tests passed, 0 failed",
+      "log_sha256": "sha256:0106ca10824ebee57df29501532b19da22341cf3c599d2e2bd7e8343dffc52f8"
+    },
+    {
+      "command": "npm run test:quant-alpha-e2e",
+      "exit_code": 0,
+      "duration_seconds": 36,
+      "status": "PASS",
+      "summary": "2 tests passed, 0 failed",
+      "log_sha256": "sha256:35575b731ca992d4745103f2864df72f74df98fa07b07fd0a9827f8fe5e1cadf"
+    },
+    {
+      "command": "npm run test:quant-alpha-diagnostics",
+      "exit_code": 0,
+      "duration_seconds": 3,
+      "status": "PASS",
+      "summary": "13 acceptance tests passed; real synthetic LightGBM B4; B1-B5 PASS; evidence checksum verified",
+      "log_sha256": "sha256:c911b9538346227f4555bb7b6ddde90fd10ebf4a601dbc45d46dc39db1f82d85"
+    },
+    {
+      "command": "npm run test:quant-alpha-scalability",
+      "exit_code": 0,
+      "duration_seconds": 19,
+      "status": "PASS",
+      "summary": "2 tests passed, 0 failed",
+      "log_sha256": "sha256:f736d39849634458f8240de002020a3a04dcea661b751f70430a2db0be035b19"
+    },
+    {
+      "command": "npm run test:quant-data-validity",
+      "exit_code": 0,
+      "duration_seconds": 12,
+      "status": "PASS",
+      "summary": "Existing v1.2 archive command: 2 tests passed, 0 failed; DATA_QUALITY_ENGINEERING=PASS, RESEARCH_DIAGNOSTICS_READINESS=PASS, EXECUTION_ENGINEERING=PASS",
+      "log_sha256": "sha256:953cdb7ddd8af4da2c6a7714eac98d41387a7e7e58cb068b1102154e7e705e49"
+    },
+    {
+      "command": "npm run test:quant-regression",
+      "exit_code": 0,
+      "duration_seconds": 101,
+      "status": "PASS",
+      "summary": "status=PASSED; windows=4; candidates=4; evaluations=36",
+      "log_sha256": "sha256:5c9eecd2e137199b3fe173eb86276422e55b39b68dc72a315112e58e79b79f60"
+    },
+    {
+      "command": "npm run test:skills",
+      "exit_code": 0,
+      "duration_seconds": 1,
+      "status": "PASS",
+      "summary": "skills tests OK; all 24 referenced tools exist in live tools/list",
+      "log_sha256": "sha256:add18c902bb6940fb04d66a4f527b74486926481b30be882aa8cc3acb754879a"
+    },
+    {
+      "command": "npm run test:plugin",
+      "exit_code": 0,
+      "duration_seconds": 0,
+      "status": "PASS",
+      "summary": "plugin tests OK; 10 skills; MCP pinned to yahoo-stock-mcp@0.5.1",
+      "log_sha256": "sha256:399162c23b4614210ae85950c2473d80d512d58075bd11e86dc5bc443c2535d8"
+    },
+    {
+      "command": "npm run verify:pack",
+      "exit_code": 0,
+      "duration_seconds": 0,
+      "status": "PASS",
+      "summary": "pack manifest OK; 195 files shipped, including 155 required paths",
+      "log_sha256": "sha256:5273814af28e6e1cb9548096b2e8bbfd78a7f0d35ecf20d2ddde308cc108d241"
+    }
+  ],
+  "full_npm_test": {
+    "status": "FAILED",
+    "exit_code": 1,
+    "failed_suite": "test:sqlite-sync-e2e",
+    "failure_count": 11,
+    "failure_labels": [
+      "FAIL  1. syncOne --full writes the fixture data into the target tables",
+      "FAIL  2. repeated full sync is idempotent (row counts stable, no duplicates)",
+      "FAIL  3. incremental sync updates the bar set and sync_state without duplicating",
+      "FAIL  4. options snapshot replacement is atomic: a bad row rolls the whole snapshot back",
+      "FAIL  5. a failing provider endpoint yields partial results without losing good data",
+      "FAIL  6. syncAll walks a non-empty instrument list and syncs each symbol",
+      "FAIL  7. syncSectors writes the ETF and sector rows for a seeded sector",
+      "FAIL  8. a NEW process reopens the database and continues incrementally",
+      "FAIL  10. provider priority: the primary wins, the fallback only fills NULL, and repeats are idempotent",
+      "FAIL  11. syncSectors({members:true}) writes real sector_members rows with DECIMAL weights",
+      "FAIL  13. a failing Investing response yields partial without losing the Yahoo data"
+    ],
+    "failure_labels_match_saved_baseline": true,
+    "baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",
+    "comparison_scope": "Failure labels only; not byte-identical logs. Full npm test is not green.",
+    "observed_upstream_http_403": [
+      "Yahoo",
+      "Investing"
+    ],
+    "log_sha256": "sha256:c240b272c76aa8ebd19c60cf574cda50c18a79c5c61d063f99ca59a5dc02e085"
+  },
+  "baseline_comparison": {
+    "baseline_commit": "5b4ece411348620e9b73ce4e9508b59ff5f42770",
+    "reference": "docs/evidence/alpha-scalability-v1-3.json#verification.npm test.same_failure_labels",
+    "failure_label_count": 11,
+    "same_failure_labels": true,
+    "byte_identical_logs": false
+  },
+  "evidence_scope": "SYNTHETIC_CONTRACT_VALIDATION_ONLY",
+  "claim_boundaries": [
+    "Yahoo price basis remains unverified",
+    "corporate actions are incomplete",
+    "historical revisions and PIT membership unavailable",
+    "predictive label groups are not executable backtests",
+    "no candidate promotion from diagnostic output",
+    "REAL_MARKET_TRADING_VALIDITY remains BLOCKED"
+  ]
+}
