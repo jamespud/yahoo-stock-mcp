@@ -31,6 +31,10 @@ The attachment distinguishes `SYNTHETIC_CONTRACT_VALIDATION: PASS` from the real
 
 Validation independently rehashes and deep-compares the embedded protocol body. It also requires the full `npm test` disclosure to remain `FAILED` with the exact 11 saved baseline-compatible labels, `failure_labels_match_saved_baseline: true`, and `byte_identical_logs: false`; regeneration fails if that evidence is missing or claims the suite is green.
 
+Runtime jobs use an explicit `protocol_mode`. `synthetic_contract` remains explicitly non-v1.3. `frozen_v1_3` requires the exact protocol hash, 50-symbol membership, windows and embargo, D01/D02 signal identity, candidate configuration, mapped calendar, `session-aligned-v2` labels, thresholds and resource budgets. Validation-only physical dataset coverage must remain outside `[2012-01-01, 2015-01-01)`, and frozen folds enforce row, iteration and elapsed-time bounds.
+
+Evidence records the actual clean Git source commit on which acceptance ran. Validation requires the same commit in the command provenance and proves it is an ancestor of the current evidence commit.
+
 Run and verify the synthetic acceptance contract with:
 
 ```bash

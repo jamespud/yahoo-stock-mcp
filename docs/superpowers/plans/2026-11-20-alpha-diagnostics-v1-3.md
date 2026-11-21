@@ -323,3 +323,12 @@ Commit: `test(alpha): freeze and verify v1.3 diagnostics acceptance`
 - [x] B5: annual/regime/weekly stability and deterministic bootstrap.
 - [x] MCP: paginated result and Test-boundary stdio E2E.
 - [x] Evidence: sanitized immutable attachment and checksum.
+
+## Final review fix wave
+
+- [x] Reject validation-only split/manifest overlap with reserved Test before any partition read, with partition-spy regressions.
+- [x] Add explicit `synthetic_contract` versus `frozen_v1_3` protocol modes. Frozen jobs require exact protocol identity, 50-symbol membership, windows/embargo, approved signal directions, candidate configuration, seed and budgets; synthetic claims are explicitly non-v1.3.
+- [x] Require mapped calendars and `session-aligned-v2` labels in frozen B4/B5 paths. Row-derived weekly sessions and observed-record labels remain only in explicitly non-v1.3 mode.
+- [x] Centralize the frozen Validation gate: Rank IC `>= 0.03`, coverage `>= 0.8` over instruments x mapped sessions, ICIR `>= 0.0`, and Rank IC `>= 0.0` in both exact frozen subperiods.
+- [x] Bound diagnostic-fold rows, iterations and elapsed time through `ModelResourceBudget` and LightGBM callbacks while preserving equal candidate budgets.
+- [x] Record executable source provenance and validate the recorded source commit against Git ancestry in Python and Node evidence checks.
