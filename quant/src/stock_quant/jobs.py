@@ -314,6 +314,7 @@ class JobStore(Registry):
 
     def _validate_signal_datasets(self, request) -> None:
         from .alpha.data.catalog import DatasetStore
+        from .alpha.jobs.requests import RESERVED_TEST_START
         datasets = DatasetStore(Path(self.path).with_suffix(".alpha"), defer_registration=True)
         try:
             stock = datasets.load_manifest(request.stock_dataset_id)
@@ -327,6 +328,10 @@ class JobStore(Registry):
             raise ValueError("evaluate_alpha_signal stock_dataset_id must identify stock_bars")
         if feature.dataset_kind != "feature_panel":
             raise ValueError("evaluate_alpha_signal feature_set_id must identify feature_panel")
+        if stock.end_at > RESERVED_TEST_START:
+            raise ValueError("evaluate_alpha_signal stock dataset physical coverage enters reserved Test")
+        if feature.end_at > RESERVED_TEST_START:
+            raise ValueError("evaluate_alpha_signal feature dataset physical coverage enters reserved Test")
         if stock.dataset_id not in feature.parent_dataset_ids:
             raise ValueError("evaluate_alpha_signal feature set is not derived from the stock dataset")
 

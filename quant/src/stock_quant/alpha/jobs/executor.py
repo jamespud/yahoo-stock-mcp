@@ -42,7 +42,7 @@ from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
     ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, EvaluateAlphaSignalJob, FreezeAlphaSelectionJob,
-    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
+    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, RESERVED_TEST_START, TrainAlphaModelJob,
 )
 
 
@@ -187,6 +187,12 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
             if stock_manifest.dataset_kind != "stock_bars":
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a stock_bars dataset")
+            if feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START:
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Signal dataset physical coverage enters reserved Test",
+                    {"feature_end": feature_manifest.end_at.isoformat(), "stock_end": stock_manifest.end_at.isoformat()},
+                )
             if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
                 raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
             calendar = mapped_stock_calendar(stock_manifest)
@@ -220,6 +226,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 horizon=request.horizon_days,
                 calendar=calendar,
             )
+            if not labels or any(label.label_version != "session-aligned-v2" for label in labels):
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No session-aligned-v2 labels generated")
             bounded(.75)
             diagnostics = evaluate_direct_signal(
                 feature_rows,
@@ -238,6 +246,7 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 "feature_set_id": request.feature_set_id,
                 "stock_dataset_id": request.stock_dataset_id,
                 "label_name": request.label_name,
+                "label_version": "session-aligned-v2",
                 "target_type": request.target_type,
                 "horizon_days": request.horizon_days,
                 "evaluation_window": evaluation_window,
@@ -264,7 +273,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     "calendar_id": getattr(calendar, "id", None),
                     "evaluation_window": evaluation_window,
                     "source_windows": source_windows,
-                    "reserved_test_start": datetime(2012, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "coverage": diagnostics["coverage"],
+                    "excluded_opportunities": summary["excluded_opportunities"],
+                    "reserved_test_start": RESERVED_TEST_START.isoformat(),
                 },
             }
         elif isinstance(request, TrainAlphaModelJob):

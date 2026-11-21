@@ -17,6 +17,7 @@ import {
   trainAlphaModelInput,
   trainAlphaModelInputFields,
   developmentWindows,
+  evaluateAlphaSignalInput,
 } from "../../dist/quant/alpha-contracts.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -67,6 +68,32 @@ test("Zod contracts are strict and cover the public Alpha inputs", () => {
   assert.throws(() => alphaModelDiagnosticsInput.parse({model_id: "sha256:" + "6".repeat(64), section: "test"}));
   assert.ok(backtestAlphaPortfolioInput.shape.portfolio_config);
   assert.ok(backtestOptionsInput.shape.execution_config);
+});
+
+test("Direct signal contract requires UTC-midnight evaluation boundaries", () => {
+  const input = {
+    feature_set_id: "sha256:" + "1".repeat(64),
+    stock_dataset_id: "sha256:" + "2".repeat(64),
+    label_name: "stock_forward_return",
+    target_type: "stock_return",
+    horizon_days: 5,
+    windows: {
+      train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+      validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+    },
+    evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
+    signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+  };
+  assert.ok(evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T08:00:00+08:00", end: "2009-06-01T08:00:00+08:00"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-04-01T23:59:59Z"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T12:00:00Z", end: "2009-04-02T00:00:00Z"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({...input, label_name: "future_return"}));
 });
 
 test("Validation-only training contract is explicit and rejects Test windows", () => {

@@ -56,14 +56,31 @@ export const directSignalSpec = z.object({
   version: z.literal("direct-factor-v1"),
 }).strict();
 
+function isUtcMidnight(value: string): boolean {
+  const instant = new Date(value);
+  return instant.getUTCHours() === 0 && instant.getUTCMinutes() === 0
+    && instant.getUTCSeconds() === 0 && instant.getUTCMilliseconds() === 0;
+}
+
+const utcMidnightDateTime = z.string().datetime({offset: true})
+  .refine(isUtcMidnight, {message: "evaluation window boundaries must be UTC midnight"});
+
+export const signalEvaluationWindow = z.object({
+  start: utcMidnightDateTime,
+  end: utcMidnightDateTime,
+}).strict().refine(
+  value => new Date(value.start) < new Date(value.end),
+  {message: "evaluation_window.start must be before end"},
+);
+
 export const evaluateAlphaSignalInput = z.object({
   feature_set_id: alphaHash,
   stock_dataset_id: alphaHash,
-  label_name: z.string().min(1).max(128).optional(),
+  label_name: z.literal("stock_forward_return").optional(),
   target_type: z.literal("stock_return").optional(),
   horizon_days: z.literal(5).optional(),
   windows: developmentWindows,
-  evaluation_window: alphaPeriod,
+  evaluation_window: signalEvaluationWindow,
   signal_spec: directSignalSpec,
 }).strict();
 

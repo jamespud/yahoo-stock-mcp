@@ -12,6 +12,8 @@ from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
 from ..models.signal_diagnostics import DirectSignalSpec
 from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
 
+RESERVED_TEST_START = datetime(2012, 1, 1, tzinfo=timezone.utc)
+
 
 class AlphaJobBase(StrictModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
@@ -82,9 +84,16 @@ class SignalEvaluationWindow(StrictModel):
     end: AwareDatetime
 
     @model_validator(mode="after")
-    def ordered(self):
-        if self.start >= self.end:
+    def utc_midnight(self):
+        start = self.start.astimezone(timezone.utc)
+        end = self.end.astimezone(timezone.utc)
+        if any((value.hour, value.minute, value.second, value.microsecond) != (0, 0, 0, 0)
+               for value in (start, end)):
+            raise ValueError("evaluation_window.start and end must be UTC midnight")
+        if start >= end:
             raise ValueError("Expected evaluation_window.start < evaluation_window.end")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
         return self
 
 
@@ -92,7 +101,7 @@ class EvaluateAlphaSignalJob(AlphaJobBase):
     kind: Literal["evaluate_alpha_signal"]
     feature_set_id: Hash
     stock_dataset_id: Hash
-    label_name: str = Field(default="stock_forward_return", min_length=1, max_length=128)
+    label_name: Literal["stock_forward_return"] = "stock_forward_return"
     target_type: Literal["stock_return"] = "stock_return"
     horizon_days: Literal[5] = 5
     split: ModelDevelopmentSplit
@@ -103,8 +112,7 @@ class EvaluateAlphaSignalJob(AlphaJobBase):
     def development_only(self):
         if self.evaluation_window.start < self.split.train_start or self.evaluation_window.end > self.split.validation_end:
             raise ValueError("evaluation window must stay within development split")
-        reserved_test_start = datetime(2012, 1, 1, tzinfo=timezone.utc)
-        if self.split.validation_end > reserved_test_start:
+        if self.split.validation_end > RESERVED_TEST_START:
             raise ValueError("validation_end must not enter reserved Test interval at or after 2012-01-01T00:00:00Z")
         return self
 

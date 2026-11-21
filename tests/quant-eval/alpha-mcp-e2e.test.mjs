@@ -294,13 +294,15 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
       {...invalid, feature_path: "/tmp/features.parquet"},
       {...invalid, windows: {...invalid.windows, validation_end: "2012-01-02T00:00:00Z"}},
       {...invalid, evaluation_window: {start: "2008-12-31T00:00:00Z", end: "2009-06-01T00:00:00Z"}},
+      {...invalid, evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-04-01T23:59:59Z"}},
+      {...invalid, evaluation_window: {start: "2009-04-01T12:00:00Z", end: "2009-04-02T00:00:00Z"}},
     ]) {
       rejected.push(Boolean((await client.callTool({name: "quant_evaluate_alpha_signal", arguments: args})).isError));
     }
     const [rejectedCount] = JSON.parse(execFileSync(python, ["-c",
       "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0]]))",
       resolve(tmp, "quant.db")], {encoding: "utf8"}));
-    assert.deepEqual({rejected, rejectedCount}, {rejected: [true, true, true, true], rejectedCount: 0});
+    assert.deepEqual({rejected, rejectedCount}, {rejected: [true, true, true, true, true, true], rejectedCount: 0});
 
     const prepared = await call("quant_prepare_alpha_dataset", {
       source: "yahoo", symbols, period: {start: "2009-01-02T00:00:00Z", end: "2009-07-01T00:00:00Z"},
@@ -316,6 +318,35 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     });
     await done(factors.job_id);
     const factorDataset = await call("quant_get_result", {job_id: factors.job_id, section: "dataset"});
+
+    const [windowJobsBefore] = JSON.parse(execFileSync(python, ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0]]))",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}));
+    const invalidWindows = [];
+    for (const evaluation_window of [
+      {start: "2009-04-01T00:00:00Z", end: "2009-04-01T23:59:59Z"},
+      {start: "2009-04-01T12:00:00Z", end: "2009-04-02T00:00:00Z"},
+    ]) {
+      invalidWindows.push(Boolean((await client.callTool({name: "quant_evaluate_alpha_signal", arguments: {
+        feature_set_id: factorDataset.dataset_id,
+        stock_dataset_id: dataset.dataset_id,
+        label_name: "stock_forward_return",
+        target_type: "stock_return",
+        horizon_days: 5,
+        windows: {
+          train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+          validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+        },
+        evaluation_window,
+        signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+      }})).isError));
+    }
+    const [windowJobsAfter] = JSON.parse(execFileSync(python, ["-c",
+      "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(json.dumps([db.execute('select count(*) from jobs').fetchone()[0]]))",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}));
+    assert.deepEqual({invalidWindows, windowJobsBefore, windowJobsAfter}, {
+      invalidWindows: [true, true], windowJobsBefore, windowJobsAfter: windowJobsBefore,
+    });
 
     const signal = await call("quant_evaluate_alpha_signal", {
       feature_set_id: factorDataset.dataset_id,
@@ -353,6 +384,8 @@ test("Direct factor signal diagnostics stay inside development through stdio MCP
     assert.ok(misbound.isError);
     const reproducibility = await call("quant_get_result", {job_id: signal.job_id, section: "reproducibility"});
     assert.equal(reproducibility.signal_spec_hash, summary.signal_spec_hash);
+    assert.deepEqual(reproducibility.coverage, summary.coverage);
+    assert.equal(reproducibility.excluded_opportunities, summary.excluded_opportunities);
     assert.equal(reproducibility.reserved_test_start, "2012-01-01T00:00:00+00:00");
     const request = JSON.parse(execFileSync(python, ["-c",
       "import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute('select request from jobs where id=?',(sys.argv[2],)).fetchone(); print(json.dumps(json.loads(row[0])))",
