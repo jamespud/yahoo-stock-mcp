@@ -166,6 +166,8 @@ export const trainAlphaModelInputFields = z.object({
     max_rows: z.number().int().min(1).optional(),
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
+  selection_metric: z.enum(["l2", "daily_rank_ic", "weekly_rank_ic"]).optional(),
+  baseline_signal: directSignalSpec.optional(),
 }).strict();
 
 // The SDK's strict-union JSON Schema conversion advertises the typed branch,
@@ -190,6 +192,8 @@ export const trainAlphaModelToolFields = z.object({
   random_seed: auditableField(training.random_seed),
   resource_budget: auditableField(training.resource_budget),
   min_rank_ic: auditableField(training.min_rank_ic),
+  selection_metric: auditableField(training.selection_metric.describe("Validation-only iteration selection metric.")),
+  baseline_signal: auditableField(training.baseline_signal.describe("Optional direct-factor baseline for the same validation grid.")),
 }).passthrough();
 
 // MCP permits a valid tools/call without an arguments member. Preserve the
@@ -200,7 +204,23 @@ trainAlphaModelToolFields.safeParseAsync = (data, params) =>
   parseTrainingInput(data === undefined ? {} : data, params);
 
 export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
-  if (value.evaluation_mode !== "validation_only") return;
+  if (value.evaluation_mode !== "validation_only") {
+    if (value.selection_metric !== undefined && value.selection_metric !== "l2") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selection_metric"],
+        message: "selection metrics are validation-only",
+      });
+    }
+    if (value.baseline_signal !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["baseline_signal"],
+        message: "baseline_signal is validation-only",
+      });
+    }
+    return;
+  }
   if (!value.research_protocol_hash) {
     context.addIssue({
       code: z.ZodIssueCode.custom,

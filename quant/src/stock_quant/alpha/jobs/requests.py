@@ -132,6 +132,8 @@ class TrainAlphaModelJob(AlphaJobBase):
     random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+    selection_metric: Literal["l2", "daily_rank_ic", "weekly_rank_ic"] = "l2"
+    baseline_signal: DirectSignalSpec | None = None
 
     _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 
@@ -143,6 +145,10 @@ class TrainAlphaModelJob(AlphaJobBase):
             raise ValueError("validation_only training currently requires stock_dataset_id")
         if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
             raise ValueError("legacy_inline_test training requires TemporalSplit")
+        if self.evaluation_mode == "legacy_inline_test" and self.selection_metric != "l2":
+            raise ValueError("selection metrics are validation-only")
+        if self.evaluation_mode == "legacy_inline_test" and self.baseline_signal is not None:
+            raise ValueError("baseline_signal is validation-only")
         return self
 
 

@@ -44,8 +44,9 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const {tools} = await client.listTools();
     const trainingSchema = tools.find(tool => tool.name === "quant_train_alpha_model").inputSchema;
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
-      "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
-      "random_seed", "research_protocol_hash", "resource_budget", "windows",
+      "baseline_signal", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec",
+      "min_rank_ic", "random_seed", "research_protocol_hash", "resource_budget",
+      "selection_metric", "windows",
     ]);
     assert.deepEqual(trainingSchema.required, ["feature_set_id", "label_spec", "windows"]);
     function advertisedType(schema, type) {
@@ -87,6 +88,10 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       [{feature_set_id: "not-a-content-id"}, "feature_set_id"],
       [{label_spec: null}, "label_spec"],
       [{evaluation_mode: "not-a-mode"}, "evaluation_mode"],
+      [{selection_metric: "rmse"}, "selection_metric"],
+      [{baseline_signal: "not-a-spec"}, "baseline_signal"],
+      [{evaluation_mode: "legacy_inline_test", selection_metric: "daily_rank_ic"}, "selection_metric"],
+      [{evaluation_mode: "legacy_inline_test", baseline_signal: {factor_name: "ret", score_multiplier: 1, version: "direct-factor-v1"}}, "baseline_signal"],
       [{windows: undefined}, "windows"],
     ];
     const outcomes = [];
@@ -162,12 +167,29 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
                 validation_start: "2024-04-01T00:00:00Z", validation_end: "2024-05-01T00:00:00Z"},
       hyperparameters: {n_estimators: 20, min_child_samples: 2},
       min_rank_ic: -1,
+      selection_metric: "daily_rank_ic",
+      baseline_signal: {factor_name: "ret", score_multiplier: 1, version: "direct-factor-v1"},
       resource_budget: {max_seconds: 120, max_rows: 10000},
     });
     await done(train.job_id);
     const model = await call("quant_get_result", {job_id: train.job_id, section: "dataset"});
     const modelRegistry = await call("quant_get_result", {job_id: train.job_id, section: "model_registry"});
     assert.equal(modelRegistry.rows[0].label_version, "session-aligned-v2");
+    const selectionDiagnostics = modelRegistry.rows[0].selection_diagnostics;
+    assert.equal(selectionDiagnostics.selection_metric, "daily_rank_ic");
+    assert.equal(selectionDiagnostics.tree_path, "single_booster_all_candidate_iterations");
+    assert.equal(selectionDiagnostics.tie_rule, "first_iteration_on_exact_tie");
+    assert.deepEqual(
+      selectionDiagnostics.candidates.map(record => record.iteration),
+      Array.from({length: 20}, (_, index) => index + 1),
+    );
+    assert.ok(selectionDiagnostics.validation_grid.weekly_decision_dates.length > 0);
+    const baselineComparison = modelRegistry.rows[0].baseline_comparison;
+    assert.equal(baselineComparison.comparison, "model_minus_baseline_on_common_samples");
+    assert.ok(baselineComparison.daily.common_sample_count > 0);
+    assert.ok(baselineComparison.weekly.common_sample_count > 0);
+    assert.ok(["positive", "negative", "zero"].includes(baselineComparison.daily.direction));
+    assert.ok(["positive", "negative", "zero"].includes(baselineComparison.weekly.direction));
     const modelDiagnostics = await call("quant_get_alpha_model_diagnostics", {model_id: model.model_id});
     assert.deepEqual(Object.keys(modelDiagnostics.feature_importance_gain), ["ret", "vol"]);
     assert.equal(modelDiagnostics.stability_status, "NOT_TESTED");

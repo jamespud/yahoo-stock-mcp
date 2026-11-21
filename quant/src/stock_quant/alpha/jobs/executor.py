@@ -320,14 +320,24 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             }
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
+            validation_sessions = None
             if request.evaluation_mode == "validation_only":
                 if not request.stock_dataset_id:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+                calendar = mapped_stock_calendar(stock_manifest)
                 labels = stock_forward_labels(
                     datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                     horizon=request.horizon_days,
-                    calendar=mapped_stock_calendar(stock_manifest),
+                    calendar=calendar,
+                )
+                validation_sessions = (
+                    expected_session_dates(
+                        calendar,
+                        request.split.validation_start.date(),
+                        request.split.validation_end.date(),
+                    )
+                    if calendar is not None else None
                 )
             elif request.stock_dataset_id:
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
@@ -350,14 +360,39 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 hyperparameters={key: value for key, value in request.hyperparameters.items()},
                 random_seed=request.random_seed, resource_budget=request.resource_budget,
                 min_rank_ic=request.min_rank_ic,
+                selection_metric=request.selection_metric,
+                baseline_signal=request.baseline_signal,
             )
-            model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
+            model = train_alpha(
+                train_req,
+                store=datasets,
+                registry=staging_registry,
+                label_rows=labels,
+                checkpoint=bounded,
+                validation_sessions=validation_sessions,
+            )
             staged_model = model
             model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
                       "diagnostics": [model_diagnostics],
-                      "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+                      "reproducibility": {
+                          "model_hash": model.model_hash,
+                          "environment_hash": model.environment_hash,
+                          "selection_metric": (
+                              model.selection_diagnostics["selection_metric"]
+                              if model.selection_diagnostics is not None else None
+                          ),
+                          "selected_iteration": model.selected_iteration,
+                          "selected_validation_prediction_hash": (
+                              model.selection_diagnostics["selected_validation_prediction_hash"]
+                              if model.selection_diagnostics is not None else None
+                          ),
+                          "baseline_signal_hash": (
+                              model.baseline_comparison["baseline_signal_hash"]
+                              if model.baseline_comparison is not None else None
+                          ),
+                      }}
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             freeze_request = FreezeRequest(
