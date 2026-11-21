@@ -614,7 +614,8 @@ def _source_path_included(path: str) -> bool:
 
 
 def source_content_hash(repo_root: Path | None = None, *, tracked_paths: list[str] | None = None) -> str:
-    root = _evidence_repo_root(repo_root)
+    # Callers may provide a synthetic tracked-path fixture rooted outside Git.
+    root = Path(repo_root) if repo_root is not None and tracked_paths is not None else _evidence_repo_root(repo_root)
     if tracked_paths is None:
         raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
         tracked_paths = [value.decode("utf-8") for value in raw.split(b"\0") if value]
