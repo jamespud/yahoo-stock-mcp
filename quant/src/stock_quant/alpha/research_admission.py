@@ -135,7 +135,12 @@ def require_training_execution(request: Any) -> None:
 
 
 def require_public_prediction(metadata: dict) -> None:
-    """Keep formal research models behind the completed-freeze OOS boundary."""
+    """Keep formal research models behind the completed-freeze OOS boundary.
+
+    Historical legacy or mode-less models remain intentionally available for
+    compatibility inference. They cannot be selected by a new validation-only
+    Freeze and therefore cannot provide formal OOS evidence.
+    """
     mode = metadata.get("evaluation_mode")
     if mode == "validation_only":
         raise AlphaError(

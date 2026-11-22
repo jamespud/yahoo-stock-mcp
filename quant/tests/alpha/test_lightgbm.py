@@ -55,7 +55,7 @@ def _fixture(tmp_path, *, noise=False):
     return store, feature_set, split, request, label_rows
 
 
-def test_lightgbm_training_and_predictions_are_reproducible(tmp_path):
+def test_lightgbm_legacy_training_and_compatibility_prediction_are_reproducible(tmp_path):
     store, feature_set, split, request, labels = _fixture(tmp_path)
     registry = AlphaModelRegistry(tmp_path / "models")
     first = train_alpha(request, store=store, registry=registry, label_rows=labels)
@@ -64,6 +64,7 @@ def test_lightgbm_training_and_predictions_are_reproducible(tmp_path):
     assert first.model_id == second.model_id
     assert first.validation_gate_passed is True
     assert first.is_alpha_certified is False
+    # Legacy inference is an intentional compatibility path, not formal OOS evidence.
     prediction = predict_alpha(first.model_set_id, feature_set.dataset_id, split.test_start, split.test_end, store=store, registry=registry)
     rows = store.read_rows(prediction.dataset_id)
     assert rows

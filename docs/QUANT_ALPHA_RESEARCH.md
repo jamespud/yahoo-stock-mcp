@@ -44,7 +44,9 @@ features and verified providers are actually available.
    `research_protocol_hash`, a stock label dataset, and ordered Train/Validation windows. Test window
    fields are rejected before enqueue; training never reads Test features or labels.
 7. `quant_predict_alpha` is not an OOS bypass. Ordinary prediction rejects Validation-only research
-   models. Historical legacy models remain readable, but new `legacy_inline_test` tasks are rejected.
+   models. Historical legacy or mode-less models remain readable and may use ordinary inference only as
+   a backward-compatibility path; they are not admissible to a new validation-only Freeze/OOS flow.
+   New `legacy_inline_test` tasks are rejected.
 8. `quant_freeze_alpha_selection` binds the Validation-selected model, Test feature/label identities and
    Test window. Only a completed Freeze Job can authorize `quant_evaluate_alpha_oos`; repeated requests
    for the same freeze return the existing authoritative Job.
@@ -56,7 +58,9 @@ features and verified providers are actually available.
 This release intentionally tightens behavior. Existing Dataset, Model, Job, Freeze and OOS artifacts keep
 their original identities and remain readable. New training submissions that omit `evaluation_mode`,
 request `legacy_inline_test`, or include `test_start`/`test_end` are rejected and audited before a Job is
-created. Already queued legacy inline-Test jobs fail closed in the upgraded Worker.
+created. Already queued legacy inline-Test jobs fail closed in the upgraded Worker. Legacy model
+prediction remains available solely for historical compatibility and cannot be treated as formal OOS
+evidence, because legacy models fail the validation-only Freeze admission checks.
 
 Use `quant_get_job`, `quant_cancel_job` and `quant_get_result` for terminal evidence. List sections
 are paginated and must be read with the returned cursor.

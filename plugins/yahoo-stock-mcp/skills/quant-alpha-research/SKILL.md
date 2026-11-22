@@ -30,7 +30,7 @@ first. For factor, option, model and reporting details read the local references
 - `quant_get_alpha_model_diagnostics` - read a verified frozen model, recompute gain/split importance, and report stability as NOT_TESTED until independent development-window folds exist.
 - `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
 - `quant_evaluate_alpha_oos` - submit one independent OOS evaluation authorized only by a completed Freeze Job; repeated requests reuse the authoritative Job.
-- `quant_predict_alpha` - predict with a historical legacy model set over a later period. Validation-only research models are rejected outside the frozen OOS path.
+- `quant_predict_alpha` - compatibility inference for historical legacy or mode-less model sets over a later period. Validation-only research models are rejected outside the frozen OOS path; legacy prediction is not formal OOS evidence.
 - `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio only after scoped raw-price attestation and complete corporate-action coverage are supplied.
 - `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
 - `quant_get_job` / `quant_cancel_job` / `quant_get_result` - poll, cancel and retrieve only terminal evidence.
@@ -62,8 +62,9 @@ first. For factor, option, model and reporting details read the local references
    stable importance; report NOT_TESTED until independent development-window folds are trained. OOS
    measurements are report-only and never automatically certify or select a model.
 7. Do not use ordinary prediction on a Validation-only research model. Complete a Freeze Job first,
-   then run OOS through `quant_evaluate_alpha_oos`. Verify feature names, order and types match the
-   registry. Reject missing/corrupt models and never let a future fold predict past decisions.
+   then run OOS through `quant_evaluate_alpha_oos`. Historical legacy or mode-less prediction remains
+   only a compatibility path and cannot be frozen as new formal evidence. Verify feature names, order
+   and types match the registry. Reject missing/corrupt models and never let a future fold predict past decisions.
 8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
    positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
    use next valid Bid. Stock execution requires both a scoped raw-OHLC price attestation and complete

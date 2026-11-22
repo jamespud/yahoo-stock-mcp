@@ -1,7 +1,12 @@
 # Alpha model validation
 
 - First version accepts only a predefined LightGBM Regressor. No arbitrary user training code or
-  untrusted Pickle loading.
+  untrusted Pickle loading. New formal training requires explicit `validation_only`, a research
+  protocol hash and Train/Validation windows only.
+- Historical `legacy_inline_test` or mode-less models remain readable and may use compatibility
+  prediction. They cannot be selected by a new validation-only Freeze and are not formal OOS evidence.
+- Ordinary prediction of a validation-only research model is rejected; OOS must use the completed
+  Freeze grant path.
 - Freeze train, validation and test windows before training. Labels must be matured by the split end.
   Purge overlapping windows and apply the configured embargo.
 - Fit preprocessing on train only. Select iterations/hyperparameters on validation. Read test once
