@@ -10,7 +10,7 @@ from ..contracts import DatasetManifest
 from ..data.catalog import DatasetStore
 from ..errors import AlphaError, AlphaErrorCode
 from .registry import AlphaModelRegistry
-from ..research_admission import require_public_prediction
+from ..research_admission import _FrozenOosGrant, require_public_prediction
 
 
 def _publish_predictions(
@@ -74,7 +74,7 @@ def predict_alpha(
 
 
 def _predict_alpha_for_frozen_oos(
-    record,
+    grant: _FrozenOosGrant,
     feature_set_id: str,
     start: datetime,
     end: datetime,
@@ -82,7 +82,13 @@ def _predict_alpha_for_frozen_oos(
     store: DatasetStore,
     registry: AlphaModelRegistry,
 ) -> DatasetManifest:
-    """Private OOS-only inference path after ResearchAdmission has revalidated the freeze."""
+    """Private OOS-only inference path requiring a ResearchAdmission grant."""
+    if not isinstance(grant, _FrozenOosGrant):
+        raise AlphaError(
+            AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID,
+            "Frozen OOS prediction requires a ResearchAdmission grant",
+        )
+    record = grant.record
     if len(record.frozen_model_ids) != 1:
         raise AlphaError(AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID, "OOS requires one frozen model")
     loaded = registry.load(record.frozen_model_ids[0])

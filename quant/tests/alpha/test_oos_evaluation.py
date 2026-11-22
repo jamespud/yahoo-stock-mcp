@@ -8,6 +8,7 @@ import pytest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
 from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
+from stock_quant.alpha.models.inference import _predict_alpha_for_frozen_oos
 from stock_quant.alpha.models.oos_evaluation import evaluate_alpha_oos
 from stock_quant.alpha.models.research_freeze import (
     FreezeRequest, FrozenResearchStore, freeze_alpha_selection, freeze_identity,
@@ -66,14 +67,26 @@ def test_concurrent_oos_submission_has_single_authoritative_result(tmp_path):
     assert first == second
 
 
+def test_private_oos_prediction_rejects_a_bare_freeze_record(tmp_path):
+    store, registry, record = _frozen(tmp_path)
+    with pytest.raises(AlphaError) as info:
+        _predict_alpha_for_frozen_oos(
+            record, record.test_dataset_ids["test_feature_set_id"],
+            __import__("datetime").datetime.fromisoformat(record.test_window["start"]),
+            __import__("datetime").datetime.fromisoformat(record.test_window["end"]),
+            store=store, registry=registry,
+        )
+    assert info.value.code == AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID
+
+
 def test_oos_evaluation_uses_only_frozen_model(tmp_path, monkeypatch):
     store, registry, record = _frozen(tmp_path)
     module = __import__("stock_quant.alpha.models.oos_evaluation", fromlist=["_predict_alpha_for_frozen_oos"])
     original = module._predict_alpha_for_frozen_oos
     observed = []
-    def spy(frozen_record, feature_set_id, start, end, *, store, registry):
-        observed.append((frozen_record.freeze_id, feature_set_id, start, end))
-        return original(frozen_record, feature_set_id, start, end, store=store, registry=registry)
+    def spy(grant, feature_set_id, start, end, *, store, registry):
+        observed.append((grant.record.freeze_id, feature_set_id, start, end))
+        return original(grant, feature_set_id, start, end, store=store, registry=registry)
     module._predict_alpha_for_frozen_oos = spy
     try:
         result = evaluate_alpha_oos(_test_grant(record), store=store, model_registry=registry)

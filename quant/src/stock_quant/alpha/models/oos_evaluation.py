@@ -70,7 +70,7 @@ def evaluate_alpha_oos(
     if record.test_dataset_hashes.get("test_label_source_dataset_id") != store.load_manifest(record.test_dataset_ids["test_label_source_dataset_id"]).content_hash:
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Test label dataset hash changed after freeze")
     prediction_manifest = _predict_alpha_for_frozen_oos(
-        record, record.test_dataset_ids["test_feature_set_id"], start, end,
+        grant, record.test_dataset_ids["test_feature_set_id"], start, end,
         store=store, registry=model_registry,
     )
     prediction_root = store.datasets / prediction_manifest.dataset_id.removeprefix("sha256:")
