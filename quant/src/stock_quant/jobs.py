@@ -5,7 +5,6 @@ a cancelled or expired owner cannot publish even if computation returns later.
 """
 from __future__ import annotations
 
-import base64
 from datetime import datetime
 import json
 from pathlib import Path
@@ -15,9 +14,9 @@ import time
 from uuid import uuid4
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, TypeAdapter, model_validator
+from pydantic import AwareDatetime, Field, TypeAdapter, ValidationError, model_validator
 
-from .artifacts import ArtifactStore
+from .artifacts import ArtifactStore, MAX_RESPONSE_ROW_BYTES
 from .compiler import compile_strategy, digest
 from .contracts import StrictModel, Timeframe
 from .data import MarketBar, Snapshot
@@ -25,6 +24,7 @@ from .quality import data_quality, resample_snapshot
 from .registry import Registry
 from .runtime import Evaluator, ExecutionConfig, run_backtest
 from .portfolio import run_portfolio
+from .pagination import result_page
 from .research import OptimizationRequest, ScreenRequest, validate_research, optimize, screen, candidates
 from .provenance import environment
 from .python_plans import PythonPlan, compile_python
@@ -85,6 +85,8 @@ class JobStore(Registry):
             CREATE TABLE IF NOT EXISTS result_artifacts (
                 job_id TEXT NOT NULL REFERENCES jobs(id), section TEXT NOT NULL,
                 manifest TEXT NOT NULL, PRIMARY KEY(job_id, section));
+            CREATE TABLE IF NOT EXISTS alpha_dataset_publications (
+                dataset_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id));
             CREATE TABLE IF NOT EXISTS job_requests (
                 request_key TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id),
                 config_hash TEXT NOT NULL);
@@ -302,12 +304,28 @@ class JobStore(Registry):
                 return {"job_id": job_id, "freeze_id": freeze_id, "record": summary}
         return None
 
+    def audit_training_rejection(self, source: str, fields: list[str]) -> dict:
+        with self.connection:
+            self._record_alpha_research_audit(
+                event_type="TRAINING_SUBMISSION_REJECTED", freeze_id="", job_id="",
+                detail={"source": source, "fields": sorted({field[:128] for field in fields[:20]})},
+            )
+        return {"recorded": True}
+
     def submit_alpha(self, raw: dict) -> dict:
         try:
             from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
         except ImportError as error:
             raise ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed") from error
-        request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
+        try:
+            request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
+        except ValidationError as error:
+            if isinstance(raw, dict) and raw.get("kind") == "train_alpha_model":
+                fields = [".".join(map(str, issue["loc"][1:])) or "request"
+                          for issue in error.errors(include_input=False)]
+                self.audit_training_rejection("runtime", fields)
+                raise ValueError(f"Invalid Alpha training fields: {', '.join(fields[:20])}") from error
+            raise
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
         is_oos = request.kind == "evaluate_alpha_oos"
@@ -412,7 +430,7 @@ class JobStore(Registry):
         compact = {}
         for section, value in result.items():
             if isinstance(value, list):
-                references[section] = self.artifacts.write_rows(iter(value), checkpoint=checkpoint)
+                references[section] = self.artifacts.write_rows(iter(value), checkpoint=checkpoint, enforce_mcp_budget=True)
                 compact[section] = {"$artifact": references[section]}
             else:
                 compact[section] = value
@@ -429,7 +447,8 @@ class JobStore(Registry):
         except OwnershipLost:
             return False
         except Exception as error:
-            return self.fail_publish(claim, error)
+            self.fail_publish(claim, error)
+            return False
         encoded = json.dumps(compact, allow_nan=False)
         with self.connection:
             changed = self.connection.execute(
@@ -442,12 +461,17 @@ class JobStore(Registry):
                     self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
         return changed.rowcount == 1
 
-    def complete_publish(self, claim: dict) -> bool:
+    def complete_publish(self, claim: dict, *, dataset_ids=()) -> bool:
         with self.connection:
             changed = self.connection.execute(
                 "UPDATE jobs SET status='completed',progress=1.,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status='publishing' AND lease_until>unixepoch()",
                 (claim["id"], claim["owner"]),
             )
+            if changed.rowcount == 1:
+                self.connection.executemany(
+                    "INSERT OR IGNORE INTO alpha_dataset_publications VALUES (?, ?)",
+                    [(dataset_id, claim["id"]) for dataset_id in dataset_ids],
+                )
             if changed.rowcount == 1 and claim["request"].get("kind") == "evaluate_alpha_oos":
                 row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
                 self._record_alpha_research_audit(
@@ -479,19 +503,7 @@ class JobStore(Registry):
         references = {}
         try:
             if result is not None:
-                def checkpoint():
-                    if not self.heartbeat(claim, .99):
-                        raise OwnershipLost()
-                compact = {}
-                for section, value in result.items():
-                    if isinstance(value, list):
-                        references[section] = self.artifacts.write_rows(iter(value), checkpoint=checkpoint)
-                        compact[section] = {"$artifact": references[section]}
-                    else:
-                        compact[section] = value
-                result = compact
-                if len(json.dumps(result, allow_nan=False).encode()) > 16777216:
-                    raise ValueError("RESOURCE_LIMIT_EXCEEDED: result metadata exceeds 16 MiB")
+                result, references = self._serialize_result(claim, result)
         except OwnershipLost:
             return False
         except Exception as serialization_error:
@@ -544,7 +556,7 @@ class JobStore(Registry):
                     )
         return self.get_job(job_id)
 
-    def get_result(self, job_id: str, section="summary", limit=100, cursor=None) -> dict:
+    def get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
         sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
@@ -573,28 +585,13 @@ class JobStore(Registry):
                 raise ValueError("Object sections do not accept cursors")
             return value
         count = reference["row_count"] if reference else len(value)
-        offset = 0
-        if cursor:
-            try:
-                parts = json.loads(base64.urlsafe_b64decode(cursor))
-                if parts[:3] != [job_id, section, row[1]] or type(parts[3]) is not int or not 0 <= parts[3] <= count:
-                    raise ValueError()
-                offset = parts[3]
-            except Exception as error:
-                raise ValueError("Invalid result cursor") from error
-        rows = self.artifacts.read_rows(reference, offset, limit, byte_limit=2500000) if reference else value[offset:offset + limit]
-        page, byte_count = [], 0
-        for item in rows:
-            row_bytes = len(json.dumps(item, allow_nan=False).encode())
-            if byte_count + row_bytes > 3_000_000:
-                if not page:
-                    raise ValueError("RESOURCE_LIMIT_EXCEEDED: one result row exceeds the response budget")
-                break
-            page.append(item)
-            byte_count += row_bytes
-        next_offset = offset + len(page)
-        token = base64.urlsafe_b64encode(json.dumps([job_id, section, row[1], next_offset]).encode()).decode() if next_offset < count else None
-        return {"rows": page, "total_count": count, "next_cursor": token, "content_hash": row[1], "resource_uri": f"quant://results/{job_id}/{section}"}
+        def read_rows(offset, size):
+            if reference:
+                return self.artifacts.read_rows(reference, offset, size, byte_limit=MAX_RESPONSE_ROW_BYTES)
+            return value[offset:offset + size]
+        return result_page(job_id, section, row[1], count, limit, None if cursor == "" else cursor, read_rows,
+                           resource_uri=f"quant://results/{job_id}/{section}", byte_limit=MAX_RESPONSE_ROW_BYTES,
+                           mcp_overhead_bytes=mcp_overhead_bytes)
 
 
 

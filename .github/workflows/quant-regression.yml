@@ -84,6 +84,9 @@ jobs:
       - run: npm run test:quant-alpha-e2e
         env:
           QUANT_PYTHON: python
+      - run: npm run test:quant-alpha-scalability
+        env:
+          QUANT_PYTHON: python
       - run: npm run test:quant-data-validity
         env:
           QUANT_PYTHON: python
@@ -122,5 +125,8 @@ jobs:
         env:
           QUANT_PYTHON: python
       - run: npm run test:quant-alpha-e2e
+        env:
+          QUANT_PYTHON: python
+      - run: npm run test:quant-alpha-scalability
         env:
           QUANT_PYTHON: python

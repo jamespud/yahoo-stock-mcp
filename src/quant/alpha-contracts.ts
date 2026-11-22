@@ -108,20 +108,60 @@ export const computeOptionFactorsInput = z.object({
   underlying_price_dataset_id: alphaHash.optional(),
 }).strict();
 
+const int32Max = 2_147_483_647;
+const lightgbmHyperparameters = z.object({
+  learning_rate: z.number().finite().positive().optional(),
+  num_leaves: z.number().int().min(2).max(131072).optional(),
+  max_depth: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
+  min_child_samples: z.number().int().min(0).max(int32Max).optional(),
+  n_estimators: z.number().int().min(1).max(int32Max).optional(),
+}).strict();
+
 export const trainAlphaModelInputFields = z.object({
   evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
   research_protocol_hash: alphaHash.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
   windows: z.union([temporalWindows, developmentWindows]),
-  hyperparameters: z.record(z.number()).optional(),
-  random_seed: z.number().int().optional(),
+  hyperparameters: lightgbmHyperparameters.optional(),
+  random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
   resource_budget: z.object({
     max_seconds: z.number().int().min(1).max(86400).optional(),
     max_rows: z.number().int().min(1).optional(),
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
 }).strict();
+
+// The SDK's strict-union JSON Schema conversion advertises the typed branch,
+// while the fallback lets missing or invalid values reach the audit handler.
+function auditableField<T extends z.ZodTypeAny>(schema: T) {
+  const optional = schema.isOptional();
+  const field = z.union([schema, z.unknown()]);
+  // Keep required JSON-Schema fields while accepting invalid JSON values for
+  // the audited validator. Zod otherwise treats an unknown union arm as optional.
+  if (!optional) Object.defineProperty(field, "isOptional", { value: () => false });
+  return field;
+}
+
+const training = trainAlphaModelInputFields.shape;
+export const trainAlphaModelToolFields = z.object({
+  evaluation_mode: auditableField(training.evaluation_mode),
+  research_protocol_hash: auditableField(training.research_protocol_hash),
+  feature_set_id: auditableField(training.feature_set_id.describe("Required feature set content ID.")),
+  label_spec: auditableField(training.label_spec.describe("Required label specification.")),
+  windows: auditableField(training.windows.describe("Required chronological windows.")),
+  hyperparameters: auditableField(training.hyperparameters.describe("Set random_seed on the request itself.")),
+  random_seed: auditableField(training.random_seed),
+  resource_budget: auditableField(training.resource_budget),
+  min_rank_ic: auditableField(training.min_rank_ic),
+}).passthrough();
+
+// MCP permits a valid tools/call without an arguments member. Preserve the
+// Zod object (and thus the advertised fields) while treating omission as {} so
+// the handler can record the required-field rejection before any Job exists.
+const parseTrainingInput = trainAlphaModelToolFields.safeParseAsync.bind(trainAlphaModelToolFields);
+trainAlphaModelToolFields.safeParseAsync = (data, params) =>
+  parseTrainingInput(data === undefined ? {} : data, params);
 
 export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
   if (value.evaluation_mode !== "validation_only") return;

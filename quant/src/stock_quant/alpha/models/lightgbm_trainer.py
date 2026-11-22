@@ -8,7 +8,7 @@ from typing import Callable
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from pydantic import Field, StrictFloat, StrictInt, model_validator
+from pydantic import Field, StrictFloat, StrictInt, field_validator, model_validator
 
 from ...compiler import digest
 from ...contracts import StrictModel
@@ -16,6 +16,7 @@ from ..contracts import Hash, ModelResourceBudget
 from ..data.catalog import DatasetStore
 from ..errors import AlphaError, AlphaErrorCode
 from .evaluation import metrics, quantile_returns
+from .hyperparameters import INT32_MAX, validate_hyperparameters
 from .labels import LabelRow
 from .registry import AlphaModelRegistry
 from .temporal_split import ModelDevelopmentSplit, TemporalSplit, split_matured_development, split_matured_labels
@@ -34,9 +35,11 @@ class TrainAlphaRequest(StrictModel):
     research_protocol_hash: str | None = None
     split: TemporalSplit | ModelDevelopmentSplit
     hyperparameters: dict[str, StrictInt | StrictFloat] = Field(default_factory=dict)
-    random_seed: int = Field(default=0, strict=True)
+    random_seed: int = Field(default=0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
     min_rank_ic: float = Field(default=0.03, ge=-1, le=1, strict=True)
+
+    _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 
     @model_validator(mode="after")
     def split_mode(self):
@@ -116,10 +119,6 @@ def _subset(joined: pd.DataFrame, start, end) -> pd.DataFrame:
 
 
 def _params(request: TrainAlphaRequest):
-    allowed = {"learning_rate", "num_leaves", "max_depth", "min_child_samples", "n_estimators"}
-    unknown = set(request.hyperparameters) - allowed
-    if unknown:
-        raise ValueError(f"Unknown LightGBM hyperparameters: {sorted(unknown)}")
     return {
         "objective": "regression",
         "metric": "l2",

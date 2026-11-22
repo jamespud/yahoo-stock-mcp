@@ -15,15 +15,36 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 from uuid import uuid4
 
-from ...compiler import digest
+from ...artifacts import MAX_RESPONSE_ROW_BYTES
+from ...pagination import fits_response_row, result_page
 from ..contracts import DatasetManifest, DatasetPartition, Hash, StockDatasetRequest
 from ..errors import AlphaError, AlphaErrorCode
-from datetime import datetime, timezone
+from .audit_hash import HASH_VERSION, logical_rows_hash
 from .manifests import canonical_json, content_hash, dataset_identity
 from .partitions import FORMAT, StockBarRow, normalise_stock_rows, read_partition, stock_rows_by_instrument, write_feature_partition, write_option_partition, write_prediction_partition, write_stock_partition
 from .quality import DataQualityReport
 
 _DATASET_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+DATASET_AUDIT_SECTIONS = ("session_coverage_by_symbol", "exchange_mappings", "partition_manifest")
+
+
+def dataset_summary(manifest: DatasetManifest) -> dict:
+    quality = manifest.data_quality
+    quality_summary = {key: value for key, value in quality.items()
+                       if value is None or isinstance(value, (bool, int, float))}
+    for key in ("provider", "calendar_id", "calendar_provider_version", "price_attestation_status",
+                "execution_validity_status", "corporate_action_coverage_status", "session_coverage"):
+        if key in quality:
+            quality_summary[key] = quality[key]
+    return {
+        "dataset_id": manifest.dataset_id, "dataset_kind": manifest.dataset_kind,
+        "content_hash": manifest.content_hash, "partition_count": len(manifest.partition_manifest),
+        "row_count": sum(part.row_count for part in manifest.partition_manifest),
+        "quality_summary": quality_summary,
+        "quality_detail_reference": {"dataset_id": manifest.dataset_id, "sections": list(DATASET_AUDIT_SECTIONS)},
+    }
+
+
 _DDL = '''
 CREATE TABLE IF NOT EXISTS alpha_datasets (
   dataset_id TEXT PRIMARY KEY, schema_version TEXT NOT NULL, dataset_kind TEXT NOT NULL,
@@ -40,6 +61,9 @@ CREATE TABLE IF NOT EXISTS alpha_dataset_parents (
   dataset_id TEXT NOT NULL REFERENCES alpha_datasets(dataset_id),
   parent_dataset_id TEXT NOT NULL REFERENCES alpha_datasets(dataset_id),
   PRIMARY KEY(dataset_id, parent_dataset_id));
+CREATE TABLE IF NOT EXISTS alpha_dataset_publication_gates (
+  dataset_id TEXT NOT NULL REFERENCES alpha_datasets(dataset_id), job_db_name TEXT NOT NULL,
+  PRIMARY KEY(dataset_id, job_db_name));
 '''
 
 
@@ -316,14 +340,16 @@ class DatasetStore:
             if stage.exists():
                 shutil.rmtree(stage, ignore_errors=True)
 
-    def register(self, manifest: DatasetManifest, checkpoint=None) -> None:
-        self._register(manifest, checkpoint=checkpoint)
+    def register(self, manifest: DatasetManifest, checkpoint=None, *, job_path: Path | None = None) -> None:
+        self._register(manifest, checkpoint=checkpoint, job_path=job_path)
 
-    def _register(self, manifest: DatasetManifest, checkpoint=None) -> None:
+    def _register(self, manifest: DatasetManifest, checkpoint=None, *, job_path: Path | None = None) -> None:
+        if job_path is not None and job_path.absolute().with_suffix(".alpha") != self.root.absolute():
+            raise ValueError("Job registry does not own this dataset catalog")
         if checkpoint:
             checkpoint()
         with self._connect() as connection:
-            connection.execute(
+            inserted = connection.execute(
                 "INSERT OR IGNORE INTO alpha_datasets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
                 (
                     manifest.dataset_id, manifest.schema_version, manifest.dataset_kind, manifest.source,
@@ -341,6 +367,14 @@ class DatasetStore:
                 "INSERT OR IGNORE INTO alpha_dataset_parents VALUES (?,?)",
                 [(manifest.dataset_id, parent) for parent in manifest.parent_dataset_ids],
             )
+            if inserted.rowcount:
+                self._validate_audit_rows(manifest)
+            if job_path is not None:
+                connection.execute(
+                    "INSERT OR IGNORE INTO alpha_dataset_publication_gates "
+                    "SELECT ?, ? WHERE ? OR EXISTS (SELECT 1 FROM alpha_dataset_publication_gates WHERE dataset_id=?)",
+                    (manifest.dataset_id, job_path.name, inserted.rowcount, manifest.dataset_id),
+                )
             connection.commit()
         if checkpoint:
             checkpoint()
@@ -349,15 +383,33 @@ class DatasetStore:
         if not isinstance(dataset_id, str) or not _DATASET_ID.fullmatch(dataset_id):
             raise ValueError("Invalid dataset ID")
         with self._connect() as connection:
-            row = connection.execute("SELECT manifest_path FROM alpha_datasets WHERE dataset_id=?", (dataset_id,)).fetchone()
-        if row is None:
+            row = connection.execute(
+                "SELECT manifest_path FROM alpha_datasets WHERE dataset_id=?", (dataset_id,),
+            ).fetchone()
+            gates = connection.execute("SELECT job_db_name FROM alpha_dataset_publication_gates WHERE dataset_id=?",
+                                       (dataset_id,)).fetchall()
+        if row is None or (gates and not any(self._has_publication_receipt(dataset_id, name) for (name,) in gates)):
             raise KeyError(dataset_id)
         path = self._safe_root_path(row[0])
         manifest = DatasetManifest.model_validate_json(path.read_text())
         expected = dataset_identity(manifest.model_dump(mode="json"), manifest.partition_manifest)
-        if manifest.dataset_id != dataset_id or expected != dataset_id:
+        if (manifest.dataset_id != dataset_id or expected != dataset_id
+                or content_hash(manifest.partition_manifest) != manifest.content_hash):
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Manifest identity mismatch")
         return manifest
+
+    def _has_publication_receipt(self, dataset_id: str, job_db_name: str) -> bool:
+        if Path(job_db_name).name != job_db_name or not job_db_name:
+            return False
+        path = self.root.parent / job_db_name
+        if path.with_suffix(".alpha") != self.root:
+            return False
+        # The catalog is durable first; visibility requires a receipt committed in the job CAS.
+        try:
+            with sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True) as connection:
+                return connection.execute("SELECT 1 FROM alpha_dataset_publications WHERE dataset_id=?", (dataset_id,)).fetchone() is not None
+        except sqlite3.OperationalError:
+            return False
 
     def load_published_manifest(self, dataset_id: str) -> DatasetManifest:
         """Load a manifest that was atomically published by a deferred job before catalog registration."""
@@ -369,6 +421,38 @@ class DatasetStore:
         if manifest.dataset_id != dataset_id or expected != dataset_id:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Published manifest identity mismatch")
         return manifest
+
+    def audit_dataset(self, dataset_id: str, section: str, limit=100, cursor=None, symbol=None,
+                      *, mcp_overhead_bytes=None) -> dict:
+        if section not in DATASET_AUDIT_SECTIONS:
+            raise ValueError("Invalid dataset audit section")
+        if symbol is not None and (section == "partition_manifest" or not isinstance(symbol, str) or not 1 <= len(symbol) <= 64):
+            raise ValueError("symbol is only supported for per-instrument dataset audit sections")
+        rows = self._audit_rows(self.load_manifest(dataset_id), section, symbol)
+        return result_page(
+            dataset_id, [HASH_VERSION, section, symbol], logical_rows_hash(rows), len(rows), limit, cursor,
+            lambda offset, size: rows[offset:offset + size],
+            resource_uri=f"quant://datasets/{dataset_id}/{section}", byte_limit=MAX_RESPONSE_ROW_BYTES,
+            metadata={"dataset_id": dataset_id, "section": section, "symbol": symbol, "hash_version": HASH_VERSION},
+            mcp_overhead_bytes=mcp_overhead_bytes,
+        )
+
+    @staticmethod
+    def _audit_rows(manifest, section, symbol=None):
+        if section == "partition_manifest":
+            return [part.model_dump(mode="json") for part in sorted(manifest.partition_manifest, key=lambda item: item.ordinal)]
+        if section == "exchange_mappings":
+            mappings = manifest.data_quality.get(section, {})
+            return [mappings[key] for key in sorted(mappings) if symbol is None or key == symbol]
+        return sorted((row for row in manifest.data_quality.get(section, [])
+                       if symbol is None or row["instrument_id"] == symbol), key=lambda row: row["instrument_id"])
+
+    def _validate_audit_rows(self, manifest):
+        for section in DATASET_AUDIT_SECTIONS:
+            for row in self._audit_rows(manifest, section):
+                size = len(json.dumps(row, allow_nan=False).encode())
+                if size + 2 > MAX_RESPONSE_ROW_BYTES or not fits_response_row(row, size):
+                    raise ValueError(f"RESOURCE_LIMIT_EXCEEDED: one {section} row exceeds the response budget")
 
     def validate_dataset(self, dataset_id: str) -> DataQualityReport:
         issues: list[dict] = []
