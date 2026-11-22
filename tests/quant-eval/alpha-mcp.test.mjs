@@ -16,7 +16,9 @@ import {
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
   trainAlphaModelInputFields,
+  trainAlphaDiagnosticFoldsInput,
   developmentWindows,
+  evaluateAlphaSignalInput,
 } from "../../dist/quant/alpha-contracts.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -69,6 +71,32 @@ test("Zod contracts are strict and cover the public Alpha inputs", () => {
   assert.ok(backtestOptionsInput.shape.execution_config);
 });
 
+test("Direct signal contract requires UTC-midnight evaluation boundaries", () => {
+  const input = {
+    feature_set_id: "sha256:" + "1".repeat(64),
+    stock_dataset_id: "sha256:" + "2".repeat(64),
+    label_name: "stock_forward_return",
+    target_type: "stock_return",
+    horizon_days: 5,
+    windows: {
+      train_start: "2009-01-02T00:00:00Z", train_end: "2009-04-01T00:00:00Z",
+      validation_start: "2009-04-01T00:00:00Z", validation_end: "2009-07-01T00:00:00Z",
+    },
+    evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-06-01T00:00:00Z"},
+    signal_spec: {factor_name: "mom5", score_multiplier: 1, version: "direct-factor-v1"},
+  };
+  assert.ok(evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T08:00:00+08:00", end: "2009-06-01T08:00:00+08:00"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T00:00:00Z", end: "2009-04-01T23:59:59Z"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({
+    ...input, evaluation_window: {start: "2009-04-01T12:00:00Z", end: "2009-04-02T00:00:00Z"},
+  }));
+  assert.throws(() => evaluateAlphaSignalInput.parse({...input, label_name: "future_return"}));
+});
+
 test("Validation-only training contract is explicit and rejects Test windows", () => {
   const windows = {
     train_start: "2022-01-14T00:00:00Z", train_end: "2022-01-15T00:00:00Z",
@@ -102,4 +130,20 @@ test("Validation-only training contract is explicit and rejects Test windows", (
     },
   }));
   assert.throws(() => developmentWindows.parse({...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"}));
+});
+
+test("Diagnostic fold date isolation applies only to frozen v1.3", () => {
+  const input = {
+    research_protocol_hash: "sha256:" + "0".repeat(64),
+    feature_set_id: "sha256:" + "1".repeat(64),
+    stock_dataset_id: "sha256:" + "2".repeat(64),
+    windows: {
+      train_start: "2013-07-01T00:00:00Z", train_end: "2013-10-01T00:00:00Z",
+      validation_start: "2013-10-01T00:00:00Z", validation_end: "2014-01-02T00:00:00Z",
+    },
+    split_at: "2013-08-15T00:00:00Z",
+    protocol_mode: "synthetic_contract",
+  };
+  assert.ok(trainAlphaDiagnosticFoldsInput.parse(input));
+  assert.throws(() => trainAlphaDiagnosticFoldsInput.parse({...input, protocol_mode: "frozen_v1_3"}));
 });

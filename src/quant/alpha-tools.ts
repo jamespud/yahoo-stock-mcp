@@ -10,11 +10,14 @@ import {
   captureOptionsSnapshotInput,
   computeFactorsInput,
   computeOptionFactorsInput,
+  evaluateAlphaSignalInput,
   predictAlphaInput,
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
   trainAlphaModelToolFields,
+  trainAlphaDiagnosticFoldsInput,
+  trainAlphaDiagnosticFoldsToolFields,
 } from "./alpha-contracts.js";
 import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
@@ -74,6 +77,33 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
     "Submit option volatility factor computation with explicit pricing configuration and PIT quote semantics.",
     computeOptionFactorsInput.shape,
     async (args) => submit({ kind: "compute_option_factors", ...args }),
+  );
+
+  server.tool(
+    "quant_evaluate_alpha_signal",
+    "Submit a deterministic development-only direct-factor diagnostic with daily Rank IC, mapped weekly-last-session Rank IC, and frozen Top20 forward-label groups. Reads only development windows and never reads reserved Test artifacts.",
+    evaluateAlphaSignalInput.shape,
+    async (args) => {
+      const { windows, ...rest } = args;
+      return submit({ kind: "evaluate_alpha_signal", ...rest, split: windows });
+    },
+  );
+
+  server.registerTool(
+    "quant_train_alpha_diagnostic_folds",
+    {
+      description: "Fit two independent deterministic LightGBM models over disjoint Train slices. The caller-approved split_at must remain strictly inside Train; outputs are exploratory importance evidence and never affect model selection or prior candidate records.",
+      inputSchema: trainAlphaDiagnosticFoldsToolFields,
+    },
+    async (args) => {
+      const parsed = trainAlphaDiagnosticFoldsInput.safeParse(args);
+      if (!parsed.success) {
+        const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".") || "request"))].sort();
+        return {isError: true, content: [{type: "text", text: `Invalid Alpha diagnostic fold fields: ${fields.join(", ")}`}]};
+      }
+      const { windows, ...rest } = parsed.data;
+      return submit({ kind: "train_alpha_diagnostic_folds", ...rest, split: windows });
+    },
   );
 
   server.registerTool(

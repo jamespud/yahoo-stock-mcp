@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
 
@@ -30,9 +30,29 @@ from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
 from ..models.feature_diagnostics import diagnose_alpha_model
+from ..models.diagnostic_protocol import (
+    RESERVED_TEST_END,
+    frozen_protocol,
+    protocol_claim,
+    validate_frozen_label_contract,
+    validate_frozen_membership,
+)
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, historical_option_labels, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
+from ..models.signal_diagnostics import (
+    ANALYSIS_LABEL,
+    evaluate_direct_signal,
+    evaluate_weekly_signal,
+    expected_session_dates,
+    moving_block_bootstrap,
+    regime_breakdown,
+    sign_consistency,
+    stability_by_subperiod,
+    stability_by_year,
+    top20_forward_diagnostics,
+)
+from ..models.window_diagnostics import diagnostic_window_importance
 from ..models.research_freeze import FreezeRequest, FrozenResearchRecord, FrozenResearchStore, freeze_alpha_selection
 from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from ..options.pricing import OptionPricingConfig
@@ -40,8 +60,9 @@ from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backte
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
 from .requests import (
     ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
-    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, FreezeAlphaSelectionJob,
-    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
+    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, EvaluateAlphaSignalJob, FreezeAlphaSelectionJob,
+    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, RESERVED_TEST_START,
+    TrainAlphaDiagnosticFoldsJob, TrainAlphaModelJob,
 )
 
 
@@ -179,16 +200,261 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             pending.append(feature)
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
+        elif isinstance(request, EvaluateAlphaSignalJob):
+            feature_manifest = datasets.load_manifest(request.feature_set_id)
+            if feature_manifest.dataset_kind != "feature_panel":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a feature_panel dataset")
+            stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            if stock_manifest.dataset_kind != "stock_bars":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Signal diagnostics require a stock_bars dataset")
+            if request.protocol_mode == "frozen_v1_3" and (
+                feature_manifest.end_at > RESERVED_TEST_START or stock_manifest.end_at > RESERVED_TEST_START
+            ):
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Signal dataset physical coverage enters reserved Test",
+                    {"feature_end": feature_manifest.end_at.isoformat(), "stock_end": stock_manifest.end_at.isoformat()},
+                )
+            if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
+            calendar = mapped_stock_calendar(stock_manifest)
+            if calendar is None:
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Signal diagnostics require a mapped stock calendar")
+            expected_sessions = expected_session_dates(
+                calendar,
+                request.evaluation_window.start.date(),
+                request.evaluation_window.end.date(),
+            )
+            if not expected_sessions:
+                raise AlphaError(AlphaErrorCode.INSUFFICIENT_HISTORY, "Evaluation window contains no scheduled sessions")
+            bounded(.1)
+            feature_rows = datasets.read_rows(
+                request.feature_set_id,
+                columns=(
+                    "decision_at", "instrument_id", "factor_name", "factor_value",
+                    "feature_available_at", "eligible", "quality_flags", "factor_version",
+                ),
+                start_at=request.evaluation_window.start,
+                end_at=request.evaluation_window.end,
+            )
+            bounded(.45)
+            stock_rows = datasets.read_rows(
+                request.stock_dataset_id,
+                start_at=request.evaluation_window.start,
+                end_at=request.split.validation_end,
+            )
+            labels = stock_forward_labels(
+                stock_rows,
+                horizon=request.horizon_days,
+                calendar=calendar,
+            )
+            if not labels or any(label.label_version != "session-aligned-v2" for label in labels):
+                raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No session-aligned-v2 labels generated")
+            bounded(.75)
+            diagnostics = evaluate_direct_signal(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
+            weekly = evaluate_weekly_signal(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
+            top20 = top20_forward_diagnostics(
+                feature_rows,
+                labels,
+                expected_instruments=feature_manifest.instrument_ids,
+                expected_sessions=expected_sessions,
+                spec=request.signal_spec,
+            )
+            annual_stability = stability_by_year(diagnostics["rank_ic_by_decision"])
+            subperiod_stability = stability_by_subperiod(diagnostics["rank_ic_by_decision"])
+            weekly_bootstrap = moving_block_bootstrap(weekly["weekly_rank_ic"])
+            benchmark_rows = []
+            regime_session_grid = []
+            if request.benchmark_symbol is not None:
+                benchmark_symbols = {str(value).upper() for value in stock_manifest.instrument_ids}
+                if request.benchmark_symbol not in benchmark_symbols:
+                    raise AlphaError(
+                        AlphaErrorCode.DATA_UNAVAILABLE,
+                        "Requested benchmark symbol is not present in the stock dataset",
+                        {"benchmark_symbol": request.benchmark_symbol},
+                    )
+                regime_session_grid = expected_session_dates(
+                    calendar,
+                    request.split.train_start.date(),
+                    request.evaluation_window.end.date(),
+                )
+                benchmark_rows = datasets.read_rows(
+                    request.stock_dataset_id,
+                    columns=("instrument_id", "start_at", "end_at", "available_at", "close"),
+                    start_at=request.split.train_start,
+                    end_at=request.evaluation_window.end,
+                )
+            regimes = regime_breakdown(
+                diagnostics["rank_ic_by_decision"],
+                benchmark_rows,
+                benchmark_symbol=request.benchmark_symbol,
+                expected_sessions=regime_session_grid,
+            )
+            annual_sign = sign_consistency(annual_stability)
+            subperiod_sign = sign_consistency(subperiod_stability)
+            weekly_sign = sign_consistency(weekly["weekly_rank_ic"])
+            stability_summary = {
+                "annual_period_count": len(annual_stability),
+                "annual_sign_consistency": annual_sign,
+                "subperiod_count": len(subperiod_stability),
+                "subperiod_sign_consistency": subperiod_sign,
+                "weekly_sign_consistency": weekly_sign,
+                "weekly_bootstrap": weekly_bootstrap,
+                "regime_session_grid": {
+                    "source": "mapped_development_sessions" if request.benchmark_symbol is not None else None,
+                    "start": request.split.train_start.isoformat() if request.benchmark_symbol is not None else None,
+                    "end": request.evaluation_window.end.isoformat() if request.benchmark_symbol is not None else None,
+                    "session_count": len(regime_session_grid),
+                },
+                "regime_decision_counts": {
+                    record["regime"]: record["decision_count"] for record in regimes
+                },
+            }
+            diagnostic_rows = [
+                {**record, "diagnostic": "annual_stability"} for record in annual_stability
+            ] + [
+                {**record, "diagnostic": "subperiod_stability"} for record in subperiod_stability
+            ] + [
+                {**record, "diagnostic": "regime_breakdown"} for record in regimes
+            ] + [
+                {"diagnostic": "weekly_moving_block_bootstrap", **weekly_bootstrap},
+                {"diagnostic": "annual_sign_consistency", **annual_sign},
+                {"diagnostic": "subperiod_sign_consistency", **subperiod_sign},
+                {"diagnostic": "weekly_sign_consistency", **weekly_sign},
+            ]
+            bounded(.95)
+            evaluation_window = {
+                "start": request.evaluation_window.start.isoformat(),
+                "end": request.evaluation_window.end.isoformat(),
+            }
+            summary = {
+                **diagnostics["summary"],
+                **weekly["summary"],
+                "feature_set_id": request.feature_set_id,
+                "stock_dataset_id": request.stock_dataset_id,
+                "label_name": request.label_name,
+                "label_version": "session-aligned-v2",
+                "target_type": request.target_type,
+                "horizon_days": request.horizon_days,
+                "evaluation_window": evaluation_window,
+                "daily_decision_count": diagnostics["summary"]["decision_count"],
+                "daily_sample_count": diagnostics["coverage"]["valid_matched_opportunities"],
+                "daily_prediction_coverage": diagnostics["coverage"]["prediction_coverage"],
+                "daily_label_coverage": diagnostics["coverage"]["label_coverage"],
+                "top20_forward_label_summary": top20["summary"],
+                "stability_summary": stability_summary,
+                **protocol_claim(request.protocol_mode),
+            }
+            source_windows = {
+                "feature_start": request.evaluation_window.start.isoformat(),
+                "feature_end": request.evaluation_window.end.isoformat(),
+                "stock_start": request.evaluation_window.start.isoformat(),
+                "stock_end": request.split.validation_end.isoformat(),
+            }
+            if request.benchmark_symbol is not None:
+                source_windows["benchmark_start"] = request.split.train_start.isoformat()
+                source_windows["benchmark_end"] = request.evaluation_window.end.isoformat()
+            result = {
+                "summary": summary,
+                "rank_ic_by_decision": diagnostics["rank_ic_by_decision"],
+                "weekly_rank_ic": weekly["weekly_rank_ic"],
+                "top20_forward_labels": top20["top20_forward_labels"],
+                "diagnostics": diagnostic_rows,
+                "reproducibility": {
+                    "signal_spec": request.signal_spec.model_dump(mode="json"),
+                    "signal_spec_hash": summary["signal_spec_hash"],
+                    "feature_set_id": request.feature_set_id,
+                    "stock_dataset_id": request.stock_dataset_id,
+                    "label_name": request.label_name,
+                    "label_version": summary["label_version"],
+                    "target_type": request.target_type,
+                    "horizon_days": request.horizon_days,
+                    "calendar_version": stock_manifest.calendar_version,
+                    "calendar_id": getattr(calendar, "id", None),
+                    "evaluation_window": evaluation_window,
+                    "source_windows": source_windows,
+                    "coverage": diagnostics["coverage"],
+                    "excluded_opportunities": summary["excluded_opportunities"],
+                    "daily_decision_count": summary["daily_decision_count"],
+                    "daily_sample_count": summary["daily_sample_count"],
+                    "daily_prediction_coverage": summary["daily_prediction_coverage"],
+                    "daily_label_coverage": summary["daily_label_coverage"],
+                    "weekly_decision_dates": summary["weekly_decision_dates"],
+                    "weekly_decision_count": summary["weekly_decision_count"],
+                    "weekly_sample_count": summary["weekly_sample_count"],
+                    "weekly_prediction_coverage": summary["weekly_prediction_coverage"],
+                    "weekly_label_coverage": summary["weekly_label_coverage"],
+                    "weekly_coverage": summary["weekly_coverage"],
+                    "top20_forward_label_summary": summary["top20_forward_label_summary"],
+                    "stability_summary": stability_summary,
+                    "benchmark_symbol": request.benchmark_symbol,
+                    "regime_lookback_sessions": 63,
+                    "regime_definition": "positive/negative/flat trailing 63-session benchmark return available by decision",
+                    "bootstrap_config": weekly_bootstrap["config"],
+                    "research_protocol_hash": request.research_protocol_hash,
+                    **protocol_claim(request.protocol_mode),
+                    "analysis_label": ANALYSIS_LABEL,
+                    "reserved_test_start": RESERVED_TEST_START.isoformat(),
+                },
+            }
         elif isinstance(request, TrainAlphaModelJob):
             labels = None
+            validation_sessions = None
             if request.evaluation_mode == "validation_only":
                 if not request.stock_dataset_id:
                     raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training currently requires stock_dataset_id")
+                feature_manifest = datasets.load_manifest(request.feature_set_id)
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+                if request.protocol_mode == "frozen_v1_3" and any(
+                    manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
+                    for manifest in (feature_manifest, stock_manifest)
+                ):
+                    raise AlphaError(
+                        AlphaErrorCode.DATASET_MISMATCH,
+                        "Validation-only dataset physical coverage enters reserved Test",
+                        {
+                            "feature_end": feature_manifest.end_at.isoformat(),
+                            "stock_end": stock_manifest.end_at.isoformat(),
+                        },
+                    )
+                for manifest in (feature_manifest, stock_manifest):
+                    if sum(partition.row_count for partition in manifest.partition_manifest) > request.resource_budget.max_rows:
+                        raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training read rows exceed budget")
+                if request.protocol_mode == "frozen_v1_3":
+                    try:
+                        validate_frozen_membership(feature_manifest.instrument_ids)
+                        validate_frozen_membership(stock_manifest.instrument_ids)
+                    except ValueError as error:
+                        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, str(error)) from error
+                calendar = mapped_stock_calendar(stock_manifest)
+                if request.protocol_mode == "frozen_v1_3" and calendar is None:
+                    raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 requires a mapped calendar")
                 labels = stock_forward_labels(
                     datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                     horizon=request.horizon_days,
-                    calendar=mapped_stock_calendar(stock_manifest),
+                    calendar=calendar,
+                )
+                if request.protocol_mode == "frozen_v1_3":
+                    validate_frozen_label_contract(labels)
+                validation_sessions = (
+                    expected_session_dates(
+                        calendar,
+                        request.split.validation_start.date(),
+                        request.split.validation_end.date(),
+                    )
+                    if calendar is not None else None
                 )
             elif request.stock_dataset_id:
                 stock_manifest = datasets.load_manifest(request.stock_dataset_id)
@@ -208,17 +474,181 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 label_name=request.label_name, horizon_days=request.horizon_days,
                 target_type=request.target_type, evaluation_mode=request.evaluation_mode,
                 research_protocol_hash=request.research_protocol_hash, split=request.split,
+                protocol_mode=request.protocol_mode, candidate_id=request.candidate_id,
                 hyperparameters={key: value for key, value in request.hyperparameters.items()},
                 random_seed=request.random_seed, resource_budget=request.resource_budget,
                 min_rank_ic=request.min_rank_ic,
+                selection_metric=request.selection_metric,
+                baseline_signal=request.baseline_signal,
             )
-            model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
+            model = train_alpha(
+                train_req,
+                store=datasets,
+                registry=staging_registry,
+                label_rows=labels,
+                checkpoint=bounded,
+                validation_sessions=validation_sessions,
+            )
             staged_model = model
             model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
                       "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
                       "diagnostics": [model_diagnostics],
-                      "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+                      "reproducibility": {
+                          "model_hash": model.model_hash,
+                          "environment_hash": model.environment_hash,
+                          "selection_metric": (
+                              model.selection_diagnostics["selection_metric"]
+                              if model.selection_diagnostics is not None else None
+                          ),
+                          "selected_iteration": model.selected_iteration,
+                          "selected_validation_prediction_hash": (
+                              model.selection_diagnostics["selected_validation_prediction_hash"]
+                              if model.selection_diagnostics is not None else None
+                          ),
+                          "baseline_signal_hash": (
+                              model.baseline_comparison["baseline_signal_hash"]
+                              if model.baseline_comparison is not None else None
+                          ),
+                          "protocol_mode": model.protocol_mode,
+                          "protocol_claim": model.protocol_claim,
+                          "frozen_validation_gate": model.frozen_validation_gate,
+                      }}
+        elif isinstance(request, TrainAlphaDiagnosticFoldsJob):
+            feature_manifest = datasets.load_manifest(request.feature_set_id)
+            if feature_manifest.dataset_kind != "feature_panel":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a feature_panel dataset")
+            stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            if stock_manifest.dataset_kind != "stock_bars":
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Diagnostic folds require a stock_bars dataset")
+            if request.protocol_mode == "frozen_v1_3" and any(
+                manifest.start_at < RESERVED_TEST_END and manifest.end_at > RESERVED_TEST_START
+                for manifest in (feature_manifest, stock_manifest)
+            ):
+                raise AlphaError(
+                    AlphaErrorCode.DATASET_MISMATCH,
+                    "Diagnostic fold dataset physical coverage enters reserved Test",
+                    {"feature_end": feature_manifest.end_at.isoformat(), "stock_end": stock_manifest.end_at.isoformat()},
+                )
+            if stock_manifest.dataset_id not in feature_manifest.parent_dataset_ids:
+                raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Feature set is not derived from the requested stock dataset")
+            for manifest in (feature_manifest, stock_manifest):
+                if sum(partition.row_count for partition in manifest.partition_manifest) > request.resource_budget.max_rows:
+                    raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Diagnostic fold read rows exceed budget")
+            if request.protocol_mode == "frozen_v1_3":
+                try:
+                    validate_frozen_membership(feature_manifest.instrument_ids)
+                    validate_frozen_membership(stock_manifest.instrument_ids)
+                except ValueError as error:
+                    raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, str(error)) from error
+                calendar = mapped_stock_calendar(stock_manifest)
+                if calendar is None:
+                    raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "frozen_v1_3 folds require a mapped calendar")
+            else:
+                calendar = mapped_stock_calendar(stock_manifest)
+            bounded(.1)
+            feature_rows = datasets.read_rows(
+                request.feature_set_id,
+                start_at=request.split.train_start,
+                end_at=request.split.train_end,
+            )
+            bounded(.35)
+            stock_rows = datasets.read_rows(
+                request.stock_dataset_id,
+                start_at=request.split.train_start,
+                end_at=request.split.train_end,
+            )
+            labels = stock_forward_labels(
+                stock_rows,
+                horizon=request.horizon_days,
+                calendar=calendar,
+            )
+            labels = [row for row in labels if row.label_name == request.label_name]
+            if request.protocol_mode == "frozen_v1_3":
+                validate_frozen_label_contract(labels)
+            fold_result = diagnostic_window_importance(
+                feature_rows,
+                labels,
+                split=request.split,
+                split_at=request.split_at,
+                hyperparameters=request.hyperparameters,
+                random_seed=request.random_seed,
+                checkpoint=bounded,
+                resource_budget=request.resource_budget,
+                max_iterations=frozen_protocol()["budgets"]["execution"]["folds"]["max_iterations"],
+            )
+            fold_rows = fold_result["folds"]
+            tested_count = sum(fold["status"] == "TESTED" for fold in fold_rows)
+            label_versions = sorted({row.label_version for row in labels})
+            if not labels:
+                label_version = None
+                label_availability = "UNAVAILABLE"
+                label_availability_reason = "NO_LABELS_GENERATED"
+            elif len(label_versions) == 1:
+                label_version = label_versions[0]
+                label_availability = "AVAILABLE"
+                label_availability_reason = None
+            else:
+                label_version = None
+                label_availability = "INVALID"
+                label_availability_reason = "MIXED_LABEL_VERSIONS"
+            summary = {
+                "kind": request.kind,
+                "status": fold_result["status"],
+                "reason": fold_result["reason"],
+                "schema_version": fold_result["schema_version"],
+                "feature_set_id": request.feature_set_id,
+                "stock_dataset_id": request.stock_dataset_id,
+                "label_name": request.label_name,
+                "label_version": label_version,
+                "label_availability": label_availability,
+                "label_availability_reason": label_availability_reason,
+                "target_type": request.target_type,
+                "horizon_days": request.horizon_days,
+                "split_at": request.split_at.isoformat(),
+                "train_window": {
+                    "start": request.split.train_start.isoformat(),
+                    "end": request.split.train_end.isoformat(),
+                },
+                "fold_count": len(fold_rows),
+                "tested_fold_count": tested_count,
+                "importance_deltas": fold_result["importance_deltas"],
+                "importance_rank_correlation": fold_result["importance_rank_correlation"],
+                "stability_claim": fold_result["stability_claim"],
+                "definition": fold_result["definition"],
+                **protocol_claim(request.protocol_mode),
+            }
+            result = {
+                "summary": summary,
+                "diagnostics": fold_rows,
+                "reproducibility": {
+                    "research_protocol_hash": request.research_protocol_hash,
+                    "feature_set_id": request.feature_set_id,
+                    "stock_dataset_id": request.stock_dataset_id,
+                    "label_name": request.label_name,
+                    "label_version": label_version,
+                    "label_availability": label_availability,
+                    "label_availability_reason": label_availability_reason,
+                    "calendar_version": stock_manifest.calendar_version,
+                    "split": request.split.model_dump(mode="json"),
+                    "split_at": request.split_at.isoformat(),
+                    "hyperparameters": request.hyperparameters,
+                    "random_seed": request.random_seed,
+                    "source_windows": {
+                        "feature_start": request.split.train_start.isoformat(),
+                        "feature_end": request.split.train_end.isoformat(),
+                        "stock_start": request.split.train_start.isoformat(),
+                        "stock_end": request.split.train_end.isoformat(),
+                    },
+                    "model_selection_affected": False,
+                    "frozen_candidate_ledger_modified": False,
+                    "test_or_oos_read": False,
+                    "reserved_test_start": RESERVED_TEST_START.isoformat(),
+                    **protocol_claim(request.protocol_mode),
+                    "candidate_id": request.candidate_id,
+                    "resource_budget": request.resource_budget.model_dump(mode="json"),
+                },
+            }
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             freeze_request = FreezeRequest(

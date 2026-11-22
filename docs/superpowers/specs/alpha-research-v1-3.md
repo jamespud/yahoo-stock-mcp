@@ -1,6 +1,6 @@
 # Alpha Research Scalability and Diagnostics v1.3
 
-Status: engineering contract implemented locally; historical calendar acceptance open. Research protocol is a draft, not a freeze.
+Status: engineering contract implemented locally; diagnostic protocol frozen for synthetic acceptance. PR A historical calendar acceptance remains open, so real diagnostic execution stays blocked and real-study readiness remains NOT_TESTED.
 
 ## Scope and gates
 

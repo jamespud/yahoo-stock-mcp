@@ -15,10 +15,10 @@ from stock_quant.alpha.models.lightgbm_trainer import (
 from stock_quant.alpha.models.temporal_split import ModelDevelopmentSplit
 
 
-def _fixture(tmp_path, *, noise=False):
+def _fixture(tmp_path, *, noise=False, start=None):
     store = DatasetStore(tmp_path / "alpha")
     rng = np.random.default_rng(42)
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    start = start or datetime(2024, 1, 1, tzinfo=timezone.utc)
     feature_rows, label_rows = [], []
     for day in range(100):
         available = start + timedelta(days=day, hours=1)
@@ -57,6 +57,21 @@ def _fixture(tmp_path, *, noise=False):
         random_seed=7, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=5000), min_rank_ic=0.03,
     )
     return store, feature_set, split, request, label_rows
+
+
+def test_synthetic_validation_only_allows_cross_reserved_years(tmp_path):
+    store, _, split, request, labels = _fixture(
+        tmp_path, start=datetime(2013, 1, 1, tzinfo=timezone.utc),
+    )
+    manifest = train_alpha(
+        request,
+        store=store,
+        registry=AlphaModelRegistry(tmp_path / "models"),
+        label_rows=labels,
+    )
+    assert manifest.evaluation_mode == "validation_only"
+    assert split.train_start.year == 2013
+    assert split.validation_end.year == 2013
 
 
 def test_validation_only_does_not_generate_test_labels(tmp_path, monkeypatch):
