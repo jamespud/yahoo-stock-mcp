@@ -8,7 +8,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_v
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
-from ..models.temporal_split import ModelDevelopmentSplit, TemporalSplit
+from ..models.temporal_split import ModelDevelopmentSplit
 
 
 class AlphaJobBase(StrictModel):
@@ -80,28 +80,17 @@ class TrainAlphaModelJob(AlphaJobBase):
     feature_set_id: Hash
     label_name: str = Field(min_length=1, max_length=128)
     target_type: str
-    stock_dataset_id: Hash | None = None
-    option_dataset_id: Hash | None = None
+    stock_dataset_id: Hash
     horizon_days: int = Field(default=5, ge=1, le=252)
-    evaluation_mode: str = Field(default="legacy_inline_test", pattern=r"^(validation_only|legacy_inline_test)$")
-    research_protocol_hash: Hash | None = None
-    split: TemporalSplit | ModelDevelopmentSplit
+    evaluation_mode: Literal["validation_only"]
+    research_protocol_hash: Hash
+    split: ModelDevelopmentSplit
     hyperparameters: dict = Field(default_factory=dict)
     random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
 
     _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
-
-    @model_validator(mode="after")
-    def split_mode(self):
-        if self.evaluation_mode == "validation_only" and not isinstance(self.split, ModelDevelopmentSplit):
-            raise ValueError("validation_only training requires ModelDevelopmentSplit")
-        if self.evaluation_mode == "validation_only" and not self.stock_dataset_id:
-            raise ValueError("validation_only training currently requires stock_dataset_id")
-        if self.evaluation_mode == "legacy_inline_test" and not isinstance(self.split, TemporalSplit):
-            raise ValueError("legacy_inline_test training requires TemporalSplit")
-        return self
 
 
 class FreezeAlphaSelectionJob(AlphaJobBase):

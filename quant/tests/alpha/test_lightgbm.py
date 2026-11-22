@@ -6,7 +6,7 @@ import pytest
 from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.models.labels import LabelRow
-from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, train_alpha
+from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, _train_legacy_inline_test as train_alpha
 from stock_quant.alpha.models.inference import predict_alpha
 from stock_quant.alpha.models.temporal_split import TemporalSplit
 
@@ -47,7 +47,8 @@ def _fixture(tmp_path, *, noise=False):
         validation_end=start + timedelta(days=90), test_start=start + timedelta(days=90), test_end=start + timedelta(days=120),
     )
     request = TrainAlphaRequest(
-        feature_set_id=feature_set.dataset_id, label_name="stock_forward_return", target_type="stock_return", split=split,
+        feature_set_id=feature_set.dataset_id, label_name="stock_forward_return", target_type="stock_return",
+        evaluation_mode="legacy_inline_test", split=split,
         hyperparameters={"learning_rate": 0.08, "num_leaves": 15, "min_child_samples": 5, "n_estimators": 80},
         random_seed=7, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=5000), min_rank_ic=0.03,
     )

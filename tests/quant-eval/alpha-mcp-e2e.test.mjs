@@ -47,7 +47,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
       "random_seed", "research_protocol_hash", "resource_budget", "windows",
     ]);
-    assert.deepEqual(trainingSchema.required, ["feature_set_id", "label_spec", "windows"]);
+    assert.deepEqual(trainingSchema.required, ["evaluation_mode", "research_protocol_hash", "feature_set_id", "label_spec", "windows"]);
     function advertisedType(schema, type) {
       if (schema.$ref) {
         return advertisedType(schema.$ref.slice(2).split("/").reduce((node, key) => node[key], trainingSchema), type);
@@ -56,6 +56,12 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       return schema.anyOf?.map(branch => advertisedType(branch, type)).find(Boolean);
     }
     assert.equal(advertisedType(trainingSchema.properties.feature_set_id, "string").pattern, "^sha256:[0-9a-f]{64}$");
+    const windowsSchema = advertisedType(trainingSchema.properties.windows, "object");
+    assert.deepEqual(Object.keys(windowsSchema.properties).sort(), [
+      "embargo_days", "train_end", "train_start", "validation_end", "validation_start",
+    ]);
+    const labelSchema = advertisedType(trainingSchema.properties.label_spec, "object");
+    assert.ok(labelSchema.required.includes("stock_dataset_id"));
     const parameters = advertisedType(trainingSchema.properties.hyperparameters, "object");
     assert.equal(parameters.additionalProperties, false);
     assert.equal(parameters.properties.num_leaves.maximum, 131072);
@@ -82,19 +88,21 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       hyperparameters: {num_leaves: 7},
     };
     const invalidCases = [
-      [{hyperparameters: {num_leaves: 7, random_seed: 20261119}}, "hyperparameters.random_seed"],
-      [{random_sead: 20261119}, "random_sead"],
-      [{feature_set_id: "not-a-content-id"}, "feature_set_id"],
-      [{label_spec: null}, "label_spec"],
-      [{evaluation_mode: "not-a-mode"}, "evaluation_mode"],
-      [{windows: undefined}, "windows"],
+      [{hyperparameters: {num_leaves: 7, random_seed: 20261119}}, ["hyperparameters.random_seed"]],
+      [{random_sead: 20261119}, ["random_sead"]],
+      [{feature_set_id: "not-a-content-id"}, ["feature_set_id"]],
+      [{label_spec: null}, ["label_spec"]],
+      [{evaluation_mode: "not-a-mode"}, ["evaluation_mode"]],
+      [{evaluation_mode: "legacy_inline_test"}, ["evaluation_mode"]],
+      [{windows: undefined}, ["windows"]],
+      [{windows: {...trainingArgs.windows, test_start: "2024-05-01T00:00:00Z", test_end: "2024-06-01T00:00:00Z"}}, ["windows.test_end", "windows.test_start"]],
     ];
     const outcomes = [];
-    for (const [overrides, field] of invalidCases) {
+    for (const [overrides, fields] of invalidCases) {
       const rejected = await client.callTool({name: "quant_train_alpha_model", arguments: {...trainingArgs, ...overrides}});
-      outcomes.push({field, rejected: Boolean(rejected.isError), message: rejected.content[0]?.text});
+      outcomes.push({field: fields.join(", "), rejected: Boolean(rejected.isError), message: rejected.content[0]?.text});
     }
-    const missingFields = ["feature_set_id", "label_spec", "windows"];
+    const missingFields = ["evaluation_mode", "feature_set_id", "label_spec", "research_protocol_hash", "windows"];
     const emptyCalls = [];
     for (const params of [{}, {arguments: {}}]) {
       const rejected = await client.callTool({name: "quant_train_alpha_model", ...params});
@@ -105,9 +113,9 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       resolve(tmp, "quant.db")], {encoding: "utf8"}));
     assert.deepEqual({count, outcomes, emptyCalls, audit: rejectionAudit.map(([event, detail]) => [event, JSON.parse(detail)])}, {
       count: 0,
-      outcomes: invalidCases.map(([, field]) => ({field, rejected: true, message: `Invalid Alpha training fields: ${field}`})),
+      outcomes: invalidCases.map(([, fields]) => ({field: fields.join(", "), rejected: true, message: `Invalid Alpha training fields: ${fields.join(", ")}`})),
       emptyCalls: Array.from({length: 2}, () => ({rejected: true, message: `Invalid Alpha training fields: ${missingFields.join(", ")}`})),
-      audit: [...invalidCases.map(([, field]) => [field]), missingFields, missingFields]
+      audit: [...invalidCases.map(([, fields]) => fields), missingFields, missingFields]
         .map(fields => ["TRAINING_SUBMISSION_REJECTED", {source: "mcp", fields}]),
     });
     const prepared = await call("quant_prepare_alpha_dataset", {source: "yahoo", symbols,
@@ -171,6 +179,20 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const modelDiagnostics = await call("quant_get_alpha_model_diagnostics", {model_id: model.model_id});
     assert.deepEqual(Object.keys(modelDiagnostics.feature_importance_gain), ["ret", "vol"]);
     assert.equal(modelDiagnostics.stability_status, "NOT_TESTED");
+    const pythonBeforePrediction = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
+    const jobsBeforePrediction = Number(execFileSync(pythonBeforePrediction, ["-c",
+      "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from jobs').fetchone()[0])",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}).trim());
+    const blockedPrediction = await client.callTool({name: "quant_predict_alpha", arguments: {
+      model_set_id: model.model_set_id, feature_set_id: factorDataset.dataset_id,
+      period: {start: "2024-05-01T00:00:00Z", end: "2024-06-28T00:00:00Z"},
+    }});
+    assert.equal(Boolean(blockedPrediction.isError), true);
+    assert.match(blockedPrediction.content[0].text, /RESEARCH_PREDICTION_REQUIRES_FREEZE/);
+    const jobsAfterPrediction = Number(execFileSync(pythonBeforePrediction, ["-c",
+      "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from jobs').fetchone()[0])",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}).trim());
+    assert.equal(jobsAfterPrediction, jobsBeforePrediction);
 
     const freezeArgs = {
       research_protocol_hash: "sha256:" + "0".repeat(64),

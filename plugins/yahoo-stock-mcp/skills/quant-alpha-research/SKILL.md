@@ -26,11 +26,11 @@ first. For factor, option, model and reporting details read the local references
 - `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
 - `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
-- `quant_train_alpha_model` - train deterministic LightGBM in explicit Validation-only or legacy mode. Validation-only mode must not read or evaluate Test data.
+- `quant_train_alpha_model` - train deterministic LightGBM only in explicit Validation-only mode with a research protocol hash and Train/Validation windows. New legacy inline-Test submissions are rejected.
 - `quant_get_alpha_model_diagnostics` - read a verified frozen model, recompute gain/split importance, and report stability as NOT_TESTED until independent development-window folds exist.
 - `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
-- `quant_evaluate_alpha_oos` - submit one independent OOS evaluation that reads only the frozen model and Test inputs.
-- `quant_predict_alpha` - predict with a frozen model set over a later period.
+- `quant_evaluate_alpha_oos` - submit one independent OOS evaluation authorized only by a completed Freeze Job; repeated requests reuse the authoritative Job.
+- `quant_predict_alpha` - predict with a historical legacy model set over a later period. Validation-only research models are rejected outside the frozen OOS path.
 - `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio only after scoped raw-price attestation and complete corporate-action coverage are supplied.
 - `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
 - `quant_get_job` / `quant_cancel_job` / `quant_get_result` - poll, cancel and retrieve only terminal evidence.
@@ -55,14 +55,15 @@ first. For factor, option, model and reporting details read the local references
 5. Define labels and windows before training. Require `label_available_at <= split_end`, purge overlap,
    apply any embargo, and keep stock-return, option-return and IV-change labels separate. Never place
    immature labels in train, validation or test.
-6. Prefer `evaluation_mode="validation_only"`. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
+6. Use explicit `evaluation_mode="validation_only"`, `research_protocol_hash`, a stock label dataset and only Train/Validation windows. Train only the deployed predefined LightGBM regressor. Read [model validation](references/model-validation.md).
    Train-only preprocessing, validation-based selection and one frozen OOS read are mandatory. Inspect
    coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. Fetch
    `quant_get_alpha_model_diagnostics` for verified gain/split importance. A single model cannot claim
    stable importance; report NOT_TESTED until independent development-window folds are trained. OOS
    measurements are report-only and never automatically certify or select a model.
-7. Predict only after the validation window. Verify feature names, order and types match the registry.
-   Reject missing/corrupt models and never let a future fold predict past decisions.
+7. Do not use ordinary prediction on a Validation-only research model. Complete a Freeze Job first,
+   then run OOS through `quant_evaluate_alpha_oos`. Verify feature names, order and types match the
+   registry. Reject missing/corrupt models and never let a future fold predict past decisions.
 8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
    positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
    use next valid Bid. Stock execution requires both a scoped raw-OHLC price attestation and complete

@@ -183,6 +183,62 @@ def freeze_identity(record: FrozenResearchRecord) -> str:
     return digest(body)
 
 
+def validate_frozen_record(
+    record: FrozenResearchRecord,
+    *,
+    store: DatasetStore,
+    model_registry: AlphaModelRegistry,
+) -> FrozenResearchRecord:
+    """Revalidate a freeze from the live immutable artifacts before OOS authorization."""
+    try:
+        if freeze_identity(record) != record.freeze_id:
+            raise ValueError("Freeze identity mismatch")
+        if len(record.frozen_model_ids) != 1 or len(record.model_hashes) != 1:
+            raise ValueError("OOS currently requires exactly one frozen model")
+        model_id = record.frozen_model_ids[0]
+        expected_model_hash = record.model_hashes.get(model_id)
+        if not expected_model_hash:
+            raise ValueError("Frozen model hash is missing")
+        test_feature = store.load_manifest(record.test_dataset_ids["test_feature_set_id"])
+        test_label = store.load_manifest(record.test_dataset_ids["test_label_source_dataset_id"])
+        if record.test_dataset_hashes.get("test_feature_set_id") != test_feature.content_hash:
+            raise ValueError("Frozen Test feature hash changed")
+        if record.test_dataset_hashes.get("test_label_source_dataset_id") != test_label.content_hash:
+            raise ValueError("Frozen Test label hash changed")
+        label_version = record.label_spec.get("label_version")
+        request = FreezeRequest(
+            research_protocol_hash=record.research_protocol_hash,
+            candidate_ledger_hash=record.candidate_ledger_hash,
+            selected_model_ids=record.frozen_model_ids,
+            test_feature_set_id=test_feature.dataset_id,
+            test_label_source_dataset_id=test_label.dataset_id,
+            test_start=datetime.fromisoformat(record.test_window["start"]),
+            test_end=datetime.fromisoformat(record.test_window["end"]),
+            selection_reason=record.selection_reason,
+            label_name=record.label_spec["label_name"],
+            target_type=record.label_spec["target_type"],
+            horizon_days=record.label_spec["horizon_days"],
+            label_version=label_version,
+        )
+        actual_model_hash = _model_hash(
+            model_registry,
+            model_id,
+            request=request,
+            store=store,
+            test_feature=test_feature,
+            test_label=test_label,
+        )
+        if actual_model_hash != expected_model_hash:
+            raise ValueError("Frozen model hash changed")
+        return record
+    except ValueError as error:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Frozen research record failed authorization",
+            {"freeze_id": record.freeze_id, "reason": str(error)},
+        ) from error
+
+
 def _parse_window_time(value, field: str, model_id: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value)
@@ -218,8 +274,15 @@ def _model_hash(
     if metadata.get("evaluation_mode") != "validation_only":
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Selected model lacks validation-only evidence", {"model_id": model_id})
     metrics = metadata.get("validation_metrics", {})
-    if "oos" in metadata or "oos" in metrics:
-        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only model contains OOS metrics", {"model_id": model_id})
+    nested_metrics = metadata.get("metrics") if isinstance(metadata.get("metrics"), dict) else {}
+    if (
+        "oos" in metadata
+        or "oos_metrics" in metadata
+        or "test_window" in metadata
+        or "oos" in metrics
+        or "oos" in nested_metrics
+    ):
+        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only model contains OOS evidence", {"model_id": model_id})
     if not isinstance(metadata.get("feature_schema"), list) or not metadata["feature_schema"]:
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model has no frozen feature schema", {"model_id": model_id})
 

@@ -6,35 +6,24 @@ from datetime import datetime
 import lightgbm as lgb
 import pandas as pd
 
-from ..contracts import DatasetManifest, Hash
+from ..contracts import DatasetManifest
 from ..data.catalog import DatasetStore
 from ..errors import AlphaError, AlphaErrorCode
 from .registry import AlphaModelRegistry
+from ..research_admission import require_public_prediction
 
 
-def predict_alpha(
+def _publish_predictions(
+    loaded,
     model_set_id: str,
     feature_set_id: str,
     start: datetime,
     end: datetime,
     *,
     store: DatasetStore,
-    registry: AlphaModelRegistry,
 ) -> DatasetManifest:
     if start >= end:
         raise ValueError("Prediction start must be before end")
-    # model_set_id and model_id are both content hashes; resolve by scanning metadata.
-    loaded = None
-    for directory in registry.root.iterdir():
-        metadata_file = directory / "metadata.json"
-        if metadata_file.is_file():
-            import json
-            metadata = json.loads(metadata_file.read_text())
-            if metadata.get("model_set_id") == model_set_id:
-                loaded = registry.load("sha256:" + directory.name)
-                break
-    if loaded is None:
-        raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model set was not found", {"model_set_id": model_set_id})
     validation_end = datetime.fromisoformat(loaded.metadata["validation_window"]["validation_end"].replace("Z", "+00:00"))
     if start < validation_end:
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Prediction period overlaps model training or validation history")
@@ -67,3 +56,36 @@ def predict_alpha(
         prediction_rows, parent_feature_set_id=feature_set_id, model_id=loaded.model_id,
         model_set_id=model_set_id, start_at=start, end_at=end, price_basis=feature_manifest.price_basis,
     )
+
+
+def predict_alpha(
+    model_set_id: str,
+    feature_set_id: str,
+    start: datetime,
+    end: datetime,
+    *,
+    store: DatasetStore,
+    registry: AlphaModelRegistry,
+) -> DatasetManifest:
+    """Public prediction path; formal research models remain behind frozen OOS."""
+    loaded = registry.find_by_model_set_id(model_set_id)
+    require_public_prediction(loaded.metadata)
+    return _publish_predictions(loaded, model_set_id, feature_set_id, start, end, store=store)
+
+
+def _predict_alpha_for_frozen_oos(
+    record,
+    feature_set_id: str,
+    start: datetime,
+    end: datetime,
+    *,
+    store: DatasetStore,
+    registry: AlphaModelRegistry,
+) -> DatasetManifest:
+    """Private OOS-only inference path after ResearchAdmission has revalidated the freeze."""
+    if len(record.frozen_model_ids) != 1:
+        raise AlphaError(AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID, "OOS requires one frozen model")
+    loaded = registry.load(record.frozen_model_ids[0])
+    if loaded.metadata.get("evaluation_mode") != "validation_only":
+        raise AlphaError(AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID, "OOS model is not validation-only")
+    return _publish_predictions(loaded, loaded.metadata["model_set_id"], feature_set_id, start, end, store=store)

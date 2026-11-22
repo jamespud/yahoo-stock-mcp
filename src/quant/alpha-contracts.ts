@@ -32,7 +32,20 @@ export const developmentWindows = z.object({
   validation_start: z.string().datetime({ offset: true }),
   validation_end: z.string().datetime({ offset: true }),
   embargo_days: z.number().int().min(0).max(252).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const start = Date.parse(value.train_start);
+  const trainEnd = Date.parse(value.train_end);
+  const validationStart = Date.parse(value.validation_start);
+  const validationEnd = Date.parse(value.validation_end);
+  if (!(start < trainEnd && trainEnd <= validationStart && validationStart < validationEnd)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "windows must be ordered non-overlapping train and validation intervals",
+    });
+  }
+});
+// Historical artifact/tooling compatibility only. This is not part of the public
+// training tool schema and cannot be submitted through quant_train_alpha_model.
 export const temporalWindows = z.object({
   train_start: z.string().datetime({ offset: true }),
   train_end: z.string().datetime({ offset: true }),
@@ -45,7 +58,7 @@ export const temporalWindows = z.object({
 export const labelSpec = z.object({
   label_name: z.string().min(1).max(128),
   target_type: z.enum(["stock_return", "option_return", "option_iv_change", "stock_return_with_option_features"]),
-  stock_dataset_id: alphaHash.optional(),
+  stock_dataset_id: alphaHash,
   option_dataset_id: alphaHash.optional(),
   horizon_days: z.number().int().min(1).max(252).optional(),
 }).strict();
@@ -118,11 +131,11 @@ const lightgbmHyperparameters = z.object({
 }).strict();
 
 export const trainAlphaModelInputFields = z.object({
-  evaluation_mode: z.enum(["validation_only", "legacy_inline_test"]).optional(),
-  research_protocol_hash: alphaHash.optional(),
+  evaluation_mode: z.literal("validation_only"),
+  research_protocol_hash: alphaHash,
   feature_set_id: alphaHash,
   label_spec: labelSpec,
-  windows: z.union([temporalWindows, developmentWindows]),
+  windows: developmentWindows,
   hyperparameters: lightgbmHyperparameters.optional(),
   random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
   resource_budget: z.object({
@@ -164,19 +177,11 @@ trainAlphaModelToolFields.safeParseAsync = (data, params) =>
   parseTrainingInput(data === undefined ? {} : data, params);
 
 export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((value, context) => {
-  if (value.evaluation_mode !== "validation_only") return;
-  if (!value.research_protocol_hash) {
+  if (value.evaluation_mode !== "validation_only") {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["research_protocol_hash"],
-      message: "validation_only training requires research_protocol_hash",
-    });
-  }
-  if (!value.label_spec.stock_dataset_id) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["label_spec", "stock_dataset_id"],
-      message: "validation_only training currently requires stock_dataset_id",
+      path: ["evaluation_mode"],
+      message: "evaluation_mode must be validation_only",
     });
   }
 });

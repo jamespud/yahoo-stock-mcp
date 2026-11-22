@@ -13,9 +13,14 @@ from stock_quant.alpha.factors.engine import compute_stock_factors
 from stock_quant.alpha.models.labels import stock_forward_labels
 from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
 from stock_quant.alpha.models.oos_evaluation import evaluate_alpha_oos
+from stock_quant.alpha.research_admission import _FrozenOosGrant, _OOS_GRANT_SEAL
 from stock_quant.alpha.models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
 from stock_quant.alpha.models.temporal_split import ModelDevelopmentSplit
 from stock_quant.calendar import generate_calendar
+
+
+def _test_grant(record):
+    return _FrozenOosGrant(record=record, _seal=_OOS_GRANT_SEAL)
 
 
 def _fixture(tmp_path):
@@ -106,7 +111,7 @@ def test_training_and_oos_use_the_same_frozen_session_label_version(tmp_path):
         freeze_store=FrozenResearchStore(tmp_path / "freezes"),
     )
     assert record.label_spec["label_version"] == "session-aligned-v2"
-    result = evaluate_alpha_oos(record, store=store, model_registry=registry)
+    result = evaluate_alpha_oos(_test_grant(record), store=store, model_registry=registry)
     assert result["summary"]["label_version"] == "session-aligned-v2"
     assert result["summary"]["exclusion_reasons"].get("INVALID_LABEL", 0) > 0
 

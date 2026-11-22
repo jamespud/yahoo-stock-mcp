@@ -8,7 +8,7 @@ import pytest
 
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
-from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
+from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, _train_legacy_inline_test as train_legacy_alpha, train_alpha
 from stock_quant.alpha.models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
 from stock_quant.alpha.models.temporal_split import TemporalSplit
 
@@ -49,7 +49,7 @@ def test_freeze_rejects_model_without_validation_only_evidence(tmp_path):
     test_feature = feature_set.dataset_id
     test_label = _test_datasets(store, feature_set)
     registry = AlphaModelRegistry(tmp_path / "models")
-    legacy = train_alpha(request.model_copy(update={"evaluation_mode": "legacy_inline_test", "split": TemporalSplit(
+    legacy = train_legacy_alpha(request.model_copy(update={"evaluation_mode": "legacy_inline_test", "split": TemporalSplit(
         train_start=split.train_start, train_end=split.train_end,
         validation_start=split.validation_start, validation_end=split.validation_end,
         test_start=split.validation_end, test_end=split.validation_end + timedelta(days=10),
@@ -194,6 +194,28 @@ def test_freeze_rejects_factor_spec_mismatch(tmp_path):
         freeze_alpha_selection(freeze_request, store=store, model_registry=registry, freeze_store=freeze)
     assert info.value.code == AlphaErrorCode.DATASET_MISMATCH
     assert any(item["field"] == "factor_spec_hash" for item in info.value.context["mismatches"])
+
+
+def test_freeze_rejects_calendar_mismatch(tmp_path):
+    store, feature_set, split, request, labels = _fixture(tmp_path)
+    test_label = _test_datasets(store, feature_set)
+    alternate_feature = store.publish_feature_panel(
+        store.read_rows(feature_set.dataset_id), parent_dataset_id=store.load_manifest(feature_set.dataset_id).parent_dataset_ids[0],
+        factor_spec_hash=feature_set.source_version,
+        instrument_ids=feature_set.instrument_ids, start_at=feature_set.start_at, end_at=feature_set.end_at,
+        calendar_version="alternate-calendar", price_basis=feature_set.price_basis,
+    )
+    registry = AlphaModelRegistry(tmp_path / "models")
+    manifest = train_alpha(request, store=store, registry=registry, label_rows=labels)
+    freeze = FrozenResearchStore(tmp_path / "freezes")
+    with pytest.raises(AlphaError) as info:
+        freeze_alpha_selection(
+            _request(manifest.model_id, split.validation_end, split.validation_end + timedelta(days=10),
+                     alternate_feature.dataset_id, test_label),
+            store=store, model_registry=registry, freeze_store=freeze,
+        )
+    assert info.value.code == AlphaErrorCode.DATASET_MISMATCH
+    assert any(item["field"] == "calendar_version" for item in info.value.context["mismatches"])
 
 
 def test_test_dataset_is_unreadable_from_validation_training_path(tmp_path):

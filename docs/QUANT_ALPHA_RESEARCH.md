@@ -39,11 +39,24 @@ features and verified providers are actually available.
 4. `quant_prepare_options_dataset` is reserved for licensed historical Bid/Ask data.
 5. `quant_compute_option_factors` calculates ATM IV, skew, term structure, OI/volume ratios,
    realized volatility, IV-RV spread and Greeks where valid inputs exist.
-6. `quant_train_alpha_model` trains only the predefined deterministic LightGBM regressor. It requires
-   matured labels, chronological windows, purge/embargo and a frozen test period.
-7. `quant_predict_alpha` applies a frozen model only after its training window.
-8. `quant_backtest_alpha_portfolio` simulates a constrained Top-K portfolio with next-open stock fills.
-9. `quant_backtest_options` simulates long calls/puts at next valid Ask/Bid and leaves missing exits unresolved.
+6. `quant_train_alpha_model` trains only the predefined deterministic LightGBM regressor. Every new
+   formal task must explicitly use `evaluation_mode="validation_only"`, a valid
+   `research_protocol_hash`, a stock label dataset, and ordered Train/Validation windows. Test window
+   fields are rejected before enqueue; training never reads Test features or labels.
+7. `quant_predict_alpha` is not an OOS bypass. Ordinary prediction rejects Validation-only research
+   models. Historical legacy models remain readable, but new `legacy_inline_test` tasks are rejected.
+8. `quant_freeze_alpha_selection` binds the Validation-selected model, Test feature/label identities and
+   Test window. Only a completed Freeze Job can authorize `quant_evaluate_alpha_oos`; repeated requests
+   for the same freeze return the existing authoritative Job.
+9. `quant_backtest_alpha_portfolio` simulates a constrained Top-K portfolio with next-open stock fills.
+10. `quant_backtest_options` simulates long calls/puts at next valid Ask/Bid and leaves missing exits unresolved.
+
+## Research admission migration
+
+This release intentionally tightens behavior. Existing Dataset, Model, Job, Freeze and OOS artifacts keep
+their original identities and remain readable. New training submissions that omit `evaluation_mode`,
+request `legacy_inline_test`, or include `test_start`/`test_end` are rejected and audited before a Job is
+created. Already queued legacy inline-Test jobs fail closed in the upgraded Worker.
 
 Use `quant_get_job`, `quant_cancel_job` and `quant_get_result` for terminal evidence. List sections
 are paginated and must be read with the returned cursor.
