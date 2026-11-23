@@ -19,6 +19,7 @@ first. All references required to install this skill independently live inside t
 - `quant_get_data_quality` - audit legacy snapshot PIT availability/gaps, or Alpha dataset session coverage, mappings and volume missingness; `section="research_readiness"` returns the evidence-aware research-quality report
 - `quant_get_alpha_model_diagnostics` - verify frozen feature importance and development-window stability evidence
 - `quant_train_alpha_model` - audit the optional fixed four-candidate development comparison embedded in a Validation-only training Job; no separate baseline tool exists
+- `quant_run_alpha_walk_forward` - audit expanding/rolling Fold plans, event-time purge/embargo, nested early stopping, pooled OOF/common-cohort metrics, moving-block intervals, Holm scope and Fold stability
 - `quant_run_backtest` - submit an authorized cost, benchmark or reproducibility comparison
 - `quant_get_job` - verify terminal status and durable diagnostics
 - `quant_cancel_job` - cancel authorized work or enforce agreed budgets
@@ -43,7 +44,9 @@ first. All references required to install this skill independently live inside t
    Report failed candidates and excluded symbols. For `baseline_comparison`, verify the FactorSpec
    hash, fixed reversal/RSI direction, Train-only Ridge preprocessing, equal Train identities and the
    all-candidate common-cohort denominator. Do not compare individual-coverage RankIC across different
-   samples.
+   samples. For `walk_forward_alpha`, page `walk_forward`, `diagnostics`, `trials` and `reproducibility`;
+   verify non-overlapping outer folds, strict event-time cutoffs, inner-only early stopping, fold-local Ridge
+   preprocessing and unique OOF sample identities.
 4. Audit data availability versus decisions/fills, warmup, explicit alignment, revisions, raw versus
    adjusted prices, corporate actions, historical universe and delisted-asset coverage. A local
    modeled delay cannot establish historical vendor publication times. Preserve these limits.
@@ -51,7 +54,9 @@ first. All references required to install this skill independently live inside t
    fold stability and cost sensitivity. A runtime enforcing disjoint windows cannot prove the analyst
    did not repeatedly retune on test. Use model diagnostics to distinguish one-model importance from
    actual multi-window stability. Distinguish an independent test from an in-sample winner. A
-   `COMPARISON_COMPLETED` or `COMPARISON_EXPLORATORY` status remains development evidence, not OOS.
+   `COMPARISON_COMPLETED`, `COMPARISON_EXPLORATORY`, `WF_COMPLETED` or `WF_EXPLORATORY` remains
+   development evidence, not independent OOS. A local Holm family of four cannot establish global
+   significance or account for earlier project trials.
 6. Apply [benchmark policy](references/benchmark-policy.md). Require aligned periods, data, currency,
    funding and costs for buy-and-hold/cash/strategy comparisons. If comparison runs are authorized,
    validate/register/compile the explicit baseline, then quant_run_backtest with the existing immutable

@@ -1,6 +1,6 @@
 # Quant Alpha Research Status
 
-Updated: 2026-11-19
+Updated: 2026-11-23
 
 ## Acceptance Status
 
@@ -8,6 +8,8 @@ Updated: 2026-11-19
 | --- | --- |
 | Engineering reliability | PASS |
 | Alpha research readiness | PASS |
+| Development walk-forward capability | PASS (synthetic and contract tests) |
+| Real-market walk-forward evidence | NOT RUN |
 | Real-market trading validity | BLOCKED |
 
 The real 99-symbol acceptance run completed 14 MCP jobs with one attempt each:
@@ -38,3 +40,16 @@ npm run test:quant-alpha-research
 The run requires the frozen 99-symbol dataset described in
 [QUANT_ALPHA_RESEARCH.md](./QUANT_ALPHA_RESEARCH.md). Detailed JSON evidence is a
 local or CI artifact and is intentionally not committed to the repository.
+
+## Walk-forward v1
+
+PR4 adds a separate development-only walk-forward Job and MCP tool. It supports deterministic expanding
+and rolling plans, event-time purge/embargo, nested LightGBM early stopping without outer-fold leakage,
+fold-local Ridge preprocessing, pooled non-overlapping common-cohort OOF metrics, moving-block bootstrap
+intervals, fixed-family Holm adjustment and time-decay/stability diagnostics.
+
+The capability is validated with synthetic development data and must not be presented as evidence that
+the Alpha v1.3 historical Test was reopened. No real historical Test/OOS rows were read or evaluated for
+PR4. Fold models are report-only identities and are never registered, frozen or eligible for OOS grants.
+All four statistical tests are local to the current preregistered family; the report explicitly records
+that global trial-history completeness is false.

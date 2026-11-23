@@ -30,6 +30,18 @@ and real-provider acceptance.
 Show quantile returns and feature importance. Explain whether the model is Alpha-certified under the
 declared quality gate; a high number alone is not certification.
 
+## Development walk-forward
+
+Report the protocol/Fold-plan/report hashes; development window; expanding or rolling mode; every Fold's
+Train, inner fit, inner tuning, outer validation and knowledge cutoff; and all `FOLD_COMPLETED`,
+`FOLD_INSUFFICIENT_DATA` and `FOLD_INVALID` records. State that fold models were not registered or frozen.
+
+Report pooled OOF and common-cohort RankIC by candidate, per-Fold IC and coverage, paired daily deltas,
+time-decay and feature-importance stability. Include the moving-block block length/replicates/seed,
+confidence intervals, effective replicate count, raw and Holm-adjusted p-values, and explicitly state
+`multiple_testing_scope=CURRENT_PREREGISTERED_FAMILY_ONLY` and
+`global_trial_history_complete=false`. A walk-forward status is not frozen Test/OOS evidence.
+
 ## Portfolio/option diagnostics
 
 Report return, CAGR, volatility, Sharpe, drawdown, turnover, commissions, benchmark/excess/tracking

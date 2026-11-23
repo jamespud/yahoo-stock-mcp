@@ -18,7 +18,7 @@ initial capital, quantity, risk limits, commission/slippage and backend. Record 
 | Data quality and historical universe | | | |
 | PIT availability, alignment and fills | | | |
 | Train/validation/test and full search disclosure | | | |
-| Overfitting, fold and parameter stability | | | |
+| Overfitting, walk-forward Fold and parameter stability | | | |
 | Benchmark comparability and funding | | | |
 | Trading costs, turnover and sensitivity | | | |
 | Accounting and metric definitions/nulls | | | |
@@ -30,6 +30,9 @@ Use returned metrics only. List strategy and valid baselines over identical peri
 assumptions, return/drawdown, costs, turnover, exposure and sample sizes. Mark unavailable comparisons
 and failed trials explicitly. Explain whether OOS results are independent fold metrics or a stitched
 portfolio; do not conflate them. Preserve per-fold outcomes rather than presenting only their average.
+For Alpha walk-forward, distinguish pooled OOF from per-Fold diagnostics, verify unique common-cohort
+samples and nested-only iteration selection, and list both raw and Holm-adjusted p-values with the fixed
+family scope. An unestimated hypothesis does not shrink the family.
 
 ## Evidence limits and next experiment
 

@@ -8,6 +8,7 @@ stock/option dataset
   -> matured executable labels
   -> deterministic LightGBM model set
   -> optional four-candidate development comparison
+  -> leakage-safe development walk-forward evidence
   -> frozen predictions
   -> Top-K stock portfolio or long-option backtest
 ```
@@ -44,21 +45,26 @@ features and verified providers are actually available.
 4. `quant_prepare_options_dataset` is reserved for licensed historical Bid/Ask data.
 5. `quant_compute_option_factors` calculates ATM IV, skew, term structure, OI/volume ratios,
    realized volatility, IV-RV spread and Greeks where valid inputs exist.
-6. `quant_train_alpha_model` trains only the predefined deterministic LightGBM regressor. Every new
+6. `quant_run_alpha_walk_forward` validates the fixed short-reversal, RSI, Ridge and nested-tuned
+   LightGBM candidates over expanding or rolling development folds. It accepts only a half-open
+   `development_window`, performs footer-level physical preflight before reads, and never registers a
+   fold model or grants Freeze/OOS access. Its fold and statistical results are development evidence,
+   not independent Test or trading validity.
+7. `quant_train_alpha_model` trains only the predefined deterministic LightGBM regressor. Every new
    formal task must explicitly use `evaluation_mode="validation_only"`, a valid
    `research_protocol_hash`, a stock label dataset, and ordered Train/Validation windows. Test window
    fields are rejected before enqueue; training never reads Test features or labels. An optional
    `baseline_comparison` adds fixed development-window scores for short reversal, RSI, Ridge and the
    same already-trained LightGBM model. It adds no deployable model, Freeze or OOS grant.
-7. `quant_predict_alpha` is not an OOS bypass. Ordinary prediction rejects Validation-only research
+8. `quant_predict_alpha` is not an OOS bypass. Ordinary prediction rejects Validation-only research
    models. Historical legacy or mode-less models remain readable and may use ordinary inference only as
    a backward-compatibility path; they are not admissible to a new validation-only Freeze/OOS flow.
    New `legacy_inline_test` tasks are rejected.
-8. `quant_freeze_alpha_selection` binds the Validation-selected model, Test feature/label identities and
+9. `quant_freeze_alpha_selection` binds the Validation-selected model, Test feature/label identities and
    Test window. Only a completed Freeze Job can authorize `quant_evaluate_alpha_oos`; repeated requests
    for the same freeze return the existing authoritative Job.
-9. `quant_backtest_alpha_portfolio` simulates a constrained Top-K portfolio with next-open stock fills.
-10. `quant_backtest_options` simulates long calls/puts at next valid Ask/Bid and leaves missing exits unresolved.
+10. `quant_backtest_alpha_portfolio` simulates a constrained Top-K portfolio with next-open stock fills.
+11. `quant_backtest_options` simulates long calls/puts at next valid Ask/Bid and leaves missing exits unresolved.
 
 ## Development baseline comparison
 
@@ -97,6 +103,32 @@ comparison statuses certifies statistical significance or trading validity.
 
 Read `training_metrics[0].baseline_comparison` and the compact Job `reproducibility.baseline_comparison`
 record. No new MCP Tool or result section is created.
+
+## Development walk-forward validation
+
+`quant_run_alpha_walk_forward` uses a separate `walk_forward_alpha` Job because it performs repeated
+training, inner tuning, outer refitting and cross-fold aggregation. It reports the fixed candidate set
+on non-overlapping outer-validation windows generated from unique decision sessions. `step_sessions`
+must equal `validation_sessions`; incomplete tails are excluded before any label is scored.
+
+For every outer Fold, `knowledge_cutoff = outer_validation_start - embargo_days`. Eligible outer-train
+labels require a decision inside Train, a non-null value, `exit_at < knowledge_cutoff` and
+`label_available_at < knowledge_cutoff`. Inner fit excludes labels not available at the first inner
+tuning decision. LightGBM early stopping sees only the inner tuning set; the selected iteration is then
+frozen and the model is refit on the eligible outer Train with no `valid_sets`. Outer Validation labels
+never select an iteration, hyperparameter, factor direction or alpha.
+
+Primary metrics use pooled non-overlapping OOF samples and the same-date, same-instrument four-candidate
+common cohort. RankIC is computed per decision date and then averaged by date. Coverage keeps null dates
+in its denominator. Four fixed paired hypotheses use moving-block bootstrap confidence intervals and
+Holm adjustment. The report must preserve `multiple_testing_scope =
+"CURRENT_PREREGISTERED_FAMILY_ONLY"` and `global_trial_history_complete = false`; it cannot correct all
+prior project trials or establish global statistical significance.
+
+Read `summary`, then every page of `walk_forward`, `diagnostics`, `trials` and `reproducibility`.
+Fold statuses include `FOLD_COMPLETED`, `FOLD_INSUFFICIENT_DATA` and `FOLD_INVALID`. Failed folds remain
+in the report. Report statuses `WF_COMPLETED`, `WF_EXPLORATORY`, `WF_INSUFFICIENT_EVIDENCE` and
+`WF_INVALID` never mean `OOS_VALIDATED`, `PRODUCTION_READY` or `TRADING_VALIDATED`.
 
 ## Research admission migration
 
@@ -157,5 +189,6 @@ npm run verify:pack
 
 See [the current research status](QUANT_ALPHA_STATUS.md), the
 [research data quality v2 design](superpowers/specs/alpha-data-quality-v2.md), and the
-[baseline models v1 design](superpowers/specs/alpha-baseline-models-v1.md) for exact evidence,
-contracts and limitations.
+[baseline models v1 design](superpowers/specs/alpha-baseline-models-v1.md) and the
+[walk-forward v1 design](superpowers/specs/alpha-walk-forward-v1.md) for exact evidence, contracts and
+limitations.
