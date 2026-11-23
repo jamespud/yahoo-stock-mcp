@@ -10,7 +10,7 @@ from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.errors import AlphaError, AlphaErrorCode
 from stock_quant.alpha.models.labels import LabelRow
 from stock_quant.alpha.models.lightgbm_trainer import (
-    AlphaModelRegistry, ModelResourceBudget, ModelSetManifest, TrainAlphaRequest, train_alpha,
+    AlphaModelRegistry, ModelResourceBudget, ModelSetManifest, TrainAlphaRequest, _train_legacy_inline_test, train_alpha,
 )
 from stock_quant.alpha.models.temporal_split import ModelDevelopmentSplit
 
@@ -166,7 +166,7 @@ def test_legacy_training_contract_is_explicit_and_backward_compatible(tmp_path):
         validation_start=split.validation_start, validation_end=split.validation_end,
         test_start=split.validation_end, test_end=split.validation_end + timedelta(days=10),
     )
-    manifest = train_alpha(request.model_copy(update={"evaluation_mode": "legacy_inline_test", "split": legacy}), store=store,
-                            registry=AlphaModelRegistry(tmp_path / "models"), label_rows=labels)
+    manifest = _train_legacy_inline_test(request.model_copy(update={"evaluation_mode": "legacy_inline_test", "split": legacy}), store=store,
+                                           registry=AlphaModelRegistry(tmp_path / "models"), label_rows=labels)
     assert manifest.evaluation_mode == "legacy_inline_test"
     assert "oos" in manifest.metrics

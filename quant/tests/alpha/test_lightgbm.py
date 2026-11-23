@@ -6,7 +6,7 @@ import pytest
 from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.models.labels import LabelRow
-from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, train_alpha
+from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, _train_legacy_inline_test as train_alpha
 from stock_quant.alpha.models.inference import predict_alpha
 from stock_quant.alpha.models.temporal_split import TemporalSplit
 
@@ -47,14 +47,15 @@ def _fixture(tmp_path, *, noise=False):
         validation_end=start + timedelta(days=90), test_start=start + timedelta(days=90), test_end=start + timedelta(days=120),
     )
     request = TrainAlphaRequest(
-        feature_set_id=feature_set.dataset_id, label_name="stock_forward_return", target_type="stock_return", split=split,
+        feature_set_id=feature_set.dataset_id, label_name="stock_forward_return", target_type="stock_return",
+        evaluation_mode="legacy_inline_test", split=split,
         hyperparameters={"learning_rate": 0.08, "num_leaves": 15, "min_child_samples": 5, "n_estimators": 80},
         random_seed=7, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=5000), min_rank_ic=0.03,
     )
     return store, feature_set, split, request, label_rows
 
 
-def test_lightgbm_training_and_predictions_are_reproducible(tmp_path):
+def test_lightgbm_legacy_training_and_compatibility_prediction_are_reproducible(tmp_path):
     store, feature_set, split, request, labels = _fixture(tmp_path)
     registry = AlphaModelRegistry(tmp_path / "models")
     first = train_alpha(request, store=store, registry=registry, label_rows=labels)
@@ -63,6 +64,7 @@ def test_lightgbm_training_and_predictions_are_reproducible(tmp_path):
     assert first.model_id == second.model_id
     assert first.validation_gate_passed is True
     assert first.is_alpha_certified is False
+    # Legacy inference is an intentional compatibility path, not formal OOS evidence.
     prediction = predict_alpha(first.model_set_id, feature_set.dataset_id, split.test_start, split.test_end, store=store, registry=registry)
     rows = store.read_rows(prediction.dataset_id)
     assert rows

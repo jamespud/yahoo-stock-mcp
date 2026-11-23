@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from stock_quant.alpha.contracts import StockDatasetRequest
 from stock_quant.alpha.data.catalog import DatasetStore
 from stock_quant.alpha.factors.engine import combine_feature_panels
-from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, train_alpha
+from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, _train_legacy_inline_test as train_alpha
 from stock_quant.alpha.models.labels import LabelRow
 from stock_quant.alpha.models.temporal_split import TemporalSplit
 
@@ -32,7 +32,7 @@ def test_stock_and_option_features_join_by_pit_and_train_together(tmp_path):
     assert names == {"momentum", "atm_iv"}
     assert combined.parent_dataset_ids == [parent.dataset_id, option.dataset_id]
     split = TemporalSplit(train_start=start, train_end=start + timedelta(days=35), validation_start=start + timedelta(days=35), validation_end=start + timedelta(days=45), test_start=start + timedelta(days=45), test_end=start + timedelta(days=60))
-    request = TrainAlphaRequest(feature_set_id=combined.dataset_id, label_name="stock_forward_return", target_type="stock_return_with_option_features", split=split, random_seed=3, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=10000))
+    request = TrainAlphaRequest(feature_set_id=combined.dataset_id, label_name="stock_forward_return", target_type="stock_return_with_option_features", evaluation_mode="legacy_inline_test", split=split, random_seed=3, resource_budget=ModelResourceBudget(max_seconds=60, max_rows=10000))
     model = train_alpha(request, store=store, registry=AlphaModelRegistry(tmp_path / "models"), label_rows=labels)
     assert "atm_iv" in model.feature_schema
     assert model.metrics["oos"]["prediction_coverage"] == 1.0

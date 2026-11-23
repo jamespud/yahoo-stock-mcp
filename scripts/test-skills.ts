@@ -247,7 +247,7 @@ async function liveToolNames(enabled: boolean, skills: Skill[]): Promise<string[
       for (const section of ["reproducibility", "artifacts", "analytics", "trials", "walk_forward"])
         assert.ok(caps.result_sections.includes(section));
       const quantToolSources = ["src/quant/tools.ts", "src/quant/alpha-tools.ts"].map(path => readFileSync(resolve(root, path), "utf8")).join("\n");
-      const registeredNames = [...quantToolSources.matchAll(/server\.tool\(\s*"(quant_[a-z_]+)"/g)].map(m => m[1]).sort();
+      const registeredNames = [...quantToolSources.matchAll(/server\.(?:tool|registerTool)\(\s*"(quant_[a-z_]+)"/g)].map(m => m[1]).sort();
       assert.deepEqual(names.filter(n => n.startsWith("quant_")), registeredNames);
       for (const skill of skills.filter(s => s.name === "quant-strategy-research")) {
         const examples = resolve(skill.dir, "references/strategy-examples.json");

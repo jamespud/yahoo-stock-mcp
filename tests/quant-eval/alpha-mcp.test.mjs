@@ -86,9 +86,16 @@ test("Validation-only training contract is explicit and rejects Test windows", (
   assert.equal(parsed.evaluation_mode, "validation_only");
   assert.equal(parsed.research_protocol_hash, "sha256:" + "0".repeat(64));
   assert.ok(developmentWindows.safeParse(parsed.windows).success);
+  assert.throws(() => trainAlphaModelInput.parse({...input, evaluation_mode: undefined}));
+  assert.throws(() => trainAlphaModelInput.parse({...input, evaluation_mode: "legacy_inline_test"}));
+  assert.throws(() => trainAlphaModelInput.parse({...input, evaluation_mode: "not-a-mode"}));
   assert.throws(() => trainAlphaModelInput.parse({
     ...input,
     research_protocol_hash: undefined,
+  }));
+  assert.throws(() => trainAlphaModelInput.parse({
+    ...input,
+    research_protocol_hash: "not-a-hash",
   }));
   assert.throws(() => trainAlphaModelInput.parse({
     ...input,
@@ -101,5 +108,16 @@ test("Validation-only training contract is explicit and rejects Test windows", (
       option_dataset_id: "sha256:" + "3".repeat(64),
     },
   }));
-  assert.throws(() => developmentWindows.parse({...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"}));
+  assert.throws(() => trainAlphaModelInput.parse({
+    ...input,
+    windows: {...windows, test_start: "2022-01-20T00:00:00Z", test_end: "2022-01-21T00:00:00Z"},
+  }));
+  assert.throws(() => trainAlphaModelInput.parse({
+    ...input,
+    windows: {...windows, train_start: windows.validation_start, train_end: windows.validation_end},
+  }));
+  assert.throws(() => trainAlphaModelInput.parse({
+    ...input,
+    windows: {...windows, embargo_days: -1},
+  }));
 });

@@ -60,6 +60,20 @@ class AlphaModelRegistry:
         if checkpoint:
             checkpoint()
 
+    def find_by_model_set_id(self, model_set_id: str) -> LoadedModel:
+        """Resolve a model-set identity through verified model artifacts."""
+        for directory in self.root.iterdir():
+            metadata_file = directory / "metadata.json"
+            if not metadata_file.is_file():
+                continue
+            try:
+                metadata = json.loads(metadata_file.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if metadata.get("model_set_id") == model_set_id:
+                return self.load("sha256:" + directory.name)
+        raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Model set was not found", {"model_set_id": model_set_id})
+
     def load(self, model_id: str) -> LoadedModel:
         directory = self.model_path(model_id)
         metadata_file = directory / "metadata.json"

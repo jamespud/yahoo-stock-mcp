@@ -304,19 +304,58 @@ class JobStore(Registry):
                 return {"job_id": job_id, "freeze_id": freeze_id, "record": summary}
         return None
 
-    def audit_training_rejection(self, source: str, fields: list[str]) -> dict:
+    def audit_training_rejection(self, source: str, fields: list[str], reason: str | None = None) -> dict:
+        detail = {"source": source, "fields": sorted({field[:128] for field in fields[:20]})}
+        if reason is not None:
+            detail["reason"] = reason
         with self.connection:
             self._record_alpha_research_audit(
                 event_type="TRAINING_SUBMISSION_REJECTED", freeze_id="", job_id="",
-                detail={"source": source, "fields": sorted({field[:128] for field in fields[:20]})},
+                detail=detail,
             )
         return {"recorded": True}
 
+    def _audit_research_submission_rejection(self, event_type: str, *, reason: str, message: str,
+                                              freeze_id: str = "", model_set_id: str | None = None) -> None:
+        detail = {"reason": reason, "message": message}
+        if model_set_id is not None:
+            detail["model_set_id"] = model_set_id
+        with self.connection:
+            self._record_alpha_research_audit(
+                event_type=event_type, freeze_id=freeze_id, job_id="",
+                detail=detail,
+            )
+
+    def _find_oos_job(self, freeze_id: str):
+        for existing_id, encoded_request, existing_hash in self.connection.execute(
+            "SELECT id,request,config_hash FROM jobs ORDER BY created_at,id"
+        ):
+            existing_request = json.loads(encoded_request)
+            if existing_request.get("kind") == "evaluate_alpha_oos" and existing_request.get("freeze_id") == freeze_id:
+                return existing_id, existing_hash
+        return None
+
     def submit_alpha(self, raw: dict) -> dict:
         try:
-            from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER
+            from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER, PredictAlphaJob, TrainAlphaModelJob
+            from .alpha.data.catalog import DatasetStore
+            from .alpha.errors import AlphaError, AlphaErrorCode
+            from .alpha.models.registry import AlphaModelRegistry
+            from .alpha.research_admission import (
+                ResearchAdmissionError,
+                authorize_oos,
+                require_public_prediction,
+                require_training_execution,
+                require_training_submission_raw,
+            )
         except ImportError as error:
             raise ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed") from error
+        if isinstance(raw, dict) and raw.get("kind") == "train_alpha_model":
+            try:
+                require_training_submission_raw(raw)
+            except ResearchAdmissionError as error:
+                self.audit_training_rejection("runtime", error.fields, error.code.value)
+                raise ValueError(str(error)) from error
         try:
             request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
         except ValidationError as error:
@@ -326,10 +365,48 @@ class JobStore(Registry):
                 self.audit_training_rejection("runtime", fields)
                 raise ValueError(f"Invalid Alpha training fields: {', '.join(fields[:20])}") from error
             raise
+        if isinstance(request, TrainAlphaModelJob):
+            try:
+                require_training_execution(request)
+            except ResearchAdmissionError as error:
+                self.audit_training_rejection("runtime", error.fields, error.code.value)
+                raise ValueError(str(error)) from error
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
         is_oos = request.kind == "evaluate_alpha_oos"
         freeze_id = getattr(request, "freeze_id", None)
+        if isinstance(request, PredictAlphaJob):
+            model_registry = AlphaModelRegistry(Path(self.path).with_suffix(".models"))
+            try:
+                loaded = model_registry.find_by_model_set_id(request.model_set_id)
+                require_public_prediction(loaded.metadata)
+            except AlphaError as error:
+                if error.code != AlphaErrorCode.MODEL_NOT_FOUND:
+                    self._audit_research_submission_rejection(
+                        "PREDICTION_SUBMISSION_REJECTED", reason=error.code.value,
+                        message=error.message, model_set_id=request.model_set_id,
+                    )
+                    raise ValueError(str(error)) from error
+        if is_oos:
+            existing_oos = self._find_oos_job(freeze_id)
+            if existing_oos is not None:
+                with self.connection:
+                    self._record_alpha_research_audit(
+                        event_type="OOS_REPEAT_REQUEST", freeze_id=freeze_id, job_id=existing_oos[0],
+                        idempotency_key=request.idempotency_key, detail={"config_hash": existing_oos[1]},
+                    )
+                job = self.get_job(existing_oos[0])
+                return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
+            datasets = DatasetStore(Path(self.path).with_suffix(".alpha"))
+            model_registry = AlphaModelRegistry(Path(self.path).with_suffix(".models"))
+            try:
+                authorize_oos(freeze_id, job_store=self, datasets=datasets, model_registry=model_registry)
+            except AlphaError as error:
+                self._audit_research_submission_rejection(
+                    "OOS_SUBMISSION_REJECTED", reason=error.code.value,
+                    message=error.message, freeze_id=freeze_id,
+                )
+                raise ValueError(str(error)) from error
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             if request.idempotency_key:
@@ -346,14 +423,7 @@ class JobStore(Registry):
                     job = self.get_job(previous[0])
                     return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
             if is_oos:
-                existing_oos = None
-                for existing_id, encoded_request, existing_hash in self.connection.execute(
-                    "SELECT id,request,config_hash FROM jobs ORDER BY created_at,id"
-                ):
-                    existing_request = json.loads(encoded_request)
-                    if existing_request.get("kind") == "evaluate_alpha_oos" and existing_request.get("freeze_id") == freeze_id:
-                        existing_oos = (existing_id, existing_hash)
-                        break
+                existing_oos = self._find_oos_job(freeze_id)
                 if existing_oos is not None:
                     self._record_alpha_research_audit(
                         event_type="OOS_REPEAT_REQUEST", freeze_id=freeze_id, job_id=existing_oos[0],

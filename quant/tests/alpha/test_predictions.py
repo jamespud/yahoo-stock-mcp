@@ -133,9 +133,9 @@ def test_model_commit_failure_never_leaves_completed_job(tmp_path, monkeypatch):
         train_run = jobs.submit_alpha({
             "kind": "train_alpha_model", "feature_set_id": feature_id, "label_name": "stock_forward_return",
             "target_type": "stock_return", "stock_dataset_id": dataset.dataset_id, "horizon_days": 1,
+            "evaluation_mode": "validation_only", "research_protocol_hash": "sha256:" + "0" * 64,
             "split": {"train_start": "2024-01-01T00:00:00Z", "train_end": "2024-01-05T00:00:00Z",
-                      "validation_start": "2024-01-05T00:00:00Z", "validation_end": "2024-01-08T00:00:00Z",
-                      "test_start": "2024-01-08T00:00:00Z", "test_end": "2024-01-11T00:00:00Z"},
+                      "validation_start": "2024-01-05T00:00:00Z", "validation_end": "2024-01-08T00:00:00Z"},
             "hyperparameters": {"n_estimators": 4, "min_child_samples": 1}, "resource_budget": {"max_seconds": 60, "max_rows": 1000},
         })
         claim = jobs.claim()

@@ -88,7 +88,7 @@ def test_option_factors_include_atm_skew_term_structure_ratios_and_greeks(tmp_pa
 
 def test_theta_style_option_factors_flow_through_lightgbm_training(tmp_path):
     from stock_quant.alpha.models.labels import LabelRow
-    from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, train_alpha
+    from stock_quant.alpha.models.lightgbm_trainer import AlphaModelRegistry, ModelResourceBudget, TrainAlphaRequest, _train_legacy_inline_test as train_alpha
     from stock_quant.alpha.models.temporal_split import TemporalSplit
 
     start = datetime(2026, 1, 2, 15, tzinfo=timezone.utc)
@@ -124,7 +124,7 @@ def test_theta_style_option_factors_flow_through_lightgbm_training(tmp_path):
                           validation_end=decisions[9], test_start=decisions[9], test_end=decisions[11] + timedelta(minutes=1))
     model = train_alpha(
         TrainAlphaRequest(feature_set_id=factors.dataset_id, label_name="stock_forward_return",
-                          target_type="stock_return_with_option_features", split=split,
+                          target_type="stock_return_with_option_features", evaluation_mode="legacy_inline_test", split=split,
                           hyperparameters={"n_estimators": 8, "min_child_samples": 1}, random_seed=9,
                           resource_budget=ModelResourceBudget(max_seconds=60, max_rows=1000)),
         store=store, registry=AlphaModelRegistry(tmp_path / "models"), label_rows=labels,

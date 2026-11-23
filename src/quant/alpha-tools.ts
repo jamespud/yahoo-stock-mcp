@@ -16,7 +16,7 @@ import {
   trainAlphaModelInput,
   trainAlphaModelToolFields,
 } from "./alpha-contracts.js";
-import { developmentWindows, temporalWindows } from "./alpha-contracts.js";
+import { developmentWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
 import { captureYahooOptionRows } from "./option-capture.js";
 
@@ -79,7 +79,7 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
   server.registerTool(
     "quant_train_alpha_model",
     {
-      description: "Train a deterministic CPU LightGBM regressor with chronological train/validation/test windows, label purging and frozen OOS evaluation.",
+      description: "Train a deterministic CPU LightGBM regressor on explicit train/validation windows. Formal research models exclude Test data and require a completed freeze for OOS evaluation.",
       inputSchema: trainAlphaModelToolFields,
     },
     async (args) => {
@@ -95,7 +95,7 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
         return {isError: true, content: [{type: "text", text: `Invalid Alpha training fields: ${fields.join(", ")}${suffix}`}]};
       }
       const { label_spec, windows, ...rest } = parsed.data;
-      const split = developmentWindows.safeParse(windows).success ? windows : temporalWindows.parse(windows);
+      const split = developmentWindows.parse(windows);
       return submit({
         kind: "train_alpha_model", ...rest, ...label_spec, split,
       });

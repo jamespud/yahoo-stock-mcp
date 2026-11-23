@@ -5,17 +5,16 @@ from datetime import datetime
 from typing import Callable
 
 import numpy as np
-from ...compiler import digest
-from ..contracts import Hash
 from ..data.catalog import DatasetStore
 from ..data.partitions import read_partition
 from ..data.session_coverage import mapped_stock_calendar
 from ..errors import AlphaError, AlphaErrorCode
 from .evaluation import quantile_returns, summarize_rank_ic_records
 from .evaluation_coverage import attribute_evaluation_coverage
-from .inference import predict_alpha
+from .inference import _predict_alpha_for_frozen_oos
 from .labels import stock_forward_labels
 from .registry import AlphaModelRegistry
+from ..research_admission import _FrozenOosGrant
 from .research_freeze import FrozenResearchRecord
 
 
@@ -38,13 +37,19 @@ def _label_rows_for_oos(record: FrozenResearchRecord, *, store: DatasetStore, la
 
 
 def evaluate_alpha_oos(
-    record: FrozenResearchRecord,
+    grant: _FrozenOosGrant,
     *,
     store: DatasetStore,
     model_registry: AlphaModelRegistry,
     checkpoint: Callable[[float], None] | None = None,
 ) -> dict:
-    """Evaluate the frozen validation-selected model against a frozen Test window."""
+    """Evaluate only after ResearchAdmission issued a completed-freeze grant."""
+    if not isinstance(grant, _FrozenOosGrant):
+        raise AlphaError(
+            AlphaErrorCode.FROZEN_OOS_AUTHORIZATION_INVALID,
+            "OOS evaluation requires a ResearchAdmission grant",
+        )
+    record = grant.record
     if record.frozen_at.tzinfo is None:
         raise AlphaError(AlphaErrorCode.MODEL_NOT_FOUND, "Freeze record has no timezone")
     if not record.frozen_model_ids:
@@ -64,10 +69,8 @@ def evaluate_alpha_oos(
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Test feature hash changed after freeze")
     if record.test_dataset_hashes.get("test_label_source_dataset_id") != store.load_manifest(record.test_dataset_ids["test_label_source_dataset_id"]).content_hash:
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Test label dataset hash changed after freeze")
-    model_id = record.frozen_model_ids[0]
-    loaded = model_registry.load(model_id)
-    prediction_manifest = predict_alpha(
-        loaded.metadata["model_set_id"], record.test_dataset_ids["test_feature_set_id"], start, end,
+    prediction_manifest = _predict_alpha_for_frozen_oos(
+        grant, record.test_dataset_ids["test_feature_set_id"], start, end,
         store=store, registry=model_registry,
     )
     prediction_root = store.datasets / prediction_manifest.dataset_id.removeprefix("sha256:")
