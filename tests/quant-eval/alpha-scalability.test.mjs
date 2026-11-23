@@ -65,6 +65,19 @@ test("audit all 100 stocks and their partitions through stdio", {timeout: 120_00
     assert.equal(overview.validation.valid, true);
     assert.equal(overview.row_count, summary.row_count);
     assert.equal(overview.content_hash, summary.content_hash);
+    const research = await call("quant_get_data_quality", {dataset_id, section: "research_readiness"});
+    assert.equal(research.schema_version, "alpha-research-quality-v2");
+    assert.equal(research.research_readiness, "RESEARCH_EXPLORATORY");
+    assert.equal(research.dimensions.price_attestation.status, "UNVERIFIED");
+    assert.equal(research.dimensions.temporal_availability.status, "UNVERIFIED");
+    assert.equal(research.dimensions.universe_validity.status, "UNVERIFIED");
+    assert.ok(research.findings.length <= 256);
+    assert.ok(research.findings.every(finding => finding.scope.length <= 64));
+    assert.ok(research.findings.some(finding => finding.evidence.scope_truncated === true));
+    assert.equal("trading_validity" in research, false);
+    const researchResource = await client.readResource({uri: `quant://datasets/${dataset_id}/research_readiness`});
+    assert.ok(frameBytes(researchResource) <= 4_194_304);
+    assert.deepEqual(JSON.parse(researchResource.contents[0].text), research);
     const manifest = JSON.parse(readFileSync(resolve(tmp, "quant.alpha/datasets", dataset_id.slice(7), "manifest.json"), "utf8"));
     const expected = {
       partition_manifest: manifest.partition_manifest,

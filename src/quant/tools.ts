@@ -49,8 +49,8 @@ export function registerQuantTools(server: McpServer): void {
     start_date: z.string().refine(isValidIsoDate), end_date: z.string().refine(isValidIsoDate),
   }, async (args) => invoke({method: "calendar", ...args}));
   const datasetId = z.string().regex(/^sha256:[0-9a-f]{64}$/);
-  const datasetDetailSection = z.enum(["session_coverage_by_symbol", "exchange_mappings", "partition_manifest"]);
-  server.tool("quant_get_data_quality", "Inspect a legacy snapshot or an immutable Alpha dataset. Use overview for summary and integrity validation; use a detail section and next_cursor to audit all rows. Omit section for the legacy inline response when small.", {
+  const datasetDetailSection = z.enum(["session_coverage_by_symbol", "exchange_mappings", "partition_manifest", "research_readiness"]);
+  server.tool("quant_get_data_quality", "Inspect a legacy snapshot or an immutable Alpha dataset. Use overview for summary and integrity validation; use a detail section and next_cursor to audit all rows, or research_readiness for the evidence-aware report. Omit section for the legacy inline response when small.", {
     data_snapshot_id: jobId.optional(), dataset_id: datasetId.optional(),
     symbol: z.string().min(1).max(64).optional(), timeframe: quantTimeframe.optional(), as_of: z.string().datetime({offset: true}).optional(),
     section: z.union([z.literal("overview"), datasetDetailSection]).optional(),
@@ -104,7 +104,7 @@ export function registerQuantTools(server: McpServer): void {
     return checkedQuantResponse({contents: [{uri: uri.href, mimeType: "application/json", text: JSON.stringify(result)}]}, extra.requestId);
   });
   server.resource("quant-dataset-audit", new ResourceTemplate("quant://datasets/{dataset_id}/{section}", {list: undefined}), {
-    mimeType: "application/json", description: "First unfiltered page of an immutable dataset detail section. Use quant_get_data_quality for subsequent pages or symbol filters.",
+    mimeType: "application/json", description: "First unfiltered page of an immutable dataset detail section. Use quant_get_data_quality for subsequent pages or symbol filters, or request research_readiness for the evidence-aware report.",
   }, async (uri, variables, extra) => {
     const mcp_overhead_bytes = quantFrameBytes({contents: [{uri: uri.href, mimeType: "application/json", text: ""}]}, extra.requestId);
     const result = await quantRequest({method: "alpha_data_quality", registry_path: registryPath(),
