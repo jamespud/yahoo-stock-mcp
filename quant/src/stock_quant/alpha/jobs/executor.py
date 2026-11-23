@@ -29,6 +29,7 @@ from ..factors.ast import FactorSpec
 from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
+from ..models.baseline_comparison import preflight_baseline_comparison
 from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, stock_forward_labels
@@ -187,6 +188,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
         elif isinstance(request, TrainAlphaModelJob):
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            preflight_baseline_comparison(
+                feature_set_id=request.feature_set_id,
+                label_source_dataset_id=request.stock_dataset_id,
+                split=request.split,
+                config=request.baseline_comparison,
+                store=datasets,
+            )
             labels = stock_forward_labels(
                 datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                 horizon=request.horizon_days,

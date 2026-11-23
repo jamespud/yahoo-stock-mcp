@@ -4,6 +4,8 @@ import math
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
 from sklearn.impute import SimpleImputer
@@ -75,6 +77,8 @@ def _fixture(
     quality_price_basis: str = "price_basis_unverified",
     extra_feature_rows_after_cutoff: bool = False,
     extra_stock_rows_after_cutoff: bool = False,
+    feature_boundary_rows: bool = False,
+    stock_boundary_rows: bool = False,
     factor_spec: FactorSpec | None = None,
     store_root=None,
 ):
@@ -166,6 +170,31 @@ def _fixture(
                         instrument_id=symbol,
                         label_name="stock_forward_return",
                     ))
+    if stock_boundary_rows:
+        for symbol_index, symbol in enumerate(SYMBOLS):
+            bars.append({
+                "instrument_id": symbol,
+                "start_at": VALIDATION_END - timedelta(hours=7),
+                "end_at": VALIDATION_END,
+                "available_at": VALIDATION_END,
+                "open": 50 + symbol_index, "high": 51 + symbol_index,
+                "low": 49 + symbol_index, "close": 50 + symbol_index,
+                "volume": 1000, "adjustment": "raw", "source": "synthetic",
+                "source_version": "synthetic-v1", "currency": "USD",
+            })
+    if feature_boundary_rows:
+        for symbol in SYMBOLS:
+            for output in spec.outputs:
+                features.append({
+                    "decision_at": VALIDATION_END,
+                    "instrument_id": symbol,
+                    "factor_name": output,
+                    "factor_value": 0.0,
+                    "feature_available_at": VALIDATION_END,
+                    "eligible": True,
+                    "quality_flags": [],
+                    "factor_version": "boundary-fixture-v1",
+                })
     stock = store.publish_stock(
         StockDatasetRequest(
             source="synthetic", symbols=SYMBOLS, start=START, end=stock_end,
@@ -476,16 +505,131 @@ def test_parent_artifact_beyond_validation_cutoff_fails_quality_scope(tmp_path):
         {"extra_feature_rows_after_cutoff": True},
     ],
 )
-def test_physical_rows_after_cutoff_are_rejected_before_quality_scan(tmp_path, monkeypatch, fixture_kwargs):
+def test_physical_rows_after_cutoff_are_rejected_before_any_partition_read(tmp_path, monkeypatch, fixture_kwargs):
     fixture = _fixture(tmp_path, **fixture_kwargs)
+    from stock_quant.alpha.data import catalog as catalog_module
     from stock_quant.alpha.models import baseline_comparison as module
-    def forbidden(*args, **kwargs):
+    partition_reads = []
+    def forbidden_quality(*args, **kwargs):
         raise AssertionError("research quality scan must not run before physical scope proof")
-    monkeypatch.setattr(module, "assess_research_quality", forbidden)
+    def read_spy(*args, **kwargs):
+        partition_reads.append((args, kwargs))
+        raise AssertionError("partition rows must not be read before physical scope proof")
+    monkeypatch.setattr(module, "assess_research_quality", forbidden_quality)
+    monkeypatch.setattr(catalog_module, "read_partition", read_spy)
     with pytest.raises(AlphaError) as info:
         _outcome(fixture, tmp_path)
     assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
     assert "Parquet" in info.value.message or "partition" in info.value.message
+    assert partition_reads == []
+
+
+def test_feature_decision_at_validation_end_is_rejected_before_partition_read(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, feature_boundary_rows=True)
+    from stock_quant.alpha.data import catalog as catalog_module
+    partition_reads = []
+    def read_spy(*args, **kwargs):
+        partition_reads.append((args, kwargs))
+        raise AssertionError("partition rows must not be read before physical scope proof")
+    monkeypatch.setattr(catalog_module, "read_partition", read_spy)
+    with pytest.raises(AlphaError) as info:
+        _outcome(fixture, tmp_path)
+    assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
+    assert "at or after" in info.value.message
+    assert partition_reads == []
+
+
+def test_stock_end_at_validation_end_is_rejected_before_partition_read(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, stock_boundary_rows=True)
+    from stock_quant.alpha.data import catalog as catalog_module
+    partition_reads = []
+    def read_spy(*args, **kwargs):
+        partition_reads.append((args, kwargs))
+        raise AssertionError("partition rows must not be read before physical scope proof")
+    monkeypatch.setattr(catalog_module, "read_partition", read_spy)
+    with pytest.raises(AlphaError) as info:
+        _outcome(fixture, tmp_path)
+    assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
+    assert "at or after" in info.value.message
+    assert partition_reads == []
+
+
+def test_job_preflight_rejects_before_any_partition_read(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, extra_feature_rows_after_cutoff=True, store_root=tmp_path / "quant.alpha")
+    from stock_quant.alpha.data import catalog as catalog_module
+    partition_reads = []
+    def read_spy(*args, **kwargs):
+        partition_reads.append((args, kwargs))
+        raise AssertionError("partition rows must not be read before physical scope proof")
+    monkeypatch.setattr(catalog_module, "read_partition", read_spy)
+    with JobStore(tmp_path / "quant.db") as jobs:
+        submitted = jobs.submit_alpha({
+            "kind": "train_alpha_model",
+            "feature_set_id": fixture["feature_set"].dataset_id,
+            "label_name": "stock_forward_return",
+            "target_type": "stock_return",
+            "stock_dataset_id": fixture["stock"].dataset_id,
+            "horizon_days": 5,
+            "evaluation_mode": "validation_only",
+            "research_protocol_hash": "sha256:" + "4" * 64,
+            "split": {
+                "train_start": START.isoformat(), "train_end": TRAIN_END.isoformat(),
+                "validation_start": VALIDATION_START.isoformat(), "validation_end": VALIDATION_END.isoformat(),
+            },
+            "hyperparameters": {"n_estimators": 20, "min_child_samples": 2},
+            "random_seed": 7,
+            "min_rank_ic": -1,
+            "resource_budget": {"max_seconds": 60, "max_rows": 50_000},
+            "baseline_comparison": _baseline_config().model_dump(mode="json"),
+        })
+        execute_job(jobs, jobs.claim())
+        job = jobs.get_job(submitted["job_id"])
+    assert job["status"] == "failed"
+    assert job["error_code"] == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED.value
+    assert partition_reads == []
+
+
+def test_zero_row_manifest_cannot_hide_nonempty_parquet(tmp_path):
+    fixture = _fixture(tmp_path)
+    from stock_quant.alpha.models.baseline_comparison import (
+        _assert_parquet_time_isolated,
+    )
+    manifest = fixture["feature_set"]
+    first = manifest.partition_manifest[0].model_copy(update={"row_count": 0})
+    falsified = manifest.model_copy(update={"partition_manifest": [first, *manifest.partition_manifest[1:]]})
+    with pytest.raises(AlphaError, match="row count"):
+        _assert_parquet_time_isolated(fixture["store"], manifest.dataset_id, falsified, VALIDATION_END)
+
+
+def test_parquet_without_time_statistics_is_rejected(tmp_path):
+    fixture = _fixture(tmp_path)
+    from stock_quant.alpha.models.baseline_comparison import (
+        _assert_parquet_time_isolated,
+    )
+    manifest = fixture["feature_set"]
+    partition = manifest.partition_manifest[0]
+    path = fixture["store"].datasets / manifest.dataset_id.removeprefix("sha256:") / partition.logical_path
+    pq.write_table(pq.read_table(path), path, write_statistics=False)
+    with pytest.raises(AlphaError, match="statistics are missing"):
+        _assert_parquet_time_isolated(fixture["store"], manifest.dataset_id, manifest, VALIDATION_END)
+
+
+def test_null_time_statistics_are_rejected(tmp_path):
+    fixture = _fixture(tmp_path)
+    from stock_quant.alpha.models.baseline_comparison import (
+        _assert_parquet_time_isolated,
+    )
+    manifest = fixture["feature_set"]
+    partition = manifest.partition_manifest[0]
+    path = fixture["store"].datasets / manifest.dataset_id.removeprefix("sha256:") / partition.logical_path
+    table = pq.read_table(path)
+    decision_index = table.schema.get_field_index("decision_at")
+    decision_type = table.schema.field(decision_index).type
+    table = table.set_column(decision_index, "decision_at", pa.nulls(table.num_rows, type=decision_type))
+    pq.write_table(table, path)
+    with pytest.raises(AlphaError) as info:
+        _assert_parquet_time_isolated(fixture["store"], manifest.dataset_id, manifest, VALIDATION_END)
+    assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
 
 
 def test_ridge_fitted_identity_binds_training_labels(tmp_path):

@@ -20,6 +20,7 @@ from .baseline_comparison import (
     BaselineComparisonConfig,
     BaselineComparisonReport,
     compare_development_models,
+    preflight_baseline_comparison,
 )
 from .development_cohort import (
     DevelopmentCohort,
@@ -170,6 +171,13 @@ def _train_validation_outcome(
     require_training_execution(request)
     if not isinstance(request.split, ModelDevelopmentSplit):
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training requires ModelDevelopmentSplit")
+    preflight_baseline_comparison(
+        feature_set_id=request.feature_set_id,
+        label_source_dataset_id=request.label_source_dataset_id,
+        split=request.split,
+        config=request.baseline_comparison,
+        store=store,
+    )
     began = time.monotonic()
     deadline = began + request.resource_budget.max_seconds
     cohort = prepare_development_cohort(

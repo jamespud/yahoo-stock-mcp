@@ -206,8 +206,15 @@ def _lineage_manifests(store: DatasetStore, roots: list[str], *, max_nodes: int 
 
 
 _PHYSICAL_TIME_COLUMNS = {
-    "stock_bars": ("start_at", "end_at", "available_at"),
-    "feature_panel": ("decision_at", "feature_available_at"),
+    "stock_bars": (
+        ("start_at", "<="),
+        ("end_at", "<"),
+        ("available_at", "<="),
+    ),
+    "feature_panel": (
+        ("decision_at", "<"),
+        ("feature_available_at", "<="),
+    ),
 }
 
 
@@ -239,8 +246,6 @@ def _assert_parquet_time_isolated(
         )
     root = store.datasets / dataset_id.removeprefix("sha256:")
     for partition in manifest.partition_manifest:
-        if partition.row_count == 0:
-            continue
         path = root / partition.logical_path
         try:
             metadata = pq.ParquetFile(path).metadata
@@ -261,8 +266,21 @@ def _assert_parquet_time_isolated(
                     "parquet_rows": metadata.num_rows,
                 },
             )
+        if metadata.num_rows == 0:
+            if partition.row_count != 0:
+                raise AlphaError(
+                    AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                    "Parquet row count does not match the manifest; physical time isolation is unproven",
+                    {
+                        "dataset_id": dataset_id,
+                        "partition": partition.logical_path,
+                        "manifest_rows": partition.row_count,
+                        "parquet_rows": metadata.num_rows,
+                    },
+                )
+            continue
         names = list(metadata.schema.names)
-        for column in columns:
+        for column, comparator in columns:
             if column not in names:
                 raise AlphaError(
                     AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
@@ -289,6 +307,18 @@ def _assert_parquet_time_isolated(
                             "column": column,
                         },
                     )
+                if statistics.null_count != 0:
+                    raise AlphaError(
+                        AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                        "Parquet time column contains null values; physical time isolation is unproven",
+                        {
+                            "dataset_id": dataset_id,
+                            "partition": partition.logical_path,
+                            "row_group": row_group_index,
+                            "column": column,
+                            "null_count": statistics.null_count,
+                        },
+                    )
                 try:
                     observed_max = _as_utc_datetime(statistics.max)
                     observed_min = _as_utc_datetime(statistics.min)
@@ -303,10 +333,11 @@ def _assert_parquet_time_isolated(
                             "column": column,
                         },
                     ) from error
-                if observed_max > cutoff:
+                out_of_range = observed_max >= cutoff if comparator == "<" else observed_max > cutoff
+                if out_of_range:
                     raise AlphaError(
                         AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
-                        "Parquet partition contains rows after the Validation cutoff",
+                        "Parquet partition contains rows at or after the Validation cutoff",
                         {
                             "dataset_id": dataset_id,
                             "partition": partition.logical_path,
@@ -314,6 +345,7 @@ def _assert_parquet_time_isolated(
                             "column": column,
                             "observed_min": observed_min.isoformat(),
                             "observed_max": observed_max.isoformat(),
+                            "comparison": comparator,
                             "validation_end": cutoff.isoformat(),
                         },
                     )
@@ -365,13 +397,10 @@ def _quality_summary(report: ResearchQualityReport) -> dict[str, Any]:
     }
 
 
-def validate_baseline_factor_source(
+def _validate_factor_manifest_source(
     config: BaselineComparisonConfig,
-    cohort: DevelopmentCohort,
-    *,
-    feature_manifest: DatasetManifest | None = None,
+    manifest: DatasetManifest,
 ) -> CompiledFactorSpec:
-    manifest = feature_manifest or cohort.feature_manifest
     if len(manifest.parent_dataset_ids) != 1:
         raise AlphaError(
             AlphaErrorCode.DATASET_MISMATCH,
@@ -388,6 +417,26 @@ def validate_baseline_factor_source(
             "FactorSpec hash does not match the feature panel source version",
             {"factor_spec_hash": compiled.spec_hash, "feature_source_version": manifest.source_version},
         )
+    manifest_factor_hash = manifest.universe_definition.get("factor_spec_hash")
+    if manifest_factor_hash not in (None, compiled.spec_hash):
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Feature panel universe metadata FactorSpec hash is inconsistent",
+            {"factor_spec_hash": compiled.spec_hash, "manifest_factor_spec_hash": manifest_factor_hash},
+        )
+    _validate_source_node(compiled.node_map[config.reversal_output], "pct_change", "reversal")
+    _validate_source_node(compiled.node_map[config.rsi_output], "rsi", "rsi")
+    return compiled
+
+
+def validate_baseline_factor_source(
+    config: BaselineComparisonConfig,
+    cohort: DevelopmentCohort,
+    *,
+    feature_manifest: DatasetManifest | None = None,
+) -> CompiledFactorSpec:
+    manifest = feature_manifest or cohort.feature_manifest
+    compiled = _validate_factor_manifest_source(config, manifest)
     expected_schema = set(compiled.spec.outputs)
     actual_schema = set(cohort.feature_schema)
     if actual_schema != expected_schema:
@@ -399,16 +448,37 @@ def validate_baseline_factor_source(
                 "unbound_outputs": sorted(actual_schema - expected_schema),
             },
         )
-    manifest_factor_hash = manifest.universe_definition.get("factor_spec_hash")
-    if manifest_factor_hash not in (None, compiled.spec_hash):
-        raise AlphaError(
-            AlphaErrorCode.DATASET_MISMATCH,
-            "Feature panel universe metadata FactorSpec hash is inconsistent",
-            {"factor_spec_hash": compiled.spec_hash, "manifest_factor_spec_hash": manifest_factor_hash},
-        )
-    _validate_source_node(compiled.node_map[config.reversal_output], "pct_change", "reversal")
-    _validate_source_node(compiled.node_map[config.rsi_output], "rsi", "rsi")
     return compiled
+
+
+def preflight_baseline_comparison(
+    *,
+    feature_set_id: str,
+    label_source_dataset_id: str,
+    split,
+    config: BaselineComparisonConfig | None,
+    store: DatasetStore,
+) -> None:
+    """Prove comparison data isolation before any stock, label or feature row is read."""
+    if config is None:
+        return
+    cutoff = split.validation_end
+    feature_manifest = store.load_manifest(feature_set_id)
+    _validate_factor_manifest_source(config, feature_manifest)
+    manifests = _lineage_manifests(store, [feature_set_id, label_source_dataset_id])
+    forbidden = [
+        {"dataset_id": dataset_id, "end_at": manifest.end_at.isoformat()}
+        for dataset_id, manifest in manifests.items()
+        if manifest.end_at > cutoff
+    ]
+    if forbidden:
+        raise AlphaError(
+            AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+            "Research quality cannot scan dataset lineage beyond the Validation cutoff",
+            {"validation_end": cutoff.isoformat(), "forbidden_end_times": forbidden[:32], "forbidden_count": len(forbidden)},
+        )
+    for dataset_id, manifest in manifests.items():
+        _assert_parquet_time_isolated(store, dataset_id, manifest, cutoff)
 
 
 def _numeric_matrix(frame: pd.DataFrame, schema: tuple[str, ...], label: str) -> np.ndarray:

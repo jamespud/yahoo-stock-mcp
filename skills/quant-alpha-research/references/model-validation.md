@@ -44,10 +44,12 @@
 - Pairwise IC uses only dates where both models have finite IC on identical samples. The report is
   descriptive; it does not claim statistical significance or trading validity.
 - Quality assessment is allowed only when every feature/label/parent artifact both declares and proves
-  via Parquet footer min/max statistics that all required time columns end by Validation. Missing or
-  unusable metadata, unsupported lineage kinds, row-count mismatch or any out-of-range row group fail
-  with `QUALITY_SCOPE_NOT_ISOLATED` before row scanning. Never scan a dataset range that may include
-  reserved Test data merely to populate a comparison report.
+  via Parquet footer min/max statistics that all required time columns are isolated. The preflight runs
+  before label or feature partition reads. Missing/unusable metadata, null time values, unsupported
+  lineage kinds, row-count mismatch or any out-of-range row group fail with
+  `QUALITY_SCOPE_NOT_ISOLATED` before any `read_partition()` call. `end_at` and `decision_at` are
+  strict at the half-open Validation boundary; availability timestamps may equal the cutoff. Never scan
+  a dataset range that may include reserved Test data merely to populate a comparison report.
 - Candidate records distinguish `candidate_definition_hash` from `fitted_model_hash`. Ridge `model_id`
   binds the Train cohort/label identity and fitted imputer/scaler/Ridge state, so different training
   labels cannot reuse an identity that implies the same fitted result.

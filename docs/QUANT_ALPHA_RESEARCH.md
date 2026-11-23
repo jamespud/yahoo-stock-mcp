@@ -87,9 +87,11 @@ Job reproducibility. `research_protocol_hash` remains a Job identity supplied by
 by itself, proof of external preregistration or independent validation.
 
 Research quality is assessed only when every feature, label and parent artifact both declares and
-physically proves through Parquet footer statistics that all required time columns end no later than
-`validation_end`. Missing statistics, unsupported lineage kinds or any out-of-range row group fail
-before the quality scanner reads row data with `QUALITY_SCOPE_NOT_ISOLATED`. `RESEARCH_EXPLORATORY`
+physically proves through Parquet footer statistics that all required time columns are isolated. The
+preflight runs before the Job generates labels or reads features, and before the direct Python training
+cohort reads data. `end_at` and `decision_at` use the half-open Validation boundary; availability
+timestamps may equal the cutoff. Missing statistics, null time values, zero-row manifest mismatches or
+any out-of-range row group fail with `QUALITY_SCOPE_NOT_ISOLATED` with zero partition reads. `RESEARCH_EXPLORATORY`
 produces `COMPARISON_EXPLORATORY`; `RESEARCH_BLOCKED` produces `COMPARISON_INVALID`. None of the
 comparison statuses certifies statistical significance or trading validity.
 

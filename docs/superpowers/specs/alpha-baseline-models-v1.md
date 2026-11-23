@@ -74,11 +74,21 @@ Test statistics. Comparison therefore requires every feature, label and parent a
 - physically proven by Parquet footer statistics to contain no `decision_at`, `start_at`, `end_at`
   or `available_at` maximum after `validation_end`.
 
-Every row group must expose usable min/max statistics for the required time columns and the Parquet
-row count must match the manifest partition row count. Missing metadata, unsupported dataset kinds,
-row-count mismatch or any out-of-range maximum fails before `assess_research_quality` is called.
-Callers cannot prove isolation by asking the quality scanner to read future rows and declare them
-unexpected. Failure is always `QUALITY_SCOPE_NOT_ISOLATED`.
+Time boundaries follow field semantics:
+
+- Stock `end_at < validation_end`, while `start_at` and `available_at` may equal the cutoff;
+- Feature `decision_at < validation_end`, while `feature_available_at` may equal the cutoff;
+- every required time column must have `null_count == 0`.
+
+Every row group must expose usable min/max statistics. The Parquet row count must match the manifest
+partition row count; a zero-row partition is accepted only when the Parquet footer also proves zero
+rows. Missing metadata, unsupported dataset kinds, row-count mismatch, null time values or any
+out-of-range maximum fails with `QUALITY_SCOPE_NOT_ISOLATED`.
+
+The full-lineage footer preflight runs in the Job executor before `DatasetStore.read_rows()` generates
+labels, and at the direct Python training entry before the shared cohort reads features. A failed
+preflight therefore performs zero `read_partition()` calls. Callers cannot prove isolation by asking a
+later quality scanner to read future rows and declare them unexpected.
 
 Within that isolated development scope, the comparison records compact PR2 readiness, dimension
 statuses and finding codes for the feature set and label source. A blocked PR2 result makes the
