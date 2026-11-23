@@ -75,3 +75,12 @@ a close. Option cross-sections use a bounded observation-time tolerance and reco
 option target weights must remain separate from actual positions, and all cash/fees/equity must reconcile.
 v1 stock returns exclude corporate-action adjustments and v1 option execution is not a full broker
 portfolio.
+
+### Development baseline comparisons
+
+A fixed-factor/Ridge/LightGBM comparison is useful only when all candidates share the same matured
+cohort, feature source, labels and common Validation denominator. Require a complete FactorSpec hash
+bound to the feature panel, fixed factor directions and Train-only Ridge preprocessing. Keep individual
+coverage separate from common-cohort metrics. Reject composite or underspecified provenance rather than
+guessing a source. A comparison status is descriptive development evidence and is not independent OOS,
+statistical significance, Alpha confirmation or trading validity.

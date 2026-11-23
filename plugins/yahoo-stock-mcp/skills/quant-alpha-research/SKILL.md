@@ -1,6 +1,6 @@
 ---
 name: quant-alpha-research
-description: Run evidence-backed stock, option, and joint Alpha research through immutable datasets, FactorSpec DAGs, LightGBM model sets, frozen predictions, Top-K portfolios, and historical long-option backtests. Use for factor pipelines, ML Alpha research, model OOS evaluation, option volatility factors, and portfolio simulation; not for rule-DSL authoring or generic backtest auditing.
+description: Run evidence-backed stock, option, and joint Alpha research through immutable datasets, FactorSpec DAGs, LightGBM model sets, fixed development baseline comparisons, frozen predictions, Top-K portfolios, and historical long-option backtests. Use for factor pipelines, ML Alpha research, baseline model comparison, model OOS evaluation, option volatility factors, and portfolio simulation; not for rule-DSL authoring or generic backtest auditing.
 ---
 
 # Quant Alpha Research
@@ -26,7 +26,7 @@ first. For factor, option, model and reporting details read the local references
 - `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
 - `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
-- `quant_train_alpha_model` - train deterministic LightGBM only in explicit Validation-only mode with a research protocol hash and Train/Validation windows. New legacy inline-Test submissions are rejected.
+- `quant_train_alpha_model` - train deterministic LightGBM only in explicit Validation-only mode with a research protocol hash and Train/Validation windows. Optional `baseline_comparison` adds the fixed short-reversal, RSI, Ridge and LightGBM development comparison without registering extra deployable models. New legacy inline-Test submissions are rejected.
 - `quant_get_alpha_model_diagnostics` - read a verified frozen model, recompute gain/split importance, and report stability as NOT_TESTED until independent development-window folds exist.
 - `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
 - `quant_evaluate_alpha_oos` - submit one independent OOS evaluation authorized only by a completed Freeze Job; repeated requests reuse the authoritative Job.
@@ -62,7 +62,11 @@ first. For factor, option, model and reporting details read the local references
    coverage, Rank IC, ICIR, quantile returns, spread, feature importance and all split metrics. Fetch
    `quant_get_alpha_model_diagnostics` for verified gain/split importance. A single model cannot claim
    stable importance; report NOT_TESTED until independent development-window folds are trained. OOS
-   measurements are report-only and never automatically certify or select a model.
+   measurements are report-only and never automatically certify or select a model. If requesting
+   `baseline_comparison`, bind the complete FactorSpec to the feature panel source and require a
+   development-only lineage ending by Validation. The primary four-candidate metrics use the all-model
+   common cohort; individual coverage stays separate. Fixed reversal/RSI directions and Train-only
+   Ridge preprocessing cannot be selected from Validation.
 7. Do not use ordinary prediction on a Validation-only research model. Complete a Freeze Job first,
    then run OOS through `quant_evaluate_alpha_oos`. Historical legacy or mode-less prediction remains
    only a compatibility path and cannot be frozen as new formal evidence. Verify feature names, order
@@ -84,6 +88,8 @@ first. For factor, option, model and reporting details read the local references
   dates and reconcile sample-level and date-level OOS exclusions.
 - Feature gain/split importance does not imply stability, and hidden corporate-action gaps block a
   total-return claim even when raw prices are attested.
+- `COMPARISON_EXPLORATORY`, `COMPARISON_COMPLETED` and pairwise IC are development diagnostics, not
+  independent OOS, statistical significance, Alpha confirmation or trading validity.
 - Do not claim historical option Alpha from Yahoo current snapshots or synthetic fills.
 - Do not claim ThetaData acceptance without real authorized data. Offline fixture passes remain fixture evidence.
 - Do not infer provider coverage from an installed adapter or tool presence.

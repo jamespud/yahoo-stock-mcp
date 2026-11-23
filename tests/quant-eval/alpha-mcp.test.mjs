@@ -7,6 +7,7 @@ import {
   backtestAlphaPortfolioInput,
   alphaModelDiagnosticsInput,
   backtestOptionsInput,
+  baselineComparisonInput,
   captureOptionsSnapshotInput,
   computeFactorsInput,
   computeOptionFactorsInput,
@@ -67,6 +68,27 @@ test("Zod contracts are strict and cover the public Alpha inputs", () => {
   assert.throws(() => alphaModelDiagnosticsInput.parse({model_id: "sha256:" + "6".repeat(64), section: "test"}));
   assert.ok(backtestAlphaPortfolioInput.shape.portfolio_config);
   assert.ok(backtestOptionsInput.shape.execution_config);
+  const factorSpec = {
+    schema_version: "1.0", timeframe: "1d", nodes: [
+      {id: "reversal_source", operator: "pct_change", inputs: ["close"], params: {period: 5}},
+      {id: "rsi_source", operator: "rsi", inputs: ["close"], params: {period: 5}},
+    ], outputs: ["reversal_source", "rsi_source"],
+  };
+  const comparison = {
+    schema_version: "1.0", factor_spec: factorSpec,
+    reversal_output: "reversal_source", rsi_output: "rsi_source", ridge_alpha: 1.0,
+  };
+  assert.ok(baselineComparisonInput.parse(comparison));
+  assert.throws(() => baselineComparisonInput.parse({
+    ...comparison,
+    factor_spec: {...factorSpec, nodes: factorSpec.nodes.map(node => node.id === "rsi_source" ? {...node, params: {period: 14}} : node)},
+  }));
+  assert.throws(() => baselineComparisonInput.parse({
+    ...comparison,
+    factor_spec: {...factorSpec, nodes: factorSpec.nodes.map(node => node.id === "reversal_source" ? {...node, params: {period: 10}} : node)},
+  }));
+  assert.throws(() => baselineComparisonInput.parse({...comparison, model_class: "Ridge"}));
+  assert.throws(() => baselineComparisonInput.parse({...comparison, factor_spec: {...factorSpec, outputs: ["reversal_source"]}}));
 });
 
 test("Validation-only training contract is explicit and rejects Test windows", () => {

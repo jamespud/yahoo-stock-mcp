@@ -7,6 +7,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_v
 
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
+from ..models.baseline_comparison import BaselineComparisonConfig
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
 from ..models.temporal_split import ModelDevelopmentSplit
 
@@ -89,6 +90,7 @@ class TrainAlphaModelJob(AlphaJobBase):
     random_seed: int = Field(0, strict=True, ge=-INT32_MAX - 1, le=INT32_MAX)
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
+    baseline_comparison: BaselineComparisonConfig | None = None
 
     _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 

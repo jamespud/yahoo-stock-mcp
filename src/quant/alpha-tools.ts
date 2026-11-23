@@ -79,7 +79,7 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
   server.registerTool(
     "quant_train_alpha_model",
     {
-      description: "Train a deterministic CPU LightGBM regressor on explicit train/validation windows. Formal research models exclude Test data and require a completed freeze for OOS evaluation.",
+      description: "Train a deterministic CPU LightGBM regressor on explicit train/validation windows. Optional baseline_comparison adds fixed short-reversal, RSI, Ridge and LightGBM development metrics on one common cohort. Formal research models exclude Test data and require a completed freeze for OOS evaluation.",
       inputSchema: trainAlphaModelToolFields,
     },
     async (args) => {
