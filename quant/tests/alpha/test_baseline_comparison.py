@@ -505,6 +505,8 @@ def test_job_adds_report_to_training_metrics_without_new_section(tmp_path):
         assert report.report_hash.startswith("sha256:")
         reproducibility = jobs.get_result(submitted["job_id"], "reproducibility")
         assert reproducibility["baseline_comparison"]["report_hash"] == report.report_hash
+        assert reproducibility["baseline_comparison"]["train_identity_hash"] == report.cohort_identity.train_identity_hash
+        assert reproducibility["baseline_comparison"]["validation_identity_hash"] == report.cohort_identity.validation_identity_hash
         with pytest.raises(ValueError, match="Invalid result section or limit"):
             jobs.get_result(submitted["job_id"], "baseline_comparison")
 

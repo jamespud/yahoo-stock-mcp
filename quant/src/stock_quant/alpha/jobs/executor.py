@@ -216,7 +216,12 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 reproducibility["baseline_comparison"] = {
                     "report_hash": outcome.baseline_comparison.report_hash,
                     "comparison_protocol_hash": outcome.baseline_comparison.comparison_protocol_hash,
-                    "cohort_identity_hash": outcome.baseline_comparison.cohort_identity.validation_identity_hash,
+                    "cohort_identity_hash": digest({
+                        "train": outcome.baseline_comparison.cohort_identity.train_identity_hash,
+                        "validation": outcome.baseline_comparison.cohort_identity.validation_identity_hash,
+                    }),
+                    "train_identity_hash": outcome.baseline_comparison.cohort_identity.train_identity_hash,
+                    "validation_identity_hash": outcome.baseline_comparison.cohort_identity.validation_identity_hash,
                     "comparison_elapsed_seconds": outcome.baseline_comparison_elapsed_seconds,
                     "computation_sample_count": outcome.baseline_comparison.reproducibility["computation_sample_count"],
                 }
