@@ -21,7 +21,7 @@ first. For factor, option, model and reporting details read the local references
 
 - `quant_get_capabilities` - inspect dependency availability, supported operators/models/labels and verified provider coverage.
 - `quant_prepare_alpha_dataset` - create immutable stock datasets with explicit price basis and PIT availability.
-- `quant_get_data_quality` with `dataset_id` - inspect per-instrument session coverage, exchange/calendar mappings and volume NULL/zero/positive/invalid counts.
+- `quant_get_data_quality` with `dataset_id` - inspect session coverage, calendar mappings and volume missingness; use `section="research_readiness"` for deterministic price, PIT, universe, lineage and research-readiness evidence.
 - `quant_capture_options_snapshot` - append an observed Yahoo option-chain snapshot; never historical option history.
 - `quant_prepare_options_dataset` - prepare licensed historical option data with bid/ask quote semantics.
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
@@ -44,7 +44,9 @@ first. For factor, option, model and reporting details read the local references
    availability policy, price basis, quality, dataset ID and content hash. Query `quant_get_data_quality`
    by `dataset_id`; `coverage` means symbol presence only. Require a separate per-instrument
    `session_coverage`, explicit calendar mapping evidence, and separate NULL/zero/invalid volume counts.
-   Do not auto-fill missing bars or mix unlabelled price bases/providers.
+   Query `section="research_readiness"` before interpreting results. Treat modeled availability,
+   caller price declarations and current-symbol lists as unverified unless the report carries
+   independent evidence. Do not auto-fill missing bars or mix unlabelled price bases/providers.
 3. Compile a FactorSpec v1 DAG. Read [factor policy](references/factor-policy.md). Use only listed
    operators, preserve missing values, and distinguish time-series from decision-time cross-sectional
    scope. Poll the job; do not treat a queued feature set as evidence.

@@ -32,8 +32,12 @@ features and verified providers are actually available.
 
 ## Main workflow
 
-1. `quant_prepare_alpha_dataset` creates an immutable, content-addressed stock dataset.
-2. `quant_compute_factors` compiles `FactorSpec v1` and publishes a feature panel.
+1. `quant_prepare_alpha_dataset` creates an immutable, content-addressed stock dataset. Query
+   `quant_get_data_quality` with `section="research_readiness"` for the deterministic research-quality
+   report. Artifact integrity, price semantics, PIT availability, historical universe and trading
+   validity are separate conclusions.
+2. `quant_compute_factors` compiles `FactorSpec v1` and publishes a feature panel. Derived datasets
+   inherit every unresolved or blocked upstream quality dimension.
 3. `quant_capture_options_snapshot` appends a Yahoo current-observation option snapshot. It cannot be
    used as historical option history.
 4. `quant_prepare_options_dataset` is reserved for licensed historical Bid/Ask data.
@@ -69,6 +73,11 @@ are paginated and must be read with the returned cursor.
 
 - Dataset IDs bind normalized manifests and every partition hash.
 - Raw partitions are immutable; corruption fails validation.
+- Research-quality reports are computed on demand and never mutate historical manifests.
+- `RESEARCH_EXPLORATORY`, `RESEARCH_DATA_VALIDATED` and `RESEARCH_BLOCKED` describe research inputs
+  only; none of them grants trading or execution validity.
+- Caller price declarations, modeled publication delays and explicit symbol lists are not treated as
+  independent price, historical-publication or point-in-time universe evidence.
 - Missing bars, labels, quotes and factors are never zero-filled.
 - Cross-sectional values use only same-decision eligible rows.
 - Model feature name/order/type is frozen in the registry; corrupt models fail closed.
@@ -92,6 +101,7 @@ npm run build
 npm run test:quant-alpha
 npm run test:quant-alpha-mcp
 npm run test:quant-alpha-e2e
+npm run test:quant-alpha-scalability
 npm run test:quant-mcp
 npm run test:quant-regression
 npm run test:skills
@@ -100,4 +110,6 @@ npm run test:plugin
 npm run verify:pack
 ```
 
-See [the current research status](QUANT_ALPHA_STATUS.md) for exact evidence and limitations.
+See [the current research status](QUANT_ALPHA_STATUS.md) and the
+[research data quality v2 design](superpowers/specs/alpha-data-quality-v2.md) for exact evidence,
+contracts and limitations.

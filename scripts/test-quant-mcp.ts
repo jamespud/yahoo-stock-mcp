@@ -181,6 +181,18 @@ try {
   const alphaDataset = await call("quant_get_result", {job_id: alphaDatasetJob.job_id, section: "dataset"});
   assert.equal(alphaDataset.section, "dataset");
   assert.equal(alphaDataset.dataset_kind, "stock_bars");
+  const alphaLegacyQuality = await call("quant_get_data_quality", {dataset_id: alphaDataset.dataset_id});
+  assert.equal(alphaLegacyQuality.schema_version, "alpha-data-quality-v1");
+  assert.equal(alphaLegacyQuality.validation.valid, true);
+  const alphaQualityOverview = await call("quant_get_data_quality", {dataset_id: alphaDataset.dataset_id, section: "overview"});
+  assert.equal(alphaQualityOverview.schema_version, "alpha-data-quality-overview-v1");
+  assert.equal(alphaQualityOverview.validation.valid, true);
+  const alphaResearchQuality = await call("quant_get_data_quality", {dataset_id: alphaDataset.dataset_id, section: "research_readiness"});
+  assert.equal(alphaResearchQuality.schema_version, "alpha-research-quality-v2");
+  assert.equal(alphaResearchQuality.research_readiness, "RESEARCH_EXPLORATORY");
+  assert.equal(alphaResearchQuality.dimensions.price_attestation.status, "UNVERIFIED");
+  assert.equal(alphaResearchQuality.dimensions.temporal_availability.status, "UNVERIFIED");
+  assert.equal(alphaResearchQuality.dimensions.universe_validity.status, "UNVERIFIED");
   const alphaFactorsJob = await call("quant_compute_factors", {
     dataset_id: alphaDataset.dataset_id,
     factor_spec: {schema_version: "1.0", timeframe: "1d", nodes: [{id: "ret", operator: "pct_change", inputs: ["close"], params: {period: 1}}], outputs: ["ret"]},

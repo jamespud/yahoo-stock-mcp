@@ -78,10 +78,15 @@ def main():
             )
         elif method == "alpha_data_quality":
             from .alpha.data.catalog import DatasetStore, dataset_summary
+            from .alpha.data.research_quality import assess_research_quality
             datasets = DatasetStore(Path(request["registry_path"]).with_suffix(".alpha"))
             dataset_id, section = request["dataset_id"], request.get("section")
             overhead = request.get("mcp_overhead_bytes")
-            if section not in (None, "overview"):
+            if section == "research_readiness":
+                if any(request.get(key) is not None for key in ("limit", "cursor", "symbol")):
+                    raise ValueError("Pagination fields do not apply to research_readiness")
+                result = assess_research_quality(dataset_id, datasets).model_dump(mode="json")
+            elif section not in (None, "overview"):
                 result = datasets.audit_dataset(dataset_id, section, request.get("limit", 100),
                                                 request.get("cursor"), request.get("symbol"),
                                                 mcp_overhead_bytes=overhead)

@@ -271,7 +271,7 @@ The assessor resolves `parent_dataset_ids` recursively with:
 - a visited report cache to avoid repeated scans;
 - deterministic parent ordering based on manifest order plus stable finding sorting.
 
-Missing, unreadable or identity-invalid parents produce `RESEARCH_BLOCKED` lineage findings. A child may add its own verified computation evidence, but it cannot remove a parent's `UNVERIFIED` or `BLOCKED` restriction.
+Missing, unreadable or identity-invalid parents produce `RESEARCH_BLOCKED` lineage findings. A child may add its own verified computation evidence, but it cannot remove a parent's `UNVERIFIED` or `BLOCKED` restriction. Inherited findings retain an ordered `inheritance_chain`, so multi-level feature and prediction panels do not lose the original source restriction.
 
 ## Resource limits
 
@@ -281,7 +281,8 @@ Default bounds:
 - maximum parent depth: 16;
 - maximum partitions: 4,096;
 - scan batch size: 65,536 rows;
-- maximum retained findings: 256.
+- maximum retained findings: 256;
+- maximum explicit scope identifiers retained per finding: 64, with the omitted count recorded in evidence.
 
 Stock rows are scanned partition-by-partition using bounded Arrow batch iteration. The implementation does not materialize the whole dataset as a DataFrame. If a bound is exceeded, the assessor raises `RESOURCE_LIMIT_EXCEEDED`; it never returns a partial scan as complete.
 
