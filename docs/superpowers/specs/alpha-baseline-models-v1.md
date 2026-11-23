@@ -68,9 +68,17 @@ separate multi-source provenance contract exists.
 
 PR2 `assess_research_quality` may scan every Parquet row in a dataset and all of its parents. Running
 it against a dataset whose artifact bounds extend into a reserved Test period would indirectly expose
-Test statistics. Comparison therefore requires every feature, label and parent manifest in the
-lineage to end no later than the Validation cutoff. Otherwise the Job fails with
-`QUALITY_SCOPE_NOT_ISOLATED`.
+Test statistics. Comparison therefore requires every feature, label and parent artifact to be both:
+
+- declared with `end_at <= validation_end`; and
+- physically proven by Parquet footer statistics to contain no `decision_at`, `start_at`, `end_at`
+  or `available_at` maximum after `validation_end`.
+
+Every row group must expose usable min/max statistics for the required time columns and the Parquet
+row count must match the manifest partition row count. Missing metadata, unsupported dataset kinds,
+row-count mismatch or any out-of-range maximum fails before `assess_research_quality` is called.
+Callers cannot prove isolation by asking the quality scanner to read future rows and declare them
+unexpected. Failure is always `QUALITY_SCOPE_NOT_ISOLATED`.
 
 Within that isolated development scope, the comparison records compact PR2 readiness, dimension
 statuses and finding codes for the feature set and label source. A blocked PR2 result makes the
@@ -291,7 +299,15 @@ Top-level fields:
 
 Candidate records bind model key/version, fitting policy, fixed parameters, feature schema hash, Train
 and Validation counts, Train/Validation/common metrics, coverage, exclusions, model/factor identities
-and signal direction.
+and signal direction. Each candidate also carries:
+
+- `candidate_definition_hash`: algorithm, version, parameters and feature schema;
+- `fitted_model_hash`: a deterministic hash of the fitted state for Ridge/LightGBM, or null for a
+  fixed factor with no fitted state.
+
+Ridge `model_id` additionally binds the feature/label dataset identities, label definition, Train
+sample identity and fitted imputer/scaler/Ridge state. A same-alpha Ridge fit on different Train labels
+must therefore produce a different Ridge result identity.
 
 `comparison_protocol_hash` binds the closed candidate definitions, fixed directions, dataset identities,
 label definition, split, missing-value policy, common-cohort rule, factor hash and metric implementation
@@ -328,7 +344,8 @@ The implementation never emits `ALPHA_CONFIRMED`, `PRODUCTION_READY`, `STATISTIC
 - FactorSpec hash mismatch: `DATASET_MISMATCH`.
 - Non-standard reversal or RSI node: `DATASET_MISMATCH`.
 - Composite/unprovable feature lineage: `DATASET_MISMATCH`.
-- Full-lineage bounds exceed Validation cutoff: `QUALITY_SCOPE_NOT_ISOLATED`.
+- Full-lineage manifest bounds exceed Validation cutoff: `QUALITY_SCOPE_NOT_ISOLATED`.
+- Parquet footer statistics are missing/unusable or contain rows after Validation: `QUALITY_SCOPE_NOT_ISOLATED`.
 - Missing/duplicate sample identity: `DATASET_MISMATCH` or `DATA_UNAVAILABLE`.
 - Empty common cohort: report with `COMPARISON_INSUFFICIENT_DATA`, not fabricated zero IC.
 - PR2 `RESEARCH_BLOCKED`: report with `COMPARISON_INVALID`.

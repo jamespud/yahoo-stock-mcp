@@ -73,6 +73,8 @@ def _fixture(
     missing_reversal_decision: int | None = None,
     all_missing_train_linear: bool = False,
     quality_price_basis: str = "price_basis_unverified",
+    extra_feature_rows_after_cutoff: bool = False,
+    extra_stock_rows_after_cutoff: bool = False,
     factor_spec: FactorSpec | None = None,
     store_root=None,
 ):
@@ -80,14 +82,22 @@ def _fixture(
     spec = factor_spec or _factor_spec()
     compiled = compile_factor_spec(spec)
     rng = np.random.default_rng(20261123)
+    cutoff_days = (VALIDATION_END - START).days
+    stock_days = max(cutoff_days, (stock_end - START).days)
+    feature_days = (feature_end - START).days
+    if extra_stock_rows_after_cutoff:
+        stock_days = max(stock_days, cutoff_days + 10)
+    if extra_feature_rows_after_cutoff:
+        feature_days = max(feature_days, cutoff_days + 10)
+    series_days = max(stock_days, feature_days, DAYS)
     bars, features, labels = [], [], []
     series_by_symbol: dict[str, dict[str, np.ndarray]] = {}
     for symbol_index, symbol in enumerate(SYMBOLS):
         base = np.array([
             50 + symbol_index * 0.2 + day * 0.03 + math.sin(day / 5 + symbol_index / 3) * 1.7
-            for day in range(DAYS)
+            for day in range(series_days)
         ])
-        close = base + rng.normal(scale=0.05, size=DAYS)
+        close = base + rng.normal(scale=0.05, size=series_days)
         series = {
             "reversal_source": apply_operator("pct_change", [__import__("pandas").Series(close)], {"period": 5}).to_numpy(copy=True),
             "rsi_source": apply_operator("rsi", [__import__("pandas").Series(close)], {"period": 5}).to_numpy(copy=True),
@@ -102,9 +112,11 @@ def _fixture(
         if all_missing_train_linear:
             series["linear_signal"][:(TRAIN_END - START).days] = np.nan
         series_by_symbol[symbol] = series
-        for day in range(DAYS):
+        for day in range(series_days):
             decision = START + timedelta(days=day, hours=21, minutes=1)
             bar_end = decision - timedelta(minutes=1)
+            if day >= stock_days:
+                continue
             bars.append({
                 "instrument_id": symbol,
                 "start_at": decision - timedelta(hours=7),
@@ -115,7 +127,9 @@ def _fixture(
                 "volume": 1000 + day, "adjustment": "raw", "source": "synthetic",
                 "source_version": "synthetic-v1", "currency": "USD",
             })
-            if day <= DAYS - 6:
+        for day in range(series_days):
+            decision = START + timedelta(days=day, hours=21, minutes=1)
+            if day < feature_days:
                 for output in spec.outputs:
                     value = series[output][day]
                     features.append({
@@ -128,6 +142,7 @@ def _fixture(
                         "quality_flags": [] if np.isfinite(value) else ["MISSING_VALUE"],
                         "factor_version": "synthetic-factor-v1",
                     })
+            if day < feature_days and day < DAYS - 5:
                 reversal = target_series["reversal_source"][day]
                 linear = target_series["linear_signal"][day]
                 shape = target_series["shape_signal"][day]
@@ -225,6 +240,7 @@ def test_comparison_runs_all_synthetic_scenarios_without_certification(tmp_path,
     assert report.comparison_status == "COMPARISON_EXPLORATORY"
     assert report.feature_set_id == fixture["feature_set"].dataset_id
     assert report.label_source_dataset_id == fixture["stock"].dataset_id
+    assert report.data_quality["physical_time_isolation"] == "PARQUET_FOOTER_VERIFIED"
     assert result.manifest.metrics.keys() == {"train", "validation"}
     assert result.manifest.test_window is None
     common_counts = {candidate.common_cohort_sample_count for candidate in report.candidates}
@@ -451,6 +467,45 @@ def test_parent_artifact_beyond_validation_cutoff_fails_quality_scope(tmp_path):
     with pytest.raises(AlphaError) as info:
         _outcome(fixture, tmp_path)
     assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
+
+
+@pytest.mark.parametrize(
+    "fixture_kwargs",
+    [
+        {"extra_stock_rows_after_cutoff": True},
+        {"extra_feature_rows_after_cutoff": True},
+    ],
+)
+def test_physical_rows_after_cutoff_are_rejected_before_quality_scan(tmp_path, monkeypatch, fixture_kwargs):
+    fixture = _fixture(tmp_path, **fixture_kwargs)
+    from stock_quant.alpha.models import baseline_comparison as module
+    def forbidden(*args, **kwargs):
+        raise AssertionError("research quality scan must not run before physical scope proof")
+    monkeypatch.setattr(module, "assess_research_quality", forbidden)
+    with pytest.raises(AlphaError) as info:
+        _outcome(fixture, tmp_path)
+    assert info.value.code == AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED
+    assert "Parquet" in info.value.message or "partition" in info.value.message
+
+
+def test_ridge_fitted_identity_binds_training_labels(tmp_path):
+    fixture = _fixture(tmp_path)
+    first = _outcome(fixture, tmp_path).baseline_comparison
+    changed_labels = [
+        row.model_copy(update={"label_value": -(row.label_value or 0.0)})
+        if row.feature_decision_at < VALIDATION_START else row
+        for row in fixture["labels"]
+    ]
+    second = _train_alpha_outcome(
+        fixture["request"], store=fixture["store"],
+        registry=AlphaModelRegistry(tmp_path / "models-changed"), label_rows=changed_labels,
+    ).baseline_comparison
+    first_ridge = next(candidate for candidate in first.candidates if candidate.model_key == "ridge_v1")
+    second_ridge = next(candidate for candidate in second.candidates if candidate.model_key == "ridge_v1")
+    assert first_ridge.candidate_definition_hash == second_ridge.candidate_definition_hash
+    assert first_ridge.fitted_model_hash != second_ridge.fitted_model_hash
+    assert first_ridge.model_id != second_ridge.model_id
+    assert first_ridge.model_hash == first_ridge.fitted_model_hash
 
 
 def test_unbound_extra_feature_column_is_rejected(tmp_path):

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from importlib.metadata import version
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from pydantic import Field, StrictFloat, model_validator
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
@@ -100,6 +102,8 @@ class BaselineCandidateRecord(StrictModel):
     model_key: Literal["short_reversal_5", "rsi_5", "ridge_v1", "lightgbm_v1"]
     model_id: Hash
     model_hash: Hash | None = None
+    candidate_definition_hash: Hash
+    fitted_model_hash: Hash | None = None
     model_version: str
     fitting_policy: str
     parameter_definition: dict[str, Any]
@@ -119,6 +123,15 @@ class BaselineCandidateRecord(StrictModel):
     exclusion_reasons: dict[str, int]
     coverage_by_decision: list[dict[str, Any]]
     omitted_coverage_decisions: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def identity_scope(self):
+        fitted_required = self.model_key in {"ridge_v1", "lightgbm_v1"}
+        if fitted_required != (self.fitted_model_hash is not None):
+            raise ValueError("Fitted candidates require a fitted_model_hash; factor-only candidates must not have one")
+        if self.fitted_model_hash is not None and self.model_hash != self.fitted_model_hash:
+            raise ValueError("model_hash must equal fitted_model_hash for fitted candidates")
+        return self
 
 
 class BaselinePairedComparison(StrictModel):
@@ -192,6 +205,120 @@ def _lineage_manifests(store: DatasetStore, roots: list[str], *, max_nodes: int 
     return dict(sorted(manifests.items()))
 
 
+_PHYSICAL_TIME_COLUMNS = {
+    "stock_bars": ("start_at", "end_at", "available_at"),
+    "feature_panel": ("decision_at", "feature_available_at"),
+}
+
+
+def _as_utc_datetime(value) -> datetime:
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+    if isinstance(value, np.datetime64):
+        value = pd.Timestamp(value).to_pydatetime()
+    if not isinstance(value, datetime):
+        raise TypeError(f"Unsupported Parquet timestamp statistic: {type(value).__name__}")
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _assert_parquet_time_isolated(
+    store: DatasetStore,
+    dataset_id: str,
+    manifest: DatasetManifest,
+    cutoff: datetime,
+) -> None:
+    """Prove physical row isolation from Parquet footer statistics before any scan."""
+    columns = _PHYSICAL_TIME_COLUMNS.get(manifest.dataset_kind)
+    if columns is None:
+        raise AlphaError(
+            AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+            "Physical time-range proof is unavailable for this dataset kind",
+            {"dataset_id": dataset_id, "dataset_kind": manifest.dataset_kind, "validation_end": cutoff.isoformat()},
+        )
+    root = store.datasets / dataset_id.removeprefix("sha256:")
+    for partition in manifest.partition_manifest:
+        if partition.row_count == 0:
+            continue
+        path = root / partition.logical_path
+        try:
+            metadata = pq.ParquetFile(path).metadata
+        except Exception as error:
+            raise AlphaError(
+                AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                "Parquet metadata is unreadable; physical time isolation is unproven",
+                {"dataset_id": dataset_id, "partition": partition.logical_path, "reason": type(error).__name__},
+            ) from error
+        if metadata.num_rows != partition.row_count:
+            raise AlphaError(
+                AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                "Parquet row count does not match the manifest; physical time isolation is unproven",
+                {
+                    "dataset_id": dataset_id,
+                    "partition": partition.logical_path,
+                    "manifest_rows": partition.row_count,
+                    "parquet_rows": metadata.num_rows,
+                },
+            )
+        names = list(metadata.schema.names)
+        for column in columns:
+            if column not in names:
+                raise AlphaError(
+                    AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                    "Required time column is absent; physical time isolation is unproven",
+                    {"dataset_id": dataset_id, "partition": partition.logical_path, "column": column},
+                )
+            column_index = names.index(column)
+            if metadata.num_row_groups == 0:
+                raise AlphaError(
+                    AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                    "Parquet partition contains no row-group metadata",
+                    {"dataset_id": dataset_id, "partition": partition.logical_path, "column": column},
+                )
+            for row_group_index in range(metadata.num_row_groups):
+                statistics = metadata.row_group(row_group_index).column(column_index).statistics
+                if statistics is None or not statistics.has_min_max:
+                    raise AlphaError(
+                        AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                        "Parquet time statistics are missing; physical time isolation is unproven",
+                        {
+                            "dataset_id": dataset_id,
+                            "partition": partition.logical_path,
+                            "row_group": row_group_index,
+                            "column": column,
+                        },
+                    )
+                try:
+                    observed_max = _as_utc_datetime(statistics.max)
+                    observed_min = _as_utc_datetime(statistics.min)
+                except (TypeError, ValueError) as error:
+                    raise AlphaError(
+                        AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                        "Parquet time statistics cannot be interpreted; physical time isolation is unproven",
+                        {
+                            "dataset_id": dataset_id,
+                            "partition": partition.logical_path,
+                            "row_group": row_group_index,
+                            "column": column,
+                        },
+                    ) from error
+                if observed_max > cutoff:
+                    raise AlphaError(
+                        AlphaErrorCode.QUALITY_SCOPE_NOT_ISOLATED,
+                        "Parquet partition contains rows after the Validation cutoff",
+                        {
+                            "dataset_id": dataset_id,
+                            "partition": partition.logical_path,
+                            "row_group": row_group_index,
+                            "column": column,
+                            "observed_min": observed_min.isoformat(),
+                            "observed_max": observed_max.isoformat(),
+                            "validation_end": cutoff.isoformat(),
+                        },
+                    )
+
+
 def _quality_reports(
     store: DatasetStore,
     cohort: DevelopmentCohort,
@@ -200,9 +327,8 @@ def _quality_reports(
     max_scan_rows: int,
 ) -> tuple[ResearchQualityReport, ResearchQualityReport]:
     forbidden = []
-    for dataset_id, manifest in _lineage_manifests(
-        store, [cohort.feature_set_id, cohort.label_source_dataset_id]
-    ).items():
+    manifests = _lineage_manifests(store, [cohort.feature_set_id, cohort.label_source_dataset_id])
+    for dataset_id, manifest in manifests.items():
         if manifest.end_at > cutoff:
             forbidden.append({"dataset_id": dataset_id, "end_at": manifest.end_at.isoformat()})
     if forbidden:
@@ -211,6 +337,8 @@ def _quality_reports(
             "Research quality cannot scan dataset lineage beyond the Validation cutoff",
             {"validation_end": cutoff.isoformat(), "forbidden_end_times": forbidden[:32], "forbidden_count": len(forbidden)},
         )
+    for dataset_id, manifest in manifests.items():
+        _assert_parquet_time_isolated(store, dataset_id, manifest, cutoff)
     limits = ResearchQualityLimits(
         max_scan_rows=max_scan_rows,
         max_parent_depth=32,
@@ -308,10 +436,17 @@ def _fixed_factor_scores(
     }
 
 
+def _finite_float_list(values) -> list[float]:
+    flattened = np.asarray(values, dtype=float).reshape(-1)
+    if not np.isfinite(flattened).all():
+        raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Ridge fitted state contains non-finite values")
+    return [float(value) for value in flattened]
+
+
 def _ridge_predictions(
     cohort: DevelopmentCohort,
     alpha: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, str]:
     schema = cohort.feature_schema
     train_x = _numeric_matrix(cohort.train, schema, "Train")
     validation_x = _numeric_matrix(cohort.validation, schema, "Validation")
@@ -333,7 +468,22 @@ def _ridge_predictions(
     predictions = np.asarray(pipeline.predict(validation_x), dtype=float)
     if not np.isfinite(train_predictions).all() or not np.isfinite(predictions).all():
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Ridge produced non-finite predictions")
-    return train_predictions, predictions
+    imputer = pipeline.named_steps["imputer"]
+    scaler = pipeline.named_steps["scaler"]
+    model = pipeline.named_steps["model"]
+    fitted_hash = digest({
+        "alpha": float(alpha),
+        "solver": "cholesky",
+        "feature_schema": list(schema),
+        "imputer_statistics": _finite_float_list(imputer.statistics_),
+        "scaler_mean": _finite_float_list(scaler.mean_),
+        "scaler_scale": _finite_float_list(scaler.scale_),
+        "scaler_samples_seen": _finite_float_list(scaler.n_samples_seen_),
+        "ridge_coef": _finite_float_list(model.coef_),
+        "ridge_intercept": _finite_float_list(model.intercept_),
+        "ridge_n_features_in": int(model.n_features_in_),
+    })
+    return train_predictions, predictions, fitted_hash
 
 
 def _metrics(y_true: np.ndarray, y_pred: np.ndarray, decisions: list, expected: list) -> dict:
@@ -389,13 +539,33 @@ def _coverage_by_decision(frame: pd.DataFrame, predictions: np.ndarray) -> tuple
     return records[:MAX_DECISION_DIAGNOSTICS], max(0, len(records) - MAX_DECISION_DIAGNOSTICS)
 
 
-def _model_identity(model_key: str, version_value: str, parameters: dict, schema_hash: str) -> str:
+def _candidate_definition_identity(
+    model_key: str,
+    version_value: str,
+    parameters: dict,
+    schema_hash: str,
+) -> str:
     return digest({
         "model_key": model_key,
         "model_version": version_value,
         "parameters": parameters,
         "feature_schema_hash": schema_hash,
         "deployable": False,
+    })
+
+
+def _fitted_result_identity(
+    cohort: DevelopmentCohort,
+    candidate_definition_hash: str,
+    fitted_model_hash: str | None,
+) -> str:
+    return digest({
+        "candidate_definition_hash": candidate_definition_hash,
+        "feature_set_id": cohort.feature_set_id,
+        "label_source_dataset_id": cohort.label_source_dataset_id,
+        "label_definition_hash": cohort.label_definition_hash,
+        "train_identity_hash": cohort.train_identity_hash,
+        "fitted_model_hash": fitted_model_hash,
     })
 
 
@@ -496,7 +666,7 @@ def compare_development_models(
     decisions = sorted(validation["decision_at"].unique().tolist())
     targets = validation["label_value"].to_numpy(dtype=float)
     factor_predictions = _fixed_factor_scores(cohort, config)
-    ridge_train_predictions, ridge_predictions = _ridge_predictions(cohort, float(config.ridge_alpha))
+    ridge_train_predictions, ridge_predictions, ridge_fitted_hash = _ridge_predictions(cohort, float(config.ridge_alpha))
     lightgbm = np.asarray(lightgbm_predictions, dtype=float)
     if len(lightgbm) != len(validation):
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "LightGBM predictions do not align with the shared Validation cohort")
@@ -580,10 +750,15 @@ def compare_development_models(
         },
     }
     for key in ("short_reversal_5", "rsi_5"):
-        model_id = _model_identity(key, FACTOR_MODEL_VERSION, {
+        candidate_definition = {
             "factor_spec_hash": compiled.spec_hash,
+            "factor_node": factor_models[key]["node"],
             **factor_models[key]["parameters"],
-        }, schema_hash)
+        }
+        candidate_definition_hash = _candidate_definition_identity(
+            key, FACTOR_MODEL_VERSION, candidate_definition, schema_hash,
+        )
+        model_id = _fitted_result_identity(cohort, candidate_definition_hash, None)
         values = predictions[key]
         individual = _metrics(targets, values, validation["decision_at"].tolist(), decisions)
         common_metric = _metrics(common_targets, common_predictions[key], common["decision_at"].tolist(), common_decisions)
@@ -593,6 +768,8 @@ def compare_development_models(
             model_key=key,
             model_id=model_id,
             model_hash=None,
+            candidate_definition_hash=candidate_definition_hash,
+            fitted_model_hash=None,
             model_version=FACTOR_MODEL_VERSION,
             fitting_policy=factor_models[key]["fitting_policy"],
             parameter_definition=factor_models[key]["parameters"],
@@ -624,7 +801,10 @@ def compare_development_models(
     ridge_individual = _metrics(targets, ridge_predictions, validation["decision_at"].tolist(), decisions)
     ridge_common = _metrics(common_targets, common_predictions["ridge_v1"], common["decision_at"].tolist(), common_decisions)
     ridge_coverage, ridge_omitted = _coverage_by_decision(validation, ridge_predictions)
-    ridge_model_id = _model_identity("ridge_v1", RIDGE_MODEL_VERSION, ridge_parameter, schema_hash)
+    ridge_definition_hash = _candidate_definition_identity(
+        "ridge_v1", RIDGE_MODEL_VERSION, ridge_parameter, schema_hash,
+    )
+    ridge_model_id = _fitted_result_identity(cohort, ridge_definition_hash, ridge_fitted_hash)
     ridge_train = _metrics(
         train["label_value"].to_numpy(dtype=float),
         ridge_train_predictions,
@@ -634,7 +814,9 @@ def compare_development_models(
     candidate_map["ridge_v1"] = BaselineCandidateRecord(
         model_key="ridge_v1",
         model_id=ridge_model_id,
-        model_hash=None,
+        model_hash=ridge_fitted_hash,
+        candidate_definition_hash=ridge_definition_hash,
+        fitted_model_hash=ridge_fitted_hash,
         model_version=RIDGE_MODEL_VERSION,
         fitting_policy="train_only_pipeline_fit",
         parameter_definition=ridge_parameter,
@@ -656,10 +838,18 @@ def compare_development_models(
 
     lightgbm_common = _metrics(common_targets, common_predictions["lightgbm_v1"], common["decision_at"].tolist(), common_decisions)
     lgb_coverage, lgb_omitted = _coverage_by_decision(validation, lightgbm)
+    lightgbm_definition_hash = _candidate_definition_identity(
+        "lightgbm_v1",
+        lightgbm_metrics.get("model_version", "lightgbm-cpu-deterministic-v1"),
+        lightgbm_metrics.get("parameter_definition", lightgbm_parameter),
+        schema_hash,
+    )
     candidate_map["lightgbm_v1"] = BaselineCandidateRecord(
         model_key="lightgbm_v1",
         model_id=lightgbm_model_id,
         model_hash=lightgbm_model_hash,
+        candidate_definition_hash=lightgbm_definition_hash,
+        fitted_model_hash=lightgbm_model_hash,
         model_version=lightgbm_metrics.get("model_version", "lightgbm-cpu-deterministic-v1"),
         fitting_policy="existing_deterministic_lightgbm_fit",
         parameter_definition=lightgbm_metrics.get("parameter_definition", lightgbm_parameter),
@@ -735,6 +925,7 @@ def compare_development_models(
         "cohort_identity": cohort_identity.model_dump(mode="json"),
         "data_quality": {
             "scope": "development_only",
+            "physical_time_isolation": "PARQUET_FOOTER_VERIFIED",
             "quality_scan_row_limit_per_root": max(1, cohort.resource_budget.max_rows // 2),
             "feature": feature_summary,
             "label_source": label_summary,

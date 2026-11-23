@@ -80,13 +80,16 @@ Train/Validation identities to Ridge and LightGBM. Primary metrics use the all-c
 Validation cohort. Individual candidate coverage remains visible separately. Pairwise RankIC
 differences use only dates where both candidates have finite IC on that exact common cohort.
 
-`report_hash` binds the data, FactorSpec, split, candidate definitions, missing-value policy and
-environment. It excludes wall-clock time and random IDs; comparison elapsed time is recorded only in
+Candidate records expose `candidate_definition_hash` and `fitted_model_hash`. Ridge `model_id` binds
+the Train cohort, label definition and fitted imputer/scaler/Ridge state. `report_hash` binds the data,
+FactorSpec, split, candidate definitions, missing-value policy and environment. It excludes wall-clock time and random IDs; comparison elapsed time is recorded only in
 Job reproducibility. `research_protocol_hash` remains a Job identity supplied by the caller and is not,
 by itself, proof of external preregistration or independent validation.
 
-Research quality is assessed only when every feature, label and parent artifact ends no later than
-`validation_end`. Otherwise the Job fails with `QUALITY_SCOPE_NOT_ISOLATED`. `RESEARCH_EXPLORATORY`
+Research quality is assessed only when every feature, label and parent artifact both declares and
+physically proves through Parquet footer statistics that all required time columns end no later than
+`validation_end`. Missing statistics, unsupported lineage kinds or any out-of-range row group fail
+before the quality scanner reads row data with `QUALITY_SCOPE_NOT_ISOLATED`. `RESEARCH_EXPLORATORY`
 produces `COMPARISON_EXPLORATORY`; `RESEARCH_BLOCKED` produces `COMPARISON_INVALID`. None of the
 comparison statuses certifies statistical significance or trading validity.
 

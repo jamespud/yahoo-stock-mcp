@@ -230,6 +230,10 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     ]);
     assert.equal(new Set(baselineReport.candidates.map(candidate => candidate.common_cohort_sample_count)).size, 1);
     assert.equal(baselineReport.paired_comparisons.length, 4);
+    assert.equal(baselineReport.data_quality.physical_time_isolation, "PARQUET_FOOTER_VERIFIED");
+    const ridgeCandidate = baselineReport.candidates.find(candidate => candidate.model_key === "ridge_v1");
+    assert.match(ridgeCandidate.candidate_definition_hash, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(ridgeCandidate.model_hash, ridgeCandidate.fitted_model_hash);
     assert.match(baselineReport.report_hash, /^sha256:[0-9a-f]{64}$/);
     const comparisonReproducibility = await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "reproducibility"});
     assert.equal(comparisonReproducibility.baseline_comparison.report_hash, baselineReport.report_hash);
