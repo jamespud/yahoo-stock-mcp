@@ -122,6 +122,57 @@ export const computeOptionFactorsInput = z.object({
 }).strict();
 
 const int32Max = 2_147_483_647;
+const baselineFactorNode = z.object({
+  id: z.string().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  operator: z.string().min(1).max(64),
+  inputs: z.array(z.string().min(1).max(64)).min(1).max(2),
+  params: z.record(z.number().finite()).optional(),
+}).strict();
+export const baselineFactorSpec = z.object({
+  schema_version: z.literal("1.0"),
+  timeframe: z.literal("1d"),
+  nodes: z.array(baselineFactorNode).min(1).max(128),
+  outputs: z.array(z.string().min(1).max(64)).min(1).max(128),
+}).strict().superRefine((value, context) => {
+  const ids = value.nodes.map((node) => node.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["nodes"], message: "node ids must be unique"});
+  }
+  if (new Set(value.outputs).size !== value.outputs.length) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["outputs"], message: "outputs must be unique"});
+  }
+  for (const output of value.outputs) {
+    if (!ids.includes(output)) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ["outputs"], message: `unknown output ${output}`});
+    }
+  }
+});
+export const baselineComparisonInput = z.object({
+  schema_version: z.literal("1.0"),
+  factor_spec: baselineFactorSpec,
+  reversal_output: z.string().min(1).max(64),
+  rsi_output: z.string().min(1).max(64),
+  ridge_alpha: z.number().finite().positive().max(1_000_000).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.reversal_output === value.rsi_output) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["rsi_output"], message: "reversal_output and rsi_output must differ"});
+    return;
+  }
+  const nodes = new Map(value.factor_spec.nodes.map((node) => [node.id, node]));
+  for (const [field, output, operator, label] of [
+    ["reversal_output", value.reversal_output, "pct_change", "reversal"],
+    ["rsi_output", value.rsi_output, "rsi", "rsi"],
+  ] as const) {
+    if (!value.factor_spec.outputs.includes(output)) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: [field], message: `${output} is not a FactorSpec output`});
+      continue;
+    }
+    const node = nodes.get(output);
+    if (!node || node.operator !== operator || node.inputs.length !== 1 || node.inputs[0] !== "close" || node.params?.period !== 5) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: [field], message: `${label} must be ${operator}(close, period=5)`});
+    }
+  }
+});
 const lightgbmHyperparameters = z.object({
   learning_rate: z.number().finite().positive().optional(),
   num_leaves: z.number().int().min(2).max(131072).optional(),
@@ -143,6 +194,7 @@ export const trainAlphaModelInputFields = z.object({
     max_rows: z.number().int().min(1).optional(),
   }).strict().optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
+  baseline_comparison: baselineComparisonInput.optional(),
 }).strict();
 
 // The SDK's strict-union JSON Schema conversion advertises the typed branch,
@@ -167,6 +219,7 @@ export const trainAlphaModelToolFields = z.object({
   random_seed: auditableField(training.random_seed),
   resource_budget: auditableField(training.resource_budget),
   min_rank_ic: auditableField(training.min_rank_ic),
+  baseline_comparison: auditableField(training.baseline_comparison.describe("Optional fixed four-candidate development comparison.")),
 }).passthrough();
 
 // MCP permits a valid tools/call without an arguments member. Preserve the

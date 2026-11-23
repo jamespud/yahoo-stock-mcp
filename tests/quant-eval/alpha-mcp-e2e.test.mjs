@@ -44,7 +44,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const {tools} = await client.listTools();
     const trainingSchema = tools.find(tool => tool.name === "quant_train_alpha_model").inputSchema;
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
-      "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
+      "baseline_comparison", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
       "random_seed", "research_protocol_hash", "resource_budget", "windows",
     ]);
     assert.deepEqual(trainingSchema.required, ["evaluation_mode", "research_protocol_hash", "feature_set_id", "label_spec", "windows"]);
@@ -179,6 +179,78 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const modelDiagnostics = await call("quant_get_alpha_model_diagnostics", {model_id: model.model_id});
     assert.deepEqual(Object.keys(modelDiagnostics.feature_importance_gain), ["ret", "vol"]);
     assert.equal(modelDiagnostics.stability_status, "NOT_TESTED");
+    const baselinePrepared = await call("quant_prepare_alpha_dataset", {
+      source: "yahoo", symbols,
+      period: {start: "2024-01-02T00:00:00Z", end: "2024-05-01T00:00:00Z"},
+      price_basis: "price_basis_unverified",
+    });
+    await done(baselinePrepared.job_id);
+    const baselineDataset = await call("quant_get_result", {job_id: baselinePrepared.job_id, section: "dataset"});
+    const baselineFactorSpec = {
+      schema_version: "1.0", timeframe: "1d", nodes: [
+        {id: "reversal_source", operator: "pct_change", inputs: ["close"], params: {period: 5}},
+        {id: "rsi_source", operator: "rsi", inputs: ["close"], params: {period: 5}},
+        {id: "linear_signal", operator: "rolling_mean", inputs: ["close"], params: {period: 5}},
+        {id: "shape_signal", operator: "rolling_std", inputs: ["close"], params: {period: 5}},
+      ], outputs: ["reversal_source", "rsi_source", "linear_signal", "shape_signal"],
+    };
+    const baselineFactors = await call("quant_compute_factors", {
+      dataset_id: baselineDataset.dataset_id, factor_spec: baselineFactorSpec,
+    });
+    await done(baselineFactors.job_id);
+    const baselineFactorDataset = await call("quant_get_result", {job_id: baselineFactors.job_id, section: "dataset"});
+    const baselineConfig = {
+      schema_version: "1.0", factor_spec: baselineFactorSpec,
+      reversal_output: "reversal_source", rsi_output: "rsi_source", ridge_alpha: 1.0,
+    };
+    const baselineTrainingArgs = {
+      evaluation_mode: "validation_only",
+      research_protocol_hash: "sha256:" + "4".repeat(64),
+      feature_set_id: baselineFactorDataset.dataset_id,
+      label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: baselineDataset.dataset_id, horizon_days: 5},
+      windows: {train_start: "2024-01-02T00:00:00Z", train_end: "2024-04-01T00:00:00Z",
+                validation_start: "2024-04-01T00:00:00Z", validation_end: "2024-05-01T00:00:00Z"},
+      hyperparameters: {n_estimators: 20, min_child_samples: 2},
+      min_rank_ic: -1,
+      resource_budget: {max_seconds: 120, max_rows: 50000},
+      baseline_comparison: baselineConfig,
+    };
+    const countAlphaDatasets = () => Number(execFileSync(process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python"), ["-c",
+      "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from alpha_datasets').fetchone()[0])",
+      resolve(tmp, "quant.alpha", "catalog.sqlite3")], {encoding: "utf8"}).trim());
+    const datasetsBeforeBaselineTraining = countAlphaDatasets();
+    const comparisonTrain = await call("quant_train_alpha_model", baselineTrainingArgs);
+    await done(comparisonTrain.job_id);
+    const baselineMetrics = (await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "training_metrics"})).rows[0];
+    const baselineReport = baselineMetrics.baseline_comparison;
+    assert.equal(baselineReport.schema_version, "alpha-baseline-comparison-v1");
+    assert.equal(baselineReport.comparison_status, "COMPARISON_EXPLORATORY");
+    assert.deepEqual(baselineReport.candidates.map(candidate => candidate.model_key), [
+      "short_reversal_5", "rsi_5", "ridge_v1", "lightgbm_v1",
+    ]);
+    assert.equal(new Set(baselineReport.candidates.map(candidate => candidate.common_cohort_sample_count)).size, 1);
+    assert.equal(baselineReport.paired_comparisons.length, 4);
+    assert.match(baselineReport.report_hash, /^sha256:[0-9a-f]{64}$/);
+    const comparisonReproducibility = await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "reproducibility"});
+    assert.equal(comparisonReproducibility.baseline_comparison.report_hash, baselineReport.report_hash);
+    assert.equal(typeof comparisonReproducibility.baseline_comparison.comparison_elapsed_seconds, "number");
+    assert.ok(comparisonReproducibility.baseline_comparison.computation_sample_count > 0);
+    assert.equal(countAlphaDatasets(), datasetsBeforeBaselineTraining);
+    const comparisonModel = (await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "model_registry"})).rows[0];
+    assert.equal(comparisonModel.test_window, null);
+    assert.ok(!("oos" in comparisonModel.metrics));
+    const invalidBaseline = await client.callTool({name: "quant_train_alpha_model", arguments: {
+      ...baselineTrainingArgs,
+      baseline_comparison: {
+        ...baselineConfig,
+        factor_spec: {
+          ...baselineFactorSpec,
+          nodes: baselineFactorSpec.nodes.map(node => node.id === "rsi_source" ? {...node, params: {period: 14}} : node),
+        },
+      },
+    }});
+    assert.equal(Boolean(invalidBaseline.isError), true);
+    assert.match(invalidBaseline.content[0].text, /baseline_comparison/);
     const pythonBeforePrediction = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
     const jobsBeforePrediction = Number(execFileSync(pythonBeforePrediction, ["-c",
       "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from jobs').fetchone()[0])",

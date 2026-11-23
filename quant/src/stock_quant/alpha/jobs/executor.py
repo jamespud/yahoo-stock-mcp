@@ -34,7 +34,7 @@ from ..models.inference import predict_alpha
 from ..models.labels import LabelRow, stock_forward_labels
 from ..models.oos_evaluation import evaluate_alpha_oos
 from ..models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
-from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, train_alpha
+from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, _train_alpha_outcome
 from ..options.pricing import OptionPricingConfig
 from ..research_admission import authorize_oos, require_training_execution, require_training_submission_raw
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
@@ -201,14 +201,29 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 hyperparameters={key: value for key, value in request.hyperparameters.items()},
                 random_seed=request.random_seed, resource_budget=request.resource_budget,
                 min_rank_ic=request.min_rank_ic,
+                baseline_comparison=request.baseline_comparison,
             )
-            model = train_alpha(train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded)
+            outcome = _train_alpha_outcome(
+                train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded,
+            )
+            model = outcome.manifest
             staged_model = model
             model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
+            metrics = dict(model.metrics)
+            reproducibility = {"model_hash": model.model_hash, "environment_hash": model.environment_hash}
+            if outcome.baseline_comparison is not None:
+                metrics["baseline_comparison"] = outcome.baseline_comparison.model_dump(mode="json")
+                reproducibility["baseline_comparison"] = {
+                    "report_hash": outcome.baseline_comparison.report_hash,
+                    "comparison_protocol_hash": outcome.baseline_comparison.comparison_protocol_hash,
+                    "cohort_identity_hash": outcome.baseline_comparison.cohort_identity.validation_identity_hash,
+                    "comparison_elapsed_seconds": outcome.baseline_comparison_elapsed_seconds,
+                    "computation_sample_count": outcome.baseline_comparison.reproducibility["computation_sample_count"],
+                }
             result = {"dataset": {"section": "dataset", "model_set_id": model.model_set_id, "model_id": model.model_id},
-                      "training_metrics": [model.metrics], "model_registry": [model.model_dump(mode="json")],
+                      "training_metrics": [metrics], "model_registry": [model.model_dump(mode="json")],
                       "diagnostics": [model_diagnostics],
-                      "reproducibility": {"model_hash": model.model_hash, "environment_hash": model.environment_hash}}
+                      "reproducibility": reproducibility}
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             freeze_request = FreezeRequest(
