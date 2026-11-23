@@ -7,6 +7,7 @@ stock/option dataset
   -> FactorSpec DAG / option factors
   -> matured executable labels
   -> deterministic LightGBM model set
+  -> optional four-candidate development comparison
   -> frozen predictions
   -> Top-K stock portfolio or long-option backtest
 ```
@@ -46,7 +47,9 @@ features and verified providers are actually available.
 6. `quant_train_alpha_model` trains only the predefined deterministic LightGBM regressor. Every new
    formal task must explicitly use `evaluation_mode="validation_only"`, a valid
    `research_protocol_hash`, a stock label dataset, and ordered Train/Validation windows. Test window
-   fields are rejected before enqueue; training never reads Test features or labels.
+   fields are rejected before enqueue; training never reads Test features or labels. An optional
+   `baseline_comparison` adds fixed development-window scores for short reversal, RSI, Ridge and the
+   same already-trained LightGBM model. It adds no deployable model, Freeze or OOS grant.
 7. `quant_predict_alpha` is not an OOS bypass. Ordinary prediction rejects Validation-only research
    models. Historical legacy or mode-less models remain readable and may use ordinary inference only as
    a backward-compatibility path; they are not admissible to a new validation-only Freeze/OOS flow.
@@ -56,6 +59,39 @@ features and verified providers are actually available.
    for the same freeze return the existing authoritative Job.
 9. `quant_backtest_alpha_portfolio` simulates a constrained Top-K portfolio with next-open stock fills.
 10. `quant_backtest_options` simulates long calls/puts at next valid Ask/Bid and leaves missing exits unresolved.
+
+## Development baseline comparison
+
+When `baseline_comparison` is supplied, the existing training Job runs one closed four-candidate
+comparison:
+
+- `short_reversal_5 = -pct_change(close, 5)`;
+- `rsi_5 = 50 - RSI(close, 5)`;
+- `ridge_v1` with Train-only median imputation, Train-only standard scaling and fixed bounded alpha;
+- `lightgbm_v1`, using the same Job's existing model without retraining.
+
+The supplied complete FactorSpec must compile to the feature panel `source_version`, use a
+single-source factor panel, and define exact `pct_change(close, period=5)` and
+`rsi(close, period=5)` output nodes. Directions are fixed before training. A Ridge alpha is fixed in
+the request and is never selected from Validation results.
+
+The Job reads one matured development cohort and applies the same `(decision_at, instrument_id)`
+Train/Validation identities to Ridge and LightGBM. Primary metrics use the all-candidate common
+Validation cohort. Individual candidate coverage remains visible separately. Pairwise RankIC
+differences use only dates where both candidates have finite IC on that exact common cohort.
+
+`report_hash` binds the data, FactorSpec, split, candidate definitions, missing-value policy and
+environment. It excludes wall-clock time and random IDs; comparison elapsed time is recorded only in
+Job reproducibility. `research_protocol_hash` remains a Job identity supplied by the caller and is not,
+by itself, proof of external preregistration or independent validation.
+
+Research quality is assessed only when every feature, label and parent artifact ends no later than
+`validation_end`. Otherwise the Job fails with `QUALITY_SCOPE_NOT_ISOLATED`. `RESEARCH_EXPLORATORY`
+produces `COMPARISON_EXPLORATORY`; `RESEARCH_BLOCKED` produces `COMPARISON_INVALID`. None of the
+comparison statuses certifies statistical significance or trading validity.
+
+Read `training_metrics[0].baseline_comparison` and the compact Job `reproducibility.baseline_comparison`
+record. No new MCP Tool or result section is created.
 
 ## Research admission migration
 
@@ -82,6 +118,10 @@ are paginated and must be read with the returned cursor.
 - Cross-sectional values use only same-decision eligible rows.
 - Model feature name/order/type is frozen in the registry; corrupt models fail closed.
 - Rank IC, ICIR, coverage, quantile returns and top-bottom spread retain sample counts and definitions.
+- Baseline comparisons bind one FactorSpec, one matured cohort and one common Validation denominator;
+  they never register factor or Ridge models in the deployable model registry.
+- Baseline directions are fixed before fitting. Validation performance never flips their sign or selects
+  Ridge alpha.
 - Target weights are separate from actual fills and positions; cash + positions must reconcile.
 
 ## Provider boundaries
@@ -110,6 +150,7 @@ npm run test:plugin
 npm run verify:pack
 ```
 
-See [the current research status](QUANT_ALPHA_STATUS.md) and the
-[research data quality v2 design](superpowers/specs/alpha-data-quality-v2.md) for exact evidence,
+See [the current research status](QUANT_ALPHA_STATUS.md), the
+[research data quality v2 design](superpowers/specs/alpha-data-quality-v2.md), and the
+[baseline models v1 design](superpowers/specs/alpha-baseline-models-v1.md) for exact evidence,
 contracts and limitations.

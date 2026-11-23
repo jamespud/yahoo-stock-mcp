@@ -28,3 +28,21 @@
   `validation_gate_passed` is a separate pre-test signal.
 - Verify predictions use a frozen model/fold, start no earlier than the validation end, and never let a
   future model predict an earlier period. Corrupt or missing model artifacts fail closed.
+
+## Development baseline comparison
+
+- `baseline_comparison` is a closed development-only comparison of short reversal, RSI, Ridge and the
+  same Job's LightGBM model. It is not a registry of selectable production models.
+- Supply the complete FactorSpec that generated the feature panel. Its compiled hash must equal the
+  feature panel `source_version`; composite panels are rejected.
+- Reversal is exactly `-pct_change(close, 5)` and RSI is exactly `50 - RSI(close, 5)`. Directions are
+  fixed before fitting. A Validation IC never changes the sign.
+- Ridge uses Train-only median imputation, Train-only standard scaling and a predeclared bounded alpha.
+  Validation performance never searches alpha. A feature missing for every Train sample is an error.
+- LightGBM and Ridge use the same matured Train identity. Primary metrics use the same all-candidate
+  Validation common cohort; individual coverage remains a diagnostic, not a different primary denominator.
+- Pairwise IC uses only dates where both models have finite IC on identical samples. The report is
+  descriptive; it does not claim statistical significance or trading validity.
+- Quality assessment is allowed only when the complete feature/label lineage ends by Validation.
+  Otherwise the job fails with `QUALITY_SCOPE_NOT_ISOLATED`. Never scan a dataset range that may include
+  reserved Test data merely to populate a comparison report.
