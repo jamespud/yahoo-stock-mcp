@@ -128,6 +128,8 @@ The production MCP path uses no evidence resolver. An internal, explicitly injec
 
 Schema version: `alpha-research-quality-v2`
 
+Current policy version: `research-quality-rules-v2.1`.
+
 ```text
 ResearchQualityReport
   schema_version
@@ -182,7 +184,7 @@ Findings are sorted by `(dimension, code, scope)` and scan findings are capped d
 `DatasetStore.validate_dataset()` remains authoritative for identity, file presence, file size and partition hashes. A scan additionally detects:
 
 - duplicate bar identity;
-- invalid/non-finite OHLC;
+- non-positive or non-finite OHLC;
 - inconsistent high/low relationships;
 - invalid volume;
 - impossible timestamps;
@@ -223,6 +225,10 @@ Three facts are kept separate:
 `modeled_bar_end_plus_delay` is always `UNVERIFIED` without a trusted historical-publication resolver. `captured_at` is dataset creation/import time and is never evidence of historical availability.
 
 `available_at < end_at`, `available_at < start_at`, or feature availability later than its decision time is a blocking impossibility. Feature panels also inherit the temporal limitations of every parent.
+
+### Session coverage identity
+
+For stock datasets, `session_coverage_by_symbol` must contain exactly one complete audit record for every manifest instrument. Missing symbols, extra symbols, duplicate records or absent required audit fields keep artifact integrity `UNVERIFIED`; a partial symbol universe cannot be treated as complete session coverage.
 
 ### Universe validity
 
@@ -277,14 +283,15 @@ Missing, unreadable or identity-invalid parents produce `RESEARCH_BLOCKED` linea
 
 Default bounds:
 
-- maximum scanned rows per dataset: 1,000,000;
+- maximum scanned rows across the complete recursively assessed lineage: 1,000,000;
+- maximum visited dataset nodes per assessment: 512;
 - maximum parent depth: 16;
 - maximum partitions: 4,096;
 - scan batch size: 65,536 rows;
 - maximum retained findings: 256;
 - maximum explicit scope identifiers retained per finding: 64, with the omitted count recorded in evidence.
 
-Stock rows are scanned partition-by-partition using bounded Arrow batch iteration. The implementation does not materialize the whole dataset as a DataFrame. If a bound is exceeded, the assessor raises `RESOURCE_LIMIT_EXCEEDED`; it never returns a partial scan as complete.
+Stock rows are scanned partition-by-partition using bounded Arrow batch iteration. The implementation does not materialize the whole dataset as a DataFrame. The row and node budgets are shared by the root dataset and every recursively assessed parent, so multiple large parents cannot each consume an independent full allowance. If a bound is exceeded, the assessor raises `RESOURCE_LIMIT_EXCEEDED`; it never returns a partial scan as complete.
 
 ## Determinism and identity
 

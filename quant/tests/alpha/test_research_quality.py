@@ -348,6 +348,34 @@ def test_invalid_ohlc_and_volume_are_counted_without_auto_repair(tmp_path):
     assert store.read_rows(manifest.dataset_id)[0]["high"] == row["high"]
 
 
+@pytest.mark.parametrize("price", [0.0, -1.0, float("nan"), float("inf")])
+def test_nonpositive_or_nonfinite_ohlc_is_blocking(tmp_path, price):
+    store = DatasetStore(tmp_path / "alpha")
+    row = _rows()[0]
+    row["open"] = row["high"] = row["low"] = row["close"] = price
+    request = StockDatasetRequest(source="yahoo", symbols=["AAA"], start=START, end=END)
+    manifest = _unchecked_publish_stock(store, request, [row], data_quality={"session_coverage_by_symbol": []})
+    report = assess_research_quality(manifest.dataset_id, store)
+    assert report.dimensions["artifact_integrity"].status == "BLOCKED"
+    assert "INVALID_STOCK_OHLC" in _codes(report)
+
+
+@pytest.mark.parametrize("mutation", ["missing-symbol", "duplicate-symbol", "missing-field"])
+def test_session_reports_must_exactly_cover_manifest_symbols(tmp_path, mutation):
+    quality = _complete_session_quality(("AAA", "BBB"))
+    reports = quality["session_coverage_by_symbol"]
+    if mutation == "missing-symbol":
+        quality["session_coverage_by_symbol"] = reports[:1]
+    elif mutation == "duplicate-symbol":
+        quality["session_coverage_by_symbol"] = [reports[0], dict(reports[0]), reports[1]]
+    else:
+        reports[0].pop("session_status")
+    store, manifest = _publish(tmp_path, symbols=("AAA", "BBB"), data_quality=quality)
+    report = assess_research_quality(manifest.dataset_id, store)
+    assert report.dimensions["artifact_integrity"].status == "UNVERIFIED"
+    assert "SESSION_COVERAGE_IDENTITY_INCOMPLETE" in _codes(report) or "SESSION_COVERAGE_FIELDS_INCOMPLETE" in _codes(report)
+
+
 def test_session_gaps_are_reported_from_existing_audit(tmp_path):
     quality = _complete_session_quality()
     quality["session_coverage_by_symbol"][0].update({
@@ -536,6 +564,35 @@ def test_prediction_panel_cannot_upgrade_parent_quality(tmp_path):
         item.evidence.get("inheritance_chain") == [parent.dataset_id, feature.dataset_id]
         for item in report.findings
     )
+
+
+@pytest.mark.parametrize(("limit_name", "limit_value", "code"), [
+    ("max_scan_rows", 4, "RESOURCE_LIMIT_EXCEEDED"),
+    ("max_nodes", 2, "RESOURCE_LIMIT_EXCEEDED"),
+])
+def test_scan_budget_is_shared_across_lineage(tmp_path, limit_name, limit_value, code):
+    store = DatasetStore(tmp_path / "alpha")
+    first_request = StockDatasetRequest(source="yahoo", symbols=["AAA"], start=START, end=END)
+    first = store.publish_stock(
+        first_request,
+        _rows(symbols=("AAA",), days=2),
+        calendar_version="fixture",
+        source_version="fixture-v1",
+        data_quality=_complete_session_quality(("AAA",)),
+    )
+    second_request = StockDatasetRequest(source="yahoo", symbols=["BBB"], start=START, end=END)
+    second = store.publish_stock(
+        second_request,
+        _rows(symbols=("BBB",), days=2),
+        calendar_version="fixture",
+        source_version="fixture-v1",
+        data_quality=_complete_session_quality(("BBB",)),
+    )
+    feature = _publish_feature(store, [first, second], rows=_feature_rows(first))
+    limits = ResearchQualityLimits(**{limit_name: limit_value})
+    with pytest.raises(AlphaError) as error:
+        assess_research_quality(feature.dataset_id, store, limits=limits)
+    assert error.value.code == AlphaErrorCode(code)
 
 
 def test_scan_resource_limit_fails_without_partial_report(tmp_path):

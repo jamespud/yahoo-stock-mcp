@@ -16,7 +16,7 @@ first. All references required to install this skill independently live inside t
 - `quant_validate_strategy` - inspect types and explicit time alignment in the supplied DSL
 - `quant_register_strategy` - register an authorized immutable comparison definition
 - `quant_compile_strategy` - bind the exact parameters and symbols for a controlled replay
-- `quant_get_data_quality` - audit legacy snapshot PIT availability/gaps, or Alpha dataset `dataset_id` session coverage, calendar mappings and volume missingness
+- `quant_get_data_quality` - audit legacy snapshot PIT availability/gaps, or Alpha dataset session coverage, mappings and volume missingness; `section="research_readiness"` returns the evidence-aware research-quality report
 - `quant_get_alpha_model_diagnostics` - verify frozen feature importance and development-window stability evidence
 - `quant_run_backtest` - submit an authorized cost, benchmark or reproducibility comparison
 - `quant_get_job` - verify terminal status and durable diagnostics
@@ -38,7 +38,8 @@ first. All references required to install this skill independently live inside t
    corporate_actions and relevant trials/walk_forward/parameter_sensitivity. Page complete ledgers with
    returned cursors. Check quality at the actual as_of clocks. For Alpha data, treat symbol presence as
    different from session coverage and report missing, extra and duplicate sessions and volume NULL/zero
-   counts. Report failed candidates and excluded symbols.
+   counts. Request `section="research_readiness"` for the explicit dimension statuses and findings.
+   Report failed candidates and excluded symbols.
 4. Audit data availability versus decisions/fills, warmup, explicit alignment, revisions, raw versus
    adjusted prices, corporate actions, historical universe and delisted-asset coverage. A local
    modeled delay cannot establish historical vendor publication times. Preserve these limits.

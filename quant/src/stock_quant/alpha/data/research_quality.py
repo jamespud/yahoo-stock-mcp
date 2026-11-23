@@ -17,7 +17,7 @@ from .catalog import DatasetStore
 
 
 REPORT_SCHEMA_VERSION = "alpha-research-quality-v2"
-POLICY_VERSION = "research-quality-rules-v2.0"
+POLICY_VERSION = "research-quality-rules-v2.1"
 
 DimensionName = Literal[
     "artifact_integrity",
@@ -51,6 +51,7 @@ class ResearchQualityLimits(StrictModel):
     max_scan_rows: int = Field(default=1_000_000, ge=1, strict=True)
     max_parent_depth: int = Field(default=16, ge=1, le=128, strict=True)
     max_partitions: int = Field(default=4096, ge=1, strict=True)
+    max_nodes: int = Field(default=512, ge=1, le=4096, strict=True)
     scan_batch_size: int = Field(default=65_536, ge=1, le=1_000_000, strict=True)
     max_findings: int = Field(default=256, ge=1, le=4096, strict=True)
 
@@ -137,6 +138,39 @@ class _Scan:
                 examples.append(example)
 
 
+@dataclass
+class _AssessmentBudget:
+    limits: ResearchQualityLimits
+    visited_nodes: set[str] = field(default_factory=set)
+    scanned_rows: int = 0
+
+    def visit(self, manifest: DatasetManifest) -> None:
+        if manifest.dataset_id not in self.visited_nodes and len(self.visited_nodes) >= self.limits.max_nodes:
+            raise AlphaError(
+                AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                "Research quality assessment exceeded max_nodes",
+                {
+                    "dataset_id": manifest.dataset_id,
+                    "max_nodes": self.limits.max_nodes,
+                    "visited_nodes": sorted(self.visited_nodes),
+                },
+            )
+        declared_rows = sum(part.row_count for part in manifest.partition_manifest)
+        if self.scanned_rows + declared_rows > self.limits.max_scan_rows:
+            raise AlphaError(
+                AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                "Research quality assessment exceeded the shared max_scan_rows budget",
+                {
+                    "dataset_id": manifest.dataset_id,
+                    "max_scan_rows": self.limits.max_scan_rows,
+                    "already_scanned_rows": self.scanned_rows,
+                    "dataset_row_count": declared_rows,
+                },
+            )
+        self.visited_nodes.add(manifest.dataset_id)
+        self.scanned_rows += declared_rows
+
+
 @dataclass(frozen=True)
 class _LocalAssessment:
     manifest: DatasetManifest
@@ -185,6 +219,20 @@ def _status_summary(status: DimensionStatus) -> str:
     }[status]
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, datetime):
+        return _iso(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return [_json_safe(item) for item in sorted(value, key=str)]
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _finding(
     code: str,
     severity: FindingSeverity,
@@ -200,7 +248,7 @@ def _finding(
         severity=severity,
         dimension=dimension,
         scope=list(scope),
-        evidence=evidence or {},
+        evidence=_json_safe(evidence or {}),
         verified_facts=list(verified_facts),
         unverified_facts=list(unverified_facts),
     )
@@ -719,7 +767,12 @@ def _scan_stock(store: DatasetStore, manifest: DatasetManifest, limits: Research
                 scan.record("INVALID_STOCK_TIME", _scan_row_example("INVALID_STOCK_TIME", row))
             values = [_number(row.get(key)) for key in ("open", "high", "low", "close")]
             ohlc = row.get("open"), row.get("high"), row.get("low"), row.get("close")
-            if any(value is None for value in values) or values[1] < max(values[0], values[3]) or values[2] > min(values[0], values[3]) or values[2] > values[1]:
+            if (
+                any(value is None or value <= 0 for value in values)
+                or values[1] < max(values[0], values[3])
+                or values[2] > min(values[0], values[3])
+                or values[2] > values[1]
+            ):
                 scan.record("INVALID_STOCK_OHLC", _scan_row_example("INVALID_STOCK_OHLC", row, values=list(ohlc)))
             else:
                 if instrument and start is not None and instrument in previous_close:
@@ -957,10 +1010,38 @@ def _artifact_findings(
             ))
         else:
             missing = extra = duplicates = 0
+            expected_symbols = set(manifest.instrument_ids)
+            report_symbols: list[str] = []
+            missing_fields: dict[str, list[str]] = {}
+            required_fields = {
+                "instrument_id",
+                "calendar_id",
+                "first_observed_session",
+                "last_observed_session",
+                "expected_sessions_within_observed_range",
+                "observed_sessions_within_observed_range",
+                "missing_sessions",
+                "extra_sessions",
+                "duplicate_sessions",
+                "missing_session_count",
+                "extra_session_count",
+                "duplicate_session_count",
+                "session_coverage",
+                "session_status",
+                "outside_observed_range_status",
+            }
             for item in reports:
                 if not isinstance(item, dict):
                     metadata_errors.append("session_coverage_by_symbol")
                     continue
+                symbol = str(item.get("instrument_id") or "").strip().upper()
+                if symbol:
+                    report_symbols.append(symbol)
+                absent = sorted(required_fields - set(item))
+                if not symbol and "instrument_id" not in absent:
+                    absent.append("instrument_id")
+                if absent:
+                    missing_fields[symbol or "<missing-instrument-id>"] = absent
                 for field_name, label in (
                     ("missing_session_count", "missing"),
                     ("extra_session_count", "extra"),
@@ -975,6 +1056,40 @@ def _artifact_findings(
                         extra += value
                     else:
                         duplicates += value
+            missing_symbols = sorted(expected_symbols - set(report_symbols))
+            extra_symbols = sorted(set(report_symbols) - expected_symbols)
+            duplicate_symbols = sorted({symbol for symbol in report_symbols if report_symbols.count(symbol) > 1})
+            if missing_symbols or extra_symbols or duplicate_symbols:
+                status = "UNVERIFIED" if status == "VERIFIED" else status
+                findings.append(_finding(
+                    "SESSION_COVERAGE_IDENTITY_INCOMPLETE",
+                    "WARNING",
+                    "artifact_integrity",
+                    evidence={
+                        "missing_symbols": missing_symbols[:20],
+                        "missing_symbol_count": len(missing_symbols),
+                        "extra_symbols": extra_symbols[:20],
+                        "extra_symbol_count": len(extra_symbols),
+                        "duplicate_symbols": duplicate_symbols[:20],
+                        "duplicate_symbol_count": len(duplicate_symbols),
+                    },
+                    unverified_facts=["Session coverage must contain exactly one complete report for every manifest instrument."],
+                ))
+            if missing_fields:
+                status = "UNVERIFIED" if status == "VERIFIED" else status
+                findings.append(_finding(
+                    "SESSION_COVERAGE_FIELDS_INCOMPLETE",
+                    "WARNING",
+                    "artifact_integrity",
+                    evidence={
+                        "instrument_ids": sorted(missing_fields)[:20],
+                        "missing_field_examples": {
+                            symbol: missing_fields[symbol]
+                            for symbol in sorted(missing_fields)[:5]
+                        },
+                    },
+                    unverified_facts=["Missing session-audit fields are unresolved evidence, not complete coverage."],
+                ))
             no_bars = sorted(str(item.get("instrument_id")) for item in reports if isinstance(item, dict) and item.get("session_status") == "NO_BARS")
             if extra or duplicates:
                 status = "BLOCKED"
@@ -1134,6 +1249,7 @@ def assess_research_quality(
     """Assess research readiness without mutating manifests or artifacts."""
     active_limits = limits or ResearchQualityLimits()
     cache: dict[str, ResearchQualityReport] = {}
+    budget = _AssessmentBudget(active_limits)
 
     def walk(identifier: str, stack: tuple[str, ...]) -> ResearchQualityReport:
         if identifier in stack:
@@ -1143,6 +1259,7 @@ def assess_research_quality(
         if identifier in cache:
             return cache[identifier]
         manifest = store.load_manifest(identifier)
+        budget.visit(manifest)
         local = _local_assessment(manifest, store, active_limits, evidence)
         statuses = dict(local.statuses)
         findings = list(local.findings)
