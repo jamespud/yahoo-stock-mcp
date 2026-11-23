@@ -49,7 +49,9 @@ fold-local Ridge preprocessing, pooled non-overlapping common-cohort OOF metrics
 intervals, fixed-family Holm adjustment and time-decay/stability diagnostics.
 
 The capability is validated with synthetic development data and must not be presented as evidence that
-the Alpha v1.3 historical Test was reopened. No real historical Test/OOS rows were read or evaluated for
+the Alpha v1.3 historical Test was reopened. The feature panel parent must equal the requested stock
+dataset, labels are generated only from that stock dataset, and the published result includes a
+canonical reconstruction path that verifies the full report hash. No real historical Test/OOS rows were read or evaluated for
 PR4. Fold models are report-only identities and are never registered, frozen or eligible for OOS grants.
 All four statistical tests are local to the current preregistered family; the report explicitly records
 that global trial-history completeness is false.

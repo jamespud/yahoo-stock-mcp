@@ -45,8 +45,10 @@ first. All references required to install this skill independently live inside t
    hash, fixed reversal/RSI direction, Train-only Ridge preprocessing, equal Train identities and the
    all-candidate common-cohort denominator. Do not compare individual-coverage RankIC across different
    samples. For `walk_forward_alpha`, page `walk_forward`, `diagnostics`, `trials` and `reproducibility`;
-   verify non-overlapping outer folds, strict event-time cutoffs, inner-only early stopping, fold-local Ridge
-   preprocessing and unique OOF sample identities.
+   verify the feature parent equals the stock label dataset, labels were generated from that dataset,
+   outer folds do not overlap, event-time cutoffs are strict, early stopping is inner-only, Ridge preprocessing
+   is fold-local and OOF sample identities are unique. Reconstruct the full report from `walk_forward` plus
+   `reproducibility.report_reconstruction` before accepting the reported Hash.
 4. Audit data availability versus decisions/fills, warmup, explicit alignment, revisions, raw versus
    adjusted prices, corporate actions, historical universe and delisted-asset coverage. A local
    modeled delay cannot establish historical vendor publication times. Preserve these limits.

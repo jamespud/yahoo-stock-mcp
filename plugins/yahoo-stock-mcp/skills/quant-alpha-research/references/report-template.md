@@ -37,10 +37,13 @@ Train, inner fit, inner tuning, outer validation and knowledge cutoff; and all `
 `FOLD_INSUFFICIENT_DATA` and `FOLD_INVALID` records. State that fold models were not registered or frozen.
 
 Report pooled OOF and common-cohort RankIC by candidate, per-Fold IC and coverage, paired daily deltas,
-time-decay and feature-importance stability. Include the moving-block block length/replicates/seed,
+time-decay and feature-importance stability. Separate planned, matured-label and conditional model
+coverage denominators. Include the moving-block block length/replicates/seed,
 confidence intervals, effective replicate count, raw and Holm-adjusted p-values, and explicitly state
 `multiple_testing_scope=CURRENT_PREREGISTERED_FAMILY_ONLY` and
-`global_trial_history_complete=false`. A walk-forward status is not frozen Test/OOS evidence.
+`global_trial_history_complete=false`. Verify `report_hash` by merging every `walk_forward` page into
+`reproducibility.report_reconstruction.report_without_folds`. A walk-forward status is not frozen
+Test/OOS evidence.
 
 ## Portfolio/option diagnostics
 

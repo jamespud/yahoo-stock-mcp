@@ -59,6 +59,9 @@
 
 - The request carries a half-open `development_window`, never Test/Freeze/OOS fields. Fold plans use
   unique decision sessions; incomplete tail windows are excluded before labels are scored.
+- The feature panel must have exactly one parent equal to the requested stock label dataset. Labels are
+  generated from that stock dataset; the Python execution entry does not accept externally injected
+  label rows, so a report cannot bind arbitrary label values/timelines to an unrelated Dataset ID.
 - Outer-train eligibility uses actual label `exit_at` and `label_available_at` against
   `outer_validation_start - embargo_days` with strict `<`. Inner fit uses the first inner-tuning
   decision as its availability cutoff.
@@ -75,3 +78,6 @@
   unestimable. Report scope is `CURRENT_PREREGISTERED_FAMILY_ONLY` and global trial history is incomplete.
 - Read `summary`, every page of `walk_forward`, `diagnostics`, `trials` and `reproducibility`.
   `WF_COMPLETED` or `WF_EXPLORATORY` does not mean frozen OOS, Alpha confirmation or trading validity.
+- Keep planned-session, matured-label and conditional model-common coverage separate. Use
+  `reproducibility.report_reconstruction.report_without_folds` plus all `walk_forward` rows to verify
+  the exact `report_hash`.

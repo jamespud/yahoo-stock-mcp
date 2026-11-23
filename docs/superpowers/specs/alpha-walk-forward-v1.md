@@ -43,17 +43,18 @@ New deep module: `stock_quant.alpha.models.walk_forward`.
 
 ```python
 def plan_development_walk_forward(
-    request, *, feature_rows, label_rows, feature_manifest, label_manifest
+    request, *, feature_frame, feature_manifest
 ) -> WalkForwardPlan: ...
 
 def run_development_walk_forward(
-    request, *, store, label_rows=None, checkpoint=None
+    request, *, store, checkpoint=None
 ) -> WalkForwardReport: ...
 ```
 
 `run_development_walk_forward` owns admission, lineage/footer preflight, one controlled
-development read, label generation when labels are not supplied, fold planning, fold
-execution, OOF aggregation, inference and report hashing. The Job executor calls this
+development read, label generation from the bound stock dataset, fold planning, fold
+execution, OOF aggregation, inference and report hashing. It does not accept caller-supplied
+label rows. The Job executor calls this
 same function after request validation. There is no second execution implementation.
 
 Internal responsibilities:
@@ -148,8 +149,9 @@ Physical preflight runs before `DatasetStore.read_rows()`:
 7. enforce total physical row and partition budgets.
 
 After success, feature rows are read once for the complete development range. Stock bars
-are read once to generate labels unless the direct test caller supplies already generated
-label rows. All folds use those bounded inputs; no fold scans the Parquet lineage again.
+are read once and labels are generated only from `stock_dataset_id`. The feature panel's
+single parent must equal that same stock dataset ID. All folds use those bounded inputs;
+no fold scans the Parquet lineage again.
 
 ## Session axis and Fold plan
 
@@ -238,6 +240,12 @@ same `(decision_at, instrument_id)`. RankIC is Spearman correlation within each 
 date. Pooled mean IC weights every valid date equally; it is not a sample-count-weighted
 or unconditional fold-mean average.
 
+Coverage distinguishes the planned validation denominator, matured-label denominator and
+conditional model-common denominator. The report includes planned/valid-label/valid-IC
+session counts, planned/eligible/common opportunity counts, conditional label coverage,
+conditional model coverage and end-to-end common coverage. Common Cohort coverage does not
+stand in for all planned sessions when labels are immature or a Fold fails.
+
 Per-candidate independent coverage and per-fold common coverage are also returned.
 Missing dates remain in the coverage denominator. Constant labels/predictions,
 insufficient cross-sections and non-finite correlations return null IC with an explicit
@@ -310,6 +318,9 @@ Completed Job sections reuse existing pagination:
 - `reproducibility`: protocol, hashes, budgets and environment.
 
 A Job publishes no partial success; only a completed whole report enters `begin_publish`.
+The `reproducibility` section also carries a canonical `report_without_folds` object and
+points to `walk_forward` as the Fold source. Reading every Fold page and merging those rows
+into that object must reconstruct the exact `WalkForwardReport` and verify `report_hash`.
 
 ## Compatibility and rollout
 

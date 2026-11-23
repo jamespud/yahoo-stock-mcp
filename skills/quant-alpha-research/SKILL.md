@@ -69,7 +69,8 @@ first. For factor, option, model and reporting details read the local references
    common cohort; individual coverage stays separate. Fixed reversal/RSI directions and Train-only
    Ridge preprocessing cannot be selected from Validation.
 7. Run `quant_run_alpha_walk_forward` when the question is cross-time repeatability rather than one
-   Validation cohort. Use only a half-open `development_window`, require at least the requested complete
+   Validation cohort. Use only a half-open `development_window`; require the feature panel's parent to equal
+   the stock label dataset and labels to be dataset-generated, not caller-injected. Require at least the requested complete
    folds, preserve all `FOLD_INSUFFICIENT_DATA`/`FOLD_INVALID` records, and page `walk_forward`,
    `diagnostics`, `trials` and `reproducibility`. Verify nested LightGBM early stopping used only inner
    tuning, final models were refit without outer Validation, Ridge preprocessing was fold-local and each

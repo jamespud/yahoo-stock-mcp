@@ -1289,6 +1289,7 @@ def _pooled_metrics(
     independent: pd.DataFrame,
     common: pd.DataFrame,
     expected_decisions: list[datetime],
+    planned_opportunity_counts: dict[pd.Timestamp, int],
     request: WalkForwardAlphaRequest,
     protocol_hash: str,
 ) -> tuple[dict, dict, list[dict], dict, list[dict]]:
@@ -1325,6 +1326,11 @@ def _pooled_metrics(
             common["decision_at"].tolist() if not common.empty else [],
             expected_decisions,
         )
+    valid_date_sets = [
+        {row["decision_at"] for row in candidate_daily[candidate] if row["rank_ic"] is not None}
+        for candidate in CANDIDATE_KEYS
+    ]
+    all_candidate_valid_ic_dates = set.intersection(*valid_date_sets) if valid_date_sets else set()
     for left, right in PAIR_DIRECTIONS:
         records = _paired_records(expected_decisions, candidate_daily, left, right)
         pair_daily[_pair_key(left, right)] = records
@@ -1349,13 +1355,53 @@ def _pooled_metrics(
         pair_uncertainty[key] = _bootstrap_series(
             values, config=inference, seed=seed, with_pvalue=True, sample_indices=sample_indices,
         )
-    total_opportunities = len(independent) if not independent.empty else 0
+    eligible_label_opportunities = len(independent) if not independent.empty else 0
+    planned_feature_opportunities = sum(int(value) for value in planned_opportunity_counts.values())
+    independent_counts = independent.groupby("decision_at").size().to_dict() if not independent.empty else {}
+    common_counts = common.groupby("decision_at").size().to_dict() if not common.empty else {}
+    common_coverage = []
+    for decision in expected_decisions:
+        timestamp = pd.Timestamp(decision)
+        planned = int(planned_opportunity_counts.get(timestamp, 0))
+        eligible = int(independent_counts.get(timestamp, 0))
+        accepted = int(common_counts.get(timestamp, 0))
+        common_coverage.append({
+            "decision_at": timestamp.isoformat(),
+            "planned_feature_count": planned,
+            "eligible_label_count": eligible,
+            "common_cohort_count": accepted,
+            "conditional_label_coverage": eligible / planned if planned else 0.0,
+            "conditional_model_coverage": accepted / eligible if eligible else 0.0,
+            "end_to_end_common_coverage": accepted / planned if planned else 0.0,
+        })
+    valid_label_sessions = sum(
+        int(independent_counts.get(pd.Timestamp(decision), 0)) > 0 for decision in expected_decisions
+    )
     common_summary = {
         "sample_identity": "(decision_at, instrument_id)",
         "expected_decision_count": len(expected_decisions),
-        "validation_opportunity_count": total_opportunities,
+        "planned_session_count": len(expected_decisions),
+        "validation_opportunity_count": planned_feature_opportunities,
+        "valid_label_session_count": valid_label_sessions,
+        "valid_ic_session_count": len(all_candidate_valid_ic_dates),
+        "planned_validation_opportunity_count": planned_feature_opportunities,
+        "eligible_label_opportunity_count": eligible_label_opportunities,
         "common_cohort_sample_count": len(common),
-        "common_cohort_coverage": len(common) / total_opportunities if total_opportunities else 0.0,
+        "conditional_label_coverage": (
+            eligible_label_opportunities / planned_feature_opportunities
+            if planned_feature_opportunities else 0.0
+        ),
+        "conditional_model_coverage": (
+            len(common) / eligible_label_opportunities if eligible_label_opportunities else 0.0
+        ),
+        "end_to_end_common_coverage": (
+            len(common) / planned_feature_opportunities if planned_feature_opportunities else 0.0
+        ),
+        "common_cohort_coverage": (
+            len(common) / planned_feature_opportunities if planned_feature_opportunities else 0.0
+        ),
+        "coverage_by_decision": common_coverage[:MAX_DECISION_DIAGNOSTICS],
+        "omitted_coverage_decisions": max(0, len(common_coverage) - MAX_DECISION_DIAGNOSTICS),
         "rule": "finite prediction for all four candidates on the same decision and instrument",
         "duplicate_oof_sample_count": 0,
     }
@@ -1523,11 +1569,33 @@ def _stability(folds: list[FoldRecord], pair_daily: dict[str, list[dict]]) -> di
 def _preflight(request: WalkForwardAlphaRequest, store: DatasetStore) -> tuple[dict[str, DatasetManifest], int, int]:
     feature_manifest = store.load_manifest(request.feature_set_id)
     _validate_factor_manifest_source(request.baseline_comparison, feature_manifest)
+    if feature_manifest.parent_dataset_ids != [request.stock_dataset_id]:
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Walk-forward feature panel must be derived from the requested stock label dataset",
+            {
+                "feature_parent_dataset_ids": feature_manifest.parent_dataset_ids,
+                "stock_dataset_id": request.stock_dataset_id,
+            },
+        )
     manifests = _lineage_manifests(
         store,
         [request.feature_set_id, request.stock_dataset_id],
         max_nodes=request.resource_budget.max_lineage_nodes,
     )
+    if feature_manifest.dataset_kind != "feature_panel":
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Walk-forward feature_set_id must identify a feature panel",
+            {"dataset_kind": feature_manifest.dataset_kind},
+        )
+    stock_manifest = manifests[request.stock_dataset_id]
+    if stock_manifest.dataset_kind != "stock_bars":
+        raise AlphaError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Walk-forward stock_dataset_id must identify stock bars",
+            {"dataset_kind": stock_manifest.dataset_kind},
+        )
     partitions = sum(len(manifest.partition_manifest) for manifest in manifests.values())
     physical_rows = sum(
         partition.row_count for manifest in manifests.values() for partition in manifest.partition_manifest
@@ -1600,7 +1668,6 @@ def run_development_walk_forward(
     request: WalkForwardAlphaRequest,
     *,
     store: DatasetStore,
-    label_rows: list[LabelRow] | None = None,
     checkpoint: Callable[[float], None] | None = None,
 ) -> WalkForwardReport:
     """Execute the sole leakage-safe development walk-forward implementation."""
@@ -1625,8 +1692,7 @@ def run_development_walk_forward(
     features = _feature_rows(feature_frame)
     plan = plan_development_walk_forward(request, feature_frame=feature_frame, feature_manifest=feature_manifest)
     budget.tick(0.12)
-    if label_rows is None:
-        label_rows = _read_generated_labels(request, store, stock_manifest)
+    label_rows = _read_generated_labels(request, store, stock_manifest)
     labels = _label_frame(label_rows, request)
     data_quality, exploratory = _quality_reports(request, store, budget)
     completed_frames: list[pd.DataFrame] = []
@@ -1634,6 +1700,11 @@ def run_development_walk_forward(
     diagnostics: list[dict] = []
     folds: list[FoldRecord] = []
     expected_decisions = _planned_validation_decisions(plan)
+    planned_opportunity_counts: dict[pd.Timestamp, int] = {}
+    for planned in plan.folds:
+        window = _subset(features, planned.outer_validation_start, planned.outer_validation_end)
+        for decision, count in window.groupby("decision_at").size().items():
+            planned_opportunity_counts[pd.Timestamp(decision)] = int(count)
     for index, planned in enumerate(plan.folds):
         try:
             record, fold_diagnostics, candidate_frame, common_frame, _ = _execute_fold(
@@ -1666,7 +1737,12 @@ def run_development_walk_forward(
     common = _concat_frames(common_frames, label="Common cohort OOF")
     budget.tick(0.85)
     pooled, common_summary, _candidate_daily, uncertainty, pair_daily = _pooled_metrics(
-        independent, common, expected_decisions, request, plan.walk_forward_protocol_hash,
+        independent,
+        common,
+        expected_decisions,
+        planned_opportunity_counts,
+        request,
+        plan.walk_forward_protocol_hash,
     )
     budget.tick(0.93)
     stability = _stability(folds, pair_daily)
@@ -1736,6 +1812,14 @@ def run_development_walk_forward(
         "software_versions": software,
         "environment_hash": environment_hash,
         "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+        "label_generation": {
+            "method": "stock_dataset_forward_return",
+            "source_dataset_id": request.stock_dataset_id,
+            "label_name": request.label_spec.label_name,
+            "label_version_policy": request.label_spec.label_version or "dataset_generated",
+            "horizon_days": request.label_spec.horizon_days,
+            "external_label_rows_accepted": False,
+        },
         "walk_forward_protocol_hash": plan.walk_forward_protocol_hash,
         "fold_plan_hash": plan.fold_plan_hash,
         "metric_implementation": "stock_quant.alpha.models.evaluation",
@@ -1749,7 +1833,7 @@ def run_development_walk_forward(
             "lineage_nodes": len(manifests),
             "training_samples": budget.training_samples,
             "feature_rows_read": len(feature_rows),
-            "label_rows_read_or_supplied": len(label_rows),
+            "label_rows_generated": len(label_rows),
             "bootstrap_replicates_requested": request.walk_forward_config.inference.bootstrap_replicates,
             "max_seconds_effective": min(request.max_seconds, request.resource_budget.max_seconds),
         },
@@ -1847,10 +1931,19 @@ def walk_forward_result_sections(report: WalkForwardReport) -> dict[str, Any]:
             "OOS validation, tradable Alpha or production approval."
         ),
     }
+    report_without_folds = report.model_dump(mode="json", exclude={"folds"})
+    reproducibility = {
+        **report.reproducibility,
+        "report_reconstruction": {
+            "folds_section": "walk_forward",
+            "report_without_folds": report_without_folds,
+            "rule": "merge all walk_forward rows into folds, then validate report_hash",
+        },
+    }
     return {
         "summary": summary,
         "walk_forward": [fold.model_dump(mode="json") for fold in report.folds],
         "diagnostics": diagnostics,
         "trials": report.trial_ledger,
-        "reproducibility": report.reproducibility,
+        "reproducibility": reproducibility,
     }

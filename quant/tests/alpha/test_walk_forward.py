@@ -15,21 +15,24 @@ from stock_quant.alpha.factors.ast import FactorNode, FactorSpec
 from stock_quant.alpha.factors.compiler import compile_factor_spec
 from stock_quant.alpha.models.baseline_comparison import BaselineComparisonConfig
 from stock_quant.alpha.models.development_cohort import _feature_frame
-from stock_quant.alpha.models.labels import LabelRow
+from stock_quant.alpha.models.labels import stock_forward_labels
 from stock_quant.alpha.models.walk_forward import (
     BootstrapInferenceConfig,
     WalkForwardAlphaRequest,
     WalkForwardConfig,
     WalkForwardDevelopmentWindow,
     WalkForwardLabelSpec,
+    WalkForwardReport,
     WalkForwardResourceBudget,
     _bootstrap_series,
     _concat_frames,
     _decision_sessions,
     _feature_rows,
+    _fit_nested_lightgbm,
     _join_window,
     _label_frame,
     _moving_block_draws,
+    _pooled_metrics,
     _preflight,
     _subset,
     holm_adjust,
@@ -136,29 +139,39 @@ def _fixture(
     spec = _factor_spec()
     compiled = compile_factor_spec(spec)
     rng = np.random.default_rng(20261123)
+    prices_by_symbol: dict[str, list[float]] = {}
+    for instrument_index, symbol in enumerate(SYMBOLS):
+        prices = [100 + instrument_index]
+        for _ in range(104):
+            prices.append(prices[-1] * float(np.exp(rng.normal(scale=0.02))))
+        prices_by_symbol[symbol] = prices
     bars: list[dict] = []
     features: list[dict] = []
-    labels: list[LabelRow] = []
     for day_index in range(105):
         decision = START + timedelta(days=day_index, hours=21, minutes=1)
-        for instrument_index, symbol in enumerate(SYMBOLS):
-            close = 100 + instrument_index + day_index * 0.1
+        for symbol in SYMBOLS:
+            close = prices_by_symbol[symbol][day_index]
             bars.append({
                 "instrument_id": symbol,
                 "start_at": decision - timedelta(hours=7),
                 "end_at": decision - timedelta(minutes=1),
                 "available_at": decision,
-                "open": close, "high": close + 1, "low": close - 1, "close": close,
+                "open": close, "high": close * 1.01, "low": close * 0.99, "close": close,
                 "volume": 1000, "adjustment": "raw", "source": "synthetic",
                 "source_version": "synthetic-v1", "currency": "USD",
             })
             if day_index >= 100:
                 continue
             x = rng.normal(size=4)
-            relation = 1.0 if scenario == "stable" else (1.0 if day_index < 60 else -0.7)
-            target = float(relation * (-0.5 * x[0] + 0.1 * x[1]))
-            if scenario == "no_signal":
-                target = float(0.01 * rng.normal())
+            if day_index + 6 < 105:
+                future_return = prices_by_symbol[symbol][day_index + 6] / prices_by_symbol[symbol][day_index + 1] - 1
+                if scenario == "stable":
+                    x[0] = -25.0 * future_return + rng.normal(scale=0.05)
+                elif scenario == "drift":
+                    direction = -1.0 if day_index >= 60 else 1.0
+                    x[0] = direction * (-25.0 * future_return) + rng.normal(scale=0.05)
+                elif scenario != "no_signal":
+                    raise AssertionError(scenario)
             for name, value in zip(spec.outputs, x, strict=True):
                 features.append({
                     "decision_at": decision,
@@ -170,16 +183,7 @@ def _fixture(
                     "quality_flags": [],
                     "factor_version": "synthetic-factor-v1",
                 })
-            labels.append(LabelRow(
-                feature_decision_at=decision,
-                entry_at=decision + timedelta(days=1),
-                exit_at=decision + timedelta(days=5),
-                label_available_at=decision + timedelta(days=5),
-                label_value=target,
-                label_quality=[],
-                instrument_id=symbol,
-                label_name="stock_forward_return",
-            ))
+    labels = stock_forward_labels(bars, horizon=5)
     if boundary_feature:
         decision = DEV_END
         for symbol in SYMBOLS:
@@ -234,8 +238,8 @@ def _plan(store, request, feature):
     )
 
 
-def _run(store, request, labels):
-    return run_development_walk_forward(request, store=store, label_rows=labels)
+def _run(store, request):
+    return run_development_walk_forward(request, store=store)
 
 
 def test_expanding_and_rolling_plans_are_deterministic_and_non_overlapping(tmp_path):
@@ -295,8 +299,8 @@ def test_incomplete_tail_is_explicit_and_fold_count_is_not_truncated(tmp_path):
 
 
 def test_fewer_than_minimum_complete_folds_reports_insufficient_evidence(tmp_path):
-    store, request, labels, _, _ = _fixture(tmp_path, train_sessions=75)
-    report = _run(store, request, labels)
+    store, request, _labels, _, _ = _fixture(tmp_path, train_sessions=75)
+    report = _run(store, request)
     assert len(report.folds) == 2
     assert report.research_status == "WF_INSUFFICIENT_EVIDENCE"
 
@@ -333,7 +337,7 @@ def test_label_purge_uses_event_times_and_strict_cutoff(tmp_path):
 
 
 def test_nested_early_stopping_never_receives_outer_validation(tmp_path, monkeypatch):
-    store, request, labels, _, _ = _fixture(tmp_path)
+    store, request, _labels, _, _ = _fixture(tmp_path)
     calls = []
     original_train = lgb.train
 
@@ -346,7 +350,7 @@ def test_nested_early_stopping_never_receives_outer_validation(tmp_path, monkeyp
         return original_train(params, train_set, *args, **kwargs)
 
     monkeypatch.setattr(lgb, "train", spy)
-    report = _run(store, request, labels)
+    report = _run(store, request)
     tuning_calls = [call for call in calls if call["valid_sets"]]
     final_calls = [call for call in calls if not call["valid_sets"]]
     assert len(tuning_calls) == len(report.folds)
@@ -357,28 +361,46 @@ def test_nested_early_stopping_never_receives_outer_validation(tmp_path, monkeyp
     assert all(fold.selected_iteration <= 20 for fold in report.folds)
 
 
-def test_outer_validation_labels_do_not_change_first_fold_model_identity(tmp_path):
-    store, request, labels, _feature, _ = _fixture(tmp_path)
-    first_report = _run(store, request, labels)
-    first_fold = first_report.folds[0]
-    validation_start = datetime.fromisoformat(first_fold.outer_validation_window.start)
-    validation_end = datetime.fromisoformat(first_fold.outer_validation_window.end)
-    changed = [
-        row.model_copy(update={"label_value": -float(row.label_value or 0.0)})
-        if validation_start <= row.feature_decision_at < validation_end else row
-        for row in labels
-    ]
-    second_report = _run(store, request, changed)
-    second_fold = second_report.folds[0]
-    assert first_fold.selected_iteration == second_fold.selected_iteration
-    assert first_fold.model_hashes == second_fold.model_hashes
-    assert first_fold.common_cohort_identity_hash == second_fold.common_cohort_identity_hash
+def test_outer_validation_labels_do_not_change_nested_model_identity():
+    from types import SimpleNamespace
+
+    rng = np.random.default_rng(44)
+    schema = ["f1", "f2", "f3", "f4"]
+
+    def frame(days: int, start_day: int) -> pd.DataFrame:
+        rows = []
+        for day in range(start_day, start_day + days):
+            decision = START + timedelta(days=day, hours=21, minutes=1)
+            for instrument in range(10):
+                values = rng.normal(size=4)
+                rows.append({
+                    "decision_at": decision,
+                    "instrument_id": f"S{instrument:02d}",
+                    "label_value": float(0.4 * values[0] - 0.2 * values[1]),
+                    **{name: float(value) for name, value in zip(schema, values, strict=True)},
+                })
+        return pd.DataFrame(rows)
+
+    inner_fit = frame(12, 0)
+    inner_tuning = frame(5, 12)
+    outer_train = frame(20, 17)
+    outer_validation = frame(6, 37)
+    request = SimpleNamespace(
+        lightgbm_hyperparameters={"n_estimators": 20, "min_child_samples": 2, "num_leaves": 7},
+        random_seed=3,
+    )
+    first = _fit_nested_lightgbm(inner_fit, inner_tuning, outer_train, outer_validation, schema, request)
+    changed_validation = outer_validation.copy()
+    changed_validation["label_value"] = -changed_validation["label_value"]
+    second = _fit_nested_lightgbm(inner_fit, inner_tuning, outer_train, changed_validation, schema, request)
+    assert first[1:] == second[1:]
+    assert np.allclose(first[0], second[0])
 
 
 def test_ridge_preprocessing_is_refit_for_every_fold(tmp_path, monkeypatch):
     import stock_quant.alpha.models.walk_forward as module
 
-    store, request, labels, _, _ = _fixture(tmp_path)
+    store, request, _labels, _, _ = _fixture(tmp_path)
     observed = []
     original = module.fit_train_only_ridge
 
@@ -387,7 +409,7 @@ def test_ridge_preprocessing_is_refit_for_every_fold(tmp_path, monkeypatch):
         return original(train, validation, schema, alpha)
 
     monkeypatch.setattr(module, "fit_train_only_ridge", spy)
-    report = _run(store, request, labels)
+    report = _run(store, request)
     assert len(observed) == len(report.folds)
     assert len({train_count for train_count, _ in observed}) > 1
     ridge_hashes = [fold.model_hashes["ridge_v1"] for fold in report.folds]
@@ -395,15 +417,23 @@ def test_ridge_preprocessing_is_refit_for_every_fold(tmp_path, monkeypatch):
 
 
 def test_oof_common_cohort_metrics_bootstrap_and_holm_are_bounded_and_deterministic(tmp_path):
-    store, request, labels, _, _ = _fixture(tmp_path)
-    first = _run(store, request, labels)
-    second = _run(store, request, labels)
+    store, request, _labels, _, _ = _fixture(tmp_path)
+    first = _run(store, request)
+    second = _run(store, request)
     idempotent_copy = request.model_copy(update={"idempotency_key": "caller-retry-key"})
-    third = _run(store, idempotent_copy, labels)
+    third = _run(store, idempotent_copy)
     assert first.report_hash == second.report_hash == third.report_hash
     assert first == second == third
     assert first.common_cohort["duplicate_oof_sample_count"] == 0
     assert first.common_cohort["common_cohort_sample_count"] > 0
+    assert first.common_cohort["planned_session_count"] == 70
+    assert first.common_cohort["valid_label_session_count"] <= first.common_cohort["planned_session_count"]
+    assert first.common_cohort["valid_ic_session_count"] <= first.common_cohort["valid_label_session_count"]
+    assert first.common_cohort["planned_validation_opportunity_count"] > 0
+    assert first.common_cohort["eligible_label_opportunity_count"] > 0
+    assert first.common_cohort["conditional_label_coverage"] <= 1
+    assert first.common_cohort["conditional_model_coverage"] <= 1
+    assert first.common_cohort["end_to_end_common_coverage"] <= 1
     common_samples = {
         candidate: first.pooled_oof_metrics["common_cohort"][candidate]["sample_count"]
         for candidate in ("short_reversal_5", "rsi_5", "ridge_v1", "lightgbm_v1")
@@ -424,6 +454,37 @@ def test_oof_common_cohort_metrics_bootstrap_and_holm_are_bounded_and_determinis
             assert row["confidence_interval"][0] <= row["confidence_interval"][1]
     assert "ALPHA_CONFIRMED" not in str(first.model_dump(mode="json"))
     assert "PRODUCTION_READY" not in str(first.model_dump(mode="json"))
+
+
+def test_pooled_coverage_separates_planned_label_and_model_denominators(tmp_path):
+    _store, request, _, _, _ = _fixture(tmp_path)
+    decision = pd.Timestamp("2024-02-01T21:01:00Z")
+    frame = pd.DataFrame({
+        "decision_at": [decision, decision],
+        "instrument_id": ["S00", "S01"],
+        "label_value": [0.1, -0.2],
+        "short_reversal_5": [0.1, -0.1],
+        "rsi_5": [0.2, -0.2],
+        "ridge_v1": [0.3, -0.3],
+        "lightgbm_v1": [0.4, -0.4],
+    })
+    _, summary, _, _, _ = _pooled_metrics(
+        frame,
+        frame,
+        [decision.to_pydatetime()],
+        {decision: 4},
+        request,
+        "sha256:" + "0" * 64,
+    )
+    assert summary["planned_session_count"] == 1
+    assert summary["valid_label_session_count"] == 1
+    assert summary["valid_ic_session_count"] == 1
+    assert summary["planned_validation_opportunity_count"] == 4
+    assert summary["eligible_label_opportunity_count"] == 2
+    assert summary["conditional_label_coverage"] == pytest.approx(0.5)
+    assert summary["conditional_model_coverage"] == pytest.approx(1.0)
+    assert summary["end_to_end_common_coverage"] == pytest.approx(0.5)
+    assert summary["common_cohort_coverage"] == pytest.approx(0.5)
 
 
 def test_duplicate_oof_sample_identity_fails_instead_of_double_counting():
@@ -473,8 +534,8 @@ def test_bootstrap_seed_and_fixed_family_holm_are_reproducible():
 
 
 def test_time_drift_is_visible_in_late_decay_without_automatic_direction_reversal(tmp_path):
-    store, request, labels, _, _ = _fixture(tmp_path, scenario="drift")
-    report = _run(store, request, labels)
+    store, request, _labels, _, _ = _fixture(tmp_path, scenario="drift")
+    report = _run(store, request)
     reversal = report.stability["candidates"]["short_reversal_5"]
     assert reversal["time_decay"]["early"] is not None
     assert reversal["time_decay"]["late"] is not None
@@ -487,8 +548,8 @@ def test_time_drift_is_visible_in_late_decay_without_automatic_direction_reversa
 
 
 def test_no_signal_scenario_returns_walk_forward_evidence_without_certification(tmp_path):
-    store, request, labels, _, _ = _fixture(tmp_path, scenario="no_signal")
-    report = _run(store, request, labels)
+    store, request, _labels, _, _ = _fixture(tmp_path, scenario="no_signal")
+    report = _run(store, request)
     assert report.research_status in {"WF_EXPLORATORY", "WF_INSUFFICIENT_EVIDENCE"}
     assert len(report.folds) >= 3
     assert report.report_hash.startswith("sha256:")
@@ -525,12 +586,12 @@ def test_preflight_rejects_parent_manifest_beyond_development_end(tmp_path, monk
 
 
 def test_direct_run_admission_rejects_legacy_mode_before_dataset_read(tmp_path, monkeypatch):
-    store, request, labels, _, _ = _fixture(tmp_path)
+    store, request, _labels, _, _ = _fixture(tmp_path)
     invalid = request.model_copy(update={"evaluation_mode": "legacy_inline_test"})
     observed = []
     monkeypatch.setattr(DatasetStore, "load_manifest", lambda self, *args, **kwargs: observed.append(args))
     with pytest.raises(ResearchAdmissionError):
-        _run(store, invalid, labels)
+        _run(store, invalid)
     assert observed == []
 
 
@@ -574,6 +635,49 @@ def test_raw_walk_forward_admission_rejects_unsafe_fields(override, reason):
     assert error.value.code.value == reason
 
 
+def test_direct_run_rejects_external_label_rows(tmp_path):
+    store, request, labels, _, _ = _fixture(tmp_path)
+    with pytest.raises(TypeError):
+        run_development_walk_forward(request, store=store, label_rows=labels)
+
+
+def test_preflight_requires_feature_parent_to_equal_stock_label_dataset(tmp_path, monkeypatch):
+    store, request, _, _, _ = _fixture(tmp_path)
+    from stock_quant.alpha.data import catalog as catalog_module
+
+    reads = []
+    monkeypatch.setattr(catalog_module, "read_partition", lambda *args, **kwargs: reads.append(args))
+    bars = []
+    for index, symbol in enumerate(SYMBOLS):
+        at = START + timedelta(hours=21, minutes=1)
+        bars.append({
+            "instrument_id": symbol,
+            "start_at": at - timedelta(hours=7),
+            "end_at": at - timedelta(minutes=1),
+            "available_at": at,
+            "open": 100 + index, "high": 101 + index, "low": 99 + index, "close": 100 + index,
+            "volume": 1000, "adjustment": "raw", "source": "other-stock",
+            "source_version": "other-v1", "currency": "USD",
+        })
+    other_stock = store.publish_stock(
+        StockDatasetRequest(
+            source="other-stock", symbols=SYMBOLS, start=START, end=DEV_END,
+            price_basis="price_basis_unverified", calendar_version="fixture",
+        ),
+        bars,
+        calendar_version="fixture",
+        source_version="other-v1",
+        data_quality={},
+    )
+    mismatched = request.model_copy(update={
+        "stock_dataset_id": other_stock.dataset_id,
+        "label_spec": request.label_spec.model_copy(update={"stock_dataset_id": other_stock.dataset_id}),
+    })
+    with pytest.raises(AlphaError, match="derived from the requested stock"):
+        _preflight(mismatched, store)
+    assert reads == []
+
+
 def test_walk_forward_job_submission_rejection_is_audited_without_enqueue(tmp_path):
     registry = tmp_path / "quant.db"
     store_root = registry.with_suffix(".alpha")
@@ -602,6 +706,7 @@ def test_walk_forward_job_publishes_paginated_sections_and_no_model_artifact(tmp
         fold_page = jobs.get_result(submission["job_id"], "walk_forward", 2)
         trials = jobs.get_result(submission["job_id"], "trials")
         diagnostics = jobs.get_result(submission["job_id"], "diagnostics", 5)
+        all_folds = jobs.get_result(submission["job_id"], "walk_forward", 100)
         reproducibility = jobs.get_result(submission["job_id"], "reproducibility")
     assert job["status"] == "completed"
     assert summary["research_status"] in {"WF_EXPLORATORY", "WF_INSUFFICIENT_EVIDENCE", "WF_COMPLETED"}
@@ -611,6 +716,11 @@ def test_walk_forward_job_publishes_paginated_sections_and_no_model_artifact(tmp
     assert trials["total_count"] == 4
     assert diagnostics["total_count"] > 0
     assert reproducibility["walk_forward_protocol_hash"].startswith("sha256:")
+    reconstruction = reproducibility["report_reconstruction"]["report_without_folds"]
+    rebuilt = WalkForwardReport.model_validate({**reconstruction, "folds": all_folds["rows"]})
+    assert rebuilt.report_hash == summary["report_hash"]
+    assert reproducibility["label_generation"]["source_dataset_id"] == request.stock_dataset_id
+    assert reproducibility["label_generation"]["external_label_rows_accepted"] is False
     assert not list(registry.with_suffix(".models").glob("*/metadata.json"))
 
 
@@ -640,8 +750,8 @@ def test_queued_legacy_walk_forward_worker_request_is_rejected_before_reads(tmp_
 
 
 def test_fold_models_never_enter_registry_across_direct_runs(tmp_path):
-    store, request, labels, _, _ = _fixture(tmp_path)
-    _run(store, request, labels)
-    _run(store, request, labels)
+    store, request, _labels, _, _ = _fixture(tmp_path)
+    _run(store, request)
+    _run(store, request)
     registry_root = tmp_path / "models"
     assert not registry_root.exists()

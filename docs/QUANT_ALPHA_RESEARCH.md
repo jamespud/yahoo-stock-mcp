@@ -107,7 +107,9 @@ record. No new MCP Tool or result section is created.
 ## Development walk-forward validation
 
 `quant_run_alpha_walk_forward` uses a separate `walk_forward_alpha` Job because it performs repeated
-training, inner tuning, outer refitting and cross-fold aggregation. It reports the fixed candidate set
+training, inner tuning, outer refitting and cross-fold aggregation. The feature panel's single parent
+must equal the requested stock label dataset; Walk-forward labels are generated only from that stock
+dataset and the Python entry does not accept caller-supplied label rows. It reports the fixed candidate set
 on non-overlapping outer-validation windows generated from unique decision sessions. `step_sessions`
 must equal `validation_sessions`; incomplete tails are excluded before any label is scored.
 
@@ -119,15 +121,17 @@ frozen and the model is refit on the eligible outer Train with no `valid_sets`. 
 never select an iteration, hyperparameter, factor direction or alpha.
 
 Primary metrics use pooled non-overlapping OOF samples and the same-date, same-instrument four-candidate
-common cohort. RankIC is computed per decision date and then averaged by date. Coverage keeps null dates
-in its denominator. Four fixed paired hypotheses use moving-block bootstrap confidence intervals and
-Holm adjustment. The report must preserve `multiple_testing_scope =
+common cohort. RankIC is computed per decision date and then averaged by date. Coverage separately reports
+planned, matured-label and conditional model-common denominators so an immature or failed Fold cannot be
+hidden behind a 100% conditional model coverage value. Four fixed paired hypotheses use moving-block
+bootstrap confidence intervals and Holm adjustment. The report must preserve `multiple_testing_scope =
 "CURRENT_PREREGISTERED_FAMILY_ONLY"` and `global_trial_history_complete = false`; it cannot correct all
 prior project trials or establish global statistical significance.
 
 Read `summary`, then every page of `walk_forward`, `diagnostics`, `trials` and `reproducibility`.
-Fold statuses include `FOLD_COMPLETED`, `FOLD_INSUFFICIENT_DATA` and `FOLD_INVALID`. Failed folds remain
-in the report. Report statuses `WF_COMPLETED`, `WF_EXPLORATORY`, `WF_INSUFFICIENT_EVIDENCE` and
+`reproducibility.report_reconstruction.report_without_folds` plus every `walk_forward` row reconstructs
+the exact `WalkForwardReport` and its `report_hash`. Fold statuses include `FOLD_COMPLETED`,
+`FOLD_INSUFFICIENT_DATA` and `FOLD_INVALID`. Failed folds remain in the report. Report statuses `WF_COMPLETED`, `WF_EXPLORATORY`, `WF_INSUFFICIENT_EVIDENCE` and
 `WF_INVALID` never mean `OOS_VALIDATED`, `PRODUCTION_READY` or `TRADING_VALIDATED`.
 
 ## Research admission migration

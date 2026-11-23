@@ -314,6 +314,12 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const walkForwardReproducibility = await call("quant_get_result", {job_id: walkForward.job_id, section: "reproducibility"});
     assert.equal(walkForwardReproducibility.walk_forward_protocol_hash, walkForwardSummary.walk_forward_protocol_hash);
     assert.equal(walkForwardReproducibility.resource_usage.training_samples > 0, true);
+    const walkForwardReconstruction = walkForwardReproducibility.report_reconstruction;
+    assert.equal(walkForwardReconstruction.folds_section, "walk_forward");
+    assert.equal(walkForwardReconstruction.report_without_folds.report_hash, walkForwardSummary.report_hash);
+    assert.ok(!("folds" in walkForwardReconstruction.report_without_folds));
+    assert.equal(walkForwardReproducibility.label_generation.source_dataset_id, baselineDataset.dataset_id);
+    assert.equal(walkForwardReproducibility.label_generation.external_label_rows_accepted, false);
     assert.equal(countModelArtifacts(), modelsBeforeWalkForward);
     const noFoldModels = await client.callTool({name: "quant_get_result", arguments: {
       job_id: walkForward.job_id, section: "model_registry",
