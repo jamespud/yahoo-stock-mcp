@@ -491,11 +491,11 @@ def _numeric_matrix(frame: pd.DataFrame, schema: tuple[str, ...], label: str) ->
     return matrix
 
 
-def _fixed_factor_scores(
-    cohort: DevelopmentCohort,
+def fixed_factor_scores(
+    frame: pd.DataFrame,
     config: BaselineComparisonConfig,
 ) -> dict[str, np.ndarray]:
-    frame = cohort.validation
+    """Return the two preregistered fixed-direction factor scores for a frame."""
     reversal = frame[config.reversal_output].to_numpy(dtype=float, na_value=np.nan)
     rsi = frame[config.rsi_output].to_numpy(dtype=float, na_value=np.nan)
     if np.isinf(reversal).any() or np.isinf(rsi).any():
@@ -506,6 +506,13 @@ def _fixed_factor_scores(
     }
 
 
+def _fixed_factor_scores(
+    cohort: DevelopmentCohort,
+    config: BaselineComparisonConfig,
+) -> dict[str, np.ndarray]:
+    return fixed_factor_scores(cohort.validation, config)
+
+
 def _finite_float_list(values) -> list[float]:
     flattened = np.asarray(values, dtype=float).reshape(-1)
     if not np.isfinite(flattened).all():
@@ -513,13 +520,15 @@ def _finite_float_list(values) -> list[float]:
     return [float(value) for value in flattened]
 
 
-def _ridge_predictions(
-    cohort: DevelopmentCohort,
+def fit_train_only_ridge(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    schema: tuple[str, ...],
     alpha: float,
 ) -> tuple[np.ndarray, np.ndarray, str]:
-    schema = cohort.feature_schema
-    train_x = _numeric_matrix(cohort.train, schema, "Train")
-    validation_x = _numeric_matrix(cohort.validation, schema, "Validation")
+    """Fit fold-local imputer, scaler and Ridge using Train rows only."""
+    train_x = _numeric_matrix(train, schema, "Train")
+    validation_x = _numeric_matrix(validation, schema, "Validation")
     all_missing = [name for name, values in zip(schema, train_x.T, strict=True) if not np.isfinite(values).any()]
     if all_missing:
         raise AlphaError(
@@ -527,7 +536,7 @@ def _ridge_predictions(
             "Ridge requires every feature to have at least one finite Train value",
             {"all_missing_features": all_missing},
         )
-    train_y = cohort.train["label_value"].to_numpy(dtype=float)
+    train_y = train["label_value"].to_numpy(dtype=float)
     pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
@@ -554,6 +563,13 @@ def _ridge_predictions(
         "ridge_n_features_in": int(model.n_features_in_),
     })
     return train_predictions, predictions, fitted_hash
+
+
+def _ridge_predictions(
+    cohort: DevelopmentCohort,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray, str]:
+    return fit_train_only_ridge(cohort.train, cohort.validation, cohort.feature_schema, alpha)
 
 
 def _metrics(y_true: np.ndarray, y_pred: np.ndarray, decisions: list, expected: list) -> dict:

@@ -18,6 +18,7 @@ import {
   trainAlphaModelInput,
   trainAlphaModelInputFields,
   developmentWindows,
+  walkForwardAlphaInput,
 } from "../../dist/quant/alpha-contracts.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -89,6 +90,61 @@ test("Zod contracts are strict and cover the public Alpha inputs", () => {
   }));
   assert.throws(() => baselineComparisonInput.parse({...comparison, model_class: "Ridge"}));
   assert.throws(() => baselineComparisonInput.parse({...comparison, factor_spec: {...factorSpec, outputs: ["reversal_source"]}}));
+});
+
+
+test("Walk-forward contract is strict, development-only and preregistered", () => {
+  const hash = (char) => "sha256:" + char.repeat(64);
+  const factorSpec = {
+    schema_version: "1.0", timeframe: "1d", nodes: [
+      {id: "reversal_source", operator: "pct_change", inputs: ["close"], params: {period: 5}},
+      {id: "rsi_source", operator: "rsi", inputs: ["close"], params: {period: 5}},
+      {id: "linear_signal", operator: "rolling_mean", inputs: ["close"], params: {period: 5}},
+      {id: "shape_signal", operator: "rolling_std", inputs: ["close"], params: {period: 5}},
+    ], outputs: ["reversal_source", "rsi_source", "linear_signal", "shape_signal"],
+  };
+  const input = {
+    evaluation_mode: "validation_only",
+    research_protocol_hash: hash("1"),
+    feature_set_id: hash("2"),
+    stock_dataset_id: hash("3"),
+    label_spec: {
+      label_name: "stock_forward_return", target_type: "stock_return",
+      stock_dataset_id: hash("3"), horizon_days: 5,
+    },
+    development_window: {
+      development_start: "2024-01-01T00:00:00Z", development_end: "2024-06-01T00:00:00Z",
+    },
+    baseline_comparison: {
+      schema_version: "1.0", factor_spec: factorSpec,
+      reversal_output: "reversal_source", rsi_output: "rsi_source", ridge_alpha: 1.0,
+    },
+    lightgbm_hyperparameters: {n_estimators: 20, min_child_samples: 5},
+    random_seed: 3,
+    walk_forward_config: {
+      schema_version: "1.0", mode: "expanding", train_sessions: 30,
+      validation_sessions: 10, inner_validation_sessions: 5, step_sessions: 10,
+      embargo_days: 0, min_folds: 3, max_folds: 12,
+      inference: {
+        bootstrap_method: "moving_block", bootstrap_block_sessions: 5,
+        bootstrap_replicates: 50, confidence_level: 0.95, multiple_testing_method: "holm",
+      },
+    },
+    resource_budget: {max_seconds: 60, max_total_physical_rows: 100000},
+    max_seconds: 60,
+  };
+  const parsed = walkForwardAlphaInput.parse(input);
+  assert.equal(parsed.evaluation_mode, "validation_only");
+  assert.equal(parsed.walk_forward_config.mode, "expanding");
+  assert.throws(() => walkForwardAlphaInput.parse({...input, evaluation_mode: undefined}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, evaluation_mode: "legacy_inline_test"}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, development_window: {...input.development_window, test_start: "2024-06-01T00:00:00Z"}}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, test_feature_set_id: hash("4")}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, freeze_id: hash("5")}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, stock_dataset_id: hash("4")}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, walk_forward_config: {...input.walk_forward_config, step_sessions: 9}}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, walk_forward_config: {...input.walk_forward_config, inner_validation_sessions: 30}}));
+  assert.throws(() => walkForwardAlphaInput.parse({...input, walk_forward_config: {...input.walk_forward_config, inference: {...input.walk_forward_config.inference, bootstrap_replicates: 2001}}}));
 });
 
 test("Validation-only training contract is explicit and rejects Test windows", () => {

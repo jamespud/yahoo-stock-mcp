@@ -5,29 +5,35 @@ a cancelled or expired owner cannot publish even if computation returns later.
 """
 from __future__ import annotations
 
-from datetime import datetime
 import json
-from pathlib import Path
 import sqlite3
 import threading
 import time
-from uuid import uuid4
+from pathlib import Path
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from pydantic import AwareDatetime, Field, TypeAdapter, ValidationError, model_validator
 
-from .artifacts import ArtifactStore, MAX_RESPONSE_ROW_BYTES
+from .artifacts import MAX_RESPONSE_ROW_BYTES, ArtifactStore
 from .compiler import compile_strategy, digest
 from .contracts import StrictModel, Timeframe
 from .data import MarketBar, Snapshot
-from .quality import data_quality, resample_snapshot
-from .registry import Registry
-from .runtime import Evaluator, ExecutionConfig, run_backtest
-from .portfolio import run_portfolio
 from .pagination import result_page
-from .research import OptimizationRequest, ScreenRequest, validate_research, optimize, screen, candidates
+from .portfolio import run_portfolio
 from .provenance import environment
 from .python_plans import PythonPlan, compile_python
+from .quality import data_quality, resample_snapshot
+from .registry import Registry
+from .research import (
+    OptimizationRequest,
+    ScreenRequest,
+    candidates,
+    optimize,
+    screen,
+    validate_research,
+)
+from .runtime import Evaluator, ExecutionConfig, run_backtest
 from .sandbox import PythonArtifact
 from .strategy_runtime import run_python_backtest
 
@@ -315,6 +321,17 @@ class JobStore(Registry):
             )
         return {"recorded": True}
 
+    def audit_walk_forward_rejection(self, source: str, fields: list[str], reason: str | None = None) -> dict:
+        detail = {"source": source, "fields": sorted({field[:128] for field in fields[:20]})}
+        if reason is not None:
+            detail["reason"] = reason
+        with self.connection:
+            self._record_alpha_research_audit(
+                event_type="WALK_FORWARD_SUBMISSION_REJECTED", freeze_id="", job_id="",
+                detail=detail,
+            )
+        return {"recorded": True}
+
     def _audit_research_submission_rejection(self, event_type: str, *, reason: str, message: str,
                                               freeze_id: str = "", model_set_id: str | None = None) -> None:
         detail = {"reason": reason, "message": message}
@@ -337,9 +354,14 @@ class JobStore(Registry):
 
     def submit_alpha(self, raw: dict) -> dict:
         try:
-            from .alpha.jobs.requests import ALPHA_REQUEST_ADAPTER, PredictAlphaJob, TrainAlphaModelJob
             from .alpha.data.catalog import DatasetStore
             from .alpha.errors import AlphaError, AlphaErrorCode
+            from .alpha.jobs.requests import (
+                ALPHA_REQUEST_ADAPTER,
+                PredictAlphaJob,
+                TrainAlphaModelJob,
+                WalkForwardAlphaRequest,
+            )
             from .alpha.models.registry import AlphaModelRegistry
             from .alpha.research_admission import (
                 ResearchAdmissionError,
@@ -347,21 +369,33 @@ class JobStore(Registry):
                 require_public_prediction,
                 require_training_execution,
                 require_training_submission_raw,
+                require_walk_forward_execution,
+                require_walk_forward_submission_raw,
             )
         except ImportError as error:
             raise ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed") from error
-        if isinstance(raw, dict) and raw.get("kind") == "train_alpha_model":
+        kind = raw.get("kind") if isinstance(raw, dict) else None
+        if kind == "train_alpha_model":
             try:
                 require_training_submission_raw(raw)
             except ResearchAdmissionError as error:
                 self.audit_training_rejection("runtime", error.fields, error.code.value)
                 raise ValueError(str(error)) from error
+        if kind == "walk_forward_alpha":
+            try:
+                require_walk_forward_submission_raw(raw)
+            except ResearchAdmissionError as error:
+                self.audit_walk_forward_rejection("runtime", error.fields, error.code.value)
+                raise ValueError(str(error)) from error
         try:
             request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
         except ValidationError as error:
-            if isinstance(raw, dict) and raw.get("kind") == "train_alpha_model":
+            if kind in {"train_alpha_model", "walk_forward_alpha"}:
                 fields = [".".join(map(str, issue["loc"][1:])) or "request"
                           for issue in error.errors(include_input=False)]
+                if kind == "walk_forward_alpha":
+                    self.audit_walk_forward_rejection("runtime", fields)
+                    raise ValueError(f"Invalid Alpha walk-forward fields: {', '.join(fields[:20])}") from error
                 self.audit_training_rejection("runtime", fields)
                 raise ValueError(f"Invalid Alpha training fields: {', '.join(fields[:20])}") from error
             raise
@@ -370,6 +404,12 @@ class JobStore(Registry):
                 require_training_execution(request)
             except ResearchAdmissionError as error:
                 self.audit_training_rejection("runtime", error.fields, error.code.value)
+                raise ValueError(str(error)) from error
+        if isinstance(request, WalkForwardAlphaRequest):
+            try:
+                require_walk_forward_execution(request)
+            except ResearchAdmissionError as error:
+                self.audit_walk_forward_rejection("runtime", error.fields, error.code.value)
                 raise ValueError(str(error)) from error
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
@@ -671,7 +711,7 @@ def execute_job(store: JobStore, claim: dict) -> bool:
         if claim["request"].get("kind") in ALPHA_KINDS:
             try:
                 from .alpha.jobs.executor import execute_alpha_job
-            except ImportError as error:
+            except ImportError:
                 return store.finish(claim, error=ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed"), error_code="DATA_UNAVAILABLE")
             if not store.heartbeat(claim):
                 return False

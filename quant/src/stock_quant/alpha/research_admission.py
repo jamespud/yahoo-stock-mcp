@@ -198,3 +198,117 @@ def authorize_oos(
             "Frozen OOS authorization is invalid",
             {"freeze_id": freeze_id, "reason": str(error)},
         ) from error
+
+
+_WALK_FORWARD_FORBIDDEN_RAW_FIELDS = frozenset({
+    "test_start",
+    "test_end",
+    "test_feature_set_id",
+    "test_label_source_dataset_id",
+    "freeze_id",
+    "oos_grant",
+})
+
+
+def _forbidden_walk_forward_fields(value: Any, path: str = "") -> list[str]:
+    fields: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = f"{path}.{key}" if path else key
+            if key in _WALK_FORWARD_FORBIDDEN_RAW_FIELDS:
+                fields.append(child)
+            fields.extend(_forbidden_walk_forward_fields(item, child))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            fields.extend(_forbidden_walk_forward_fields(item, f"{path}[{index}]"))
+    return sorted(set(fields))
+
+
+def require_walk_forward_submission_raw(raw: Any) -> None:
+    """Reject unsafe Walk-forward submissions before Pydantic normalizes defaults."""
+    if not isinstance(raw, dict):
+        return
+    mode = _training_mode(raw.get("evaluation_mode"))
+    if mode is None or mode not in {"validation_only", "legacy_inline_test"}:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.RESEARCH_MODE_REQUIRED,
+            "Alpha walk-forward requires evaluation_mode=validation_only",
+            ["evaluation_mode"],
+        )
+    if mode == "legacy_inline_test":
+        raise ResearchAdmissionError(
+            AlphaErrorCode.LEGACY_INLINE_TEST_DISABLED,
+            "legacy_inline_test cannot start a Walk-forward job",
+            ["evaluation_mode"],
+        )
+    forbidden = _forbidden_walk_forward_fields(raw)
+    if forbidden:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.TEST_WINDOW_NOT_ALLOWED,
+            "Walk-forward accepts only a development window and cannot carry Test, Freeze or OOS fields",
+            forbidden[:20],
+        )
+    if not raw.get("research_protocol_hash"):
+        raise ResearchAdmissionError(
+            AlphaErrorCode.RESEARCH_PROTOCOL_REQUIRED,
+            "Walk-forward requires research_protocol_hash",
+            ["research_protocol_hash"],
+        )
+    label_spec = raw.get("label_spec") if isinstance(raw.get("label_spec"), dict) else {}
+    if not raw.get("stock_dataset_id") and not label_spec.get("stock_dataset_id"):
+        raise ResearchAdmissionError(
+            AlphaErrorCode.STOCK_LABEL_DATASET_REQUIRED,
+            "Walk-forward requires a stock label dataset",
+            ["stock_dataset_id"],
+        )
+
+
+def require_walk_forward_execution(request: Any) -> None:
+    """Authorize a validated Walk-forward request before any dataset read."""
+    mode = _training_mode(getattr(request, "evaluation_mode", None))
+    if mode is None or mode not in {"validation_only", "legacy_inline_test"}:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.RESEARCH_MODE_REQUIRED,
+            "Alpha walk-forward requires evaluation_mode=validation_only",
+            ["evaluation_mode"],
+        )
+    if mode == "legacy_inline_test":
+        raise ResearchAdmissionError(
+            AlphaErrorCode.LEGACY_INLINE_TEST_DISABLED,
+            "legacy_inline_test cannot execute a Walk-forward job",
+            ["evaluation_mode"],
+        )
+    forbidden = [
+        field for field in _WALK_FORWARD_FORBIDDEN_RAW_FIELDS
+        if hasattr(request, field)
+    ]
+    development = getattr(request, "development_window", None)
+    if development is None or any(hasattr(development, field) for field in _WALK_FORWARD_FORBIDDEN_RAW_FIELDS):
+        forbidden.append("development_window")
+    if forbidden:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.TEST_WINDOW_NOT_ALLOWED,
+            "Walk-forward request contains a forbidden Test, Freeze or OOS field",
+            sorted(set(forbidden)),
+        )
+    if not getattr(request, "research_protocol_hash", None):
+        raise ResearchAdmissionError(
+            AlphaErrorCode.RESEARCH_PROTOCOL_REQUIRED,
+            "Walk-forward requires research_protocol_hash",
+            ["research_protocol_hash"],
+        )
+    label_spec = getattr(request, "label_spec", None)
+    stock_dataset_id = getattr(request, "stock_dataset_id", None)
+    label_stock_id = getattr(label_spec, "stock_dataset_id", None)
+    if not stock_dataset_id or not label_stock_id:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.STOCK_LABEL_DATASET_REQUIRED,
+            "Walk-forward requires a stock label dataset",
+            ["stock_dataset_id"],
+        )
+    if stock_dataset_id != label_stock_id:
+        raise ResearchAdmissionError(
+            AlphaErrorCode.DATASET_MISMATCH,
+            "Walk-forward stock_dataset_id and label_spec.stock_dataset_id must match",
+            ["stock_dataset_id", "label_spec.stock_dataset_id"],
+        )

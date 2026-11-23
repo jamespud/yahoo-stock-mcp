@@ -1,27 +1,30 @@
 """Trusted Alpha job executor using the shared durable lease/fencing protocol."""
 from __future__ import annotations
 
-import os
 import hashlib
 import json
+import os
+import time
 from datetime import timedelta
 from pathlib import Path
-import time
 
 from pydantic import ValidationError
 
-from ...calendar import CALENDAR_PROVIDER_VERSION, generate_long_calendar
-from ...compiler import digest
-from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
 from ...artifacts import MAX_RESPONSE_ROW_BYTES
+from ...compiler import digest
 from ...pagination import fits_response, fits_response_row
+from ..contracts import DatasetManifest, OptionDatasetRequest, StockDatasetRequest
 from ..data.catalog import DatasetStore, dataset_summary
 from ..data.corporate_actions import CorporateActionDataset
-from ..data.price_attestation import PriceAttestation
 from ..data.option_dataset import OptionSnapshotBatch, prepare_option_dataset
-from ..data.thetadata_adapter import ThetaDataHttpClient, ThetaDataV3Provider, ThetaDataV3ResponseError
-from ..data.stock_dataset import StockHistoryBatch, prepare_stock_dataset
+from ..data.price_attestation import PriceAttestation
 from ..data.session_coverage import mapped_stock_calendar
+from ..data.stock_dataset import prepare_stock_dataset
+from ..data.thetadata_adapter import (
+    ThetaDataHttpClient,
+    ThetaDataV3Provider,
+    ThetaDataV3ResponseError,
+)
 from ..data.yahoo_option_import import YahooOptionChainImport
 from ..data.yahoo_stock_adapter import YahooStockAdapter
 from ..errors import AlphaError, AlphaErrorCode
@@ -32,18 +35,46 @@ from ..factors.option_factors import compute_option_factors
 from ..models.baseline_comparison import preflight_baseline_comparison
 from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
-from ..models.labels import LabelRow, stock_forward_labels
+from ..models.labels import stock_forward_labels
+from ..models.lightgbm_trainer import (
+    AlphaModelRegistry,
+    TrainAlphaRequest,
+    _train_alpha_outcome,
+)
 from ..models.oos_evaluation import evaluate_alpha_oos
-from ..models.research_freeze import FreezeRequest, FrozenResearchStore, freeze_alpha_selection
-from ..models.lightgbm_trainer import AlphaModelRegistry, TrainAlphaRequest, _train_alpha_outcome
+from ..models.research_freeze import (
+    FreezeRequest,
+    FrozenResearchStore,
+    freeze_alpha_selection,
+)
+from ..models.walk_forward import (
+    WalkForwardAlphaRequest,
+    run_development_walk_forward,
+    walk_forward_result_sections,
+)
 from ..options.pricing import OptionPricingConfig
-from ..research_admission import authorize_oos, require_training_execution, require_training_submission_raw
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
+from ..research_admission import (
+    authorize_oos,
+    require_training_execution,
+    require_training_submission_raw,
+    require_walk_forward_execution,
+    require_walk_forward_submission_raw,
+)
 from .requests import (
-    ALPHA_REQUEST_ADAPTER, BacktestAlphaPortfolioJob, BacktestOptionsJob, CaptureOptionChainJob,
-    ComputeFactorsJob, ComputeOptionFactorsJob, EvaluateAlphaOOSJob, FreezeAlphaSelectionJob,
-    PrepareOptionsDatasetJob, PrepareStockDatasetJob, PredictAlphaJob, TrainAlphaModelJob,
+    ALPHA_REQUEST_ADAPTER,
+    BacktestAlphaPortfolioJob,
+    BacktestOptionsJob,
+    CaptureOptionChainJob,
+    ComputeFactorsJob,
+    ComputeOptionFactorsJob,
+    EvaluateAlphaOOSJob,
+    FreezeAlphaSelectionJob,
+    PredictAlphaJob,
+    PrepareOptionsDatasetJob,
+    PrepareStockDatasetJob,
+    TrainAlphaModelJob,
 )
 
 
@@ -97,11 +128,15 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         raw_request = claim["request"]
         if isinstance(raw_request, dict) and raw_request.get("kind") == "train_alpha_model":
             require_training_submission_raw(raw_request)
+        if isinstance(raw_request, dict) and raw_request.get("kind") == "walk_forward_alpha":
+            require_walk_forward_submission_raw(raw_request)
         request = ALPHA_REQUEST_ADAPTER.validate_python(raw_request)
         if digest(request.model_dump(mode="json")) != claim["config_hash"]:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Job configuration integrity check failed")
         if isinstance(request, TrainAlphaModelJob):
             require_training_execution(request)
+        if isinstance(request, WalkForwardAlphaRequest):
+            require_walk_forward_execution(request)
         root = Path(store.path).with_suffix(".alpha")
         datasets = DatasetStore(root, defer_registration=True)
         final_registry = AlphaModelRegistry(Path(store.path).with_suffix(".models"))
@@ -237,6 +272,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "training_metrics": [metrics], "model_registry": [model.model_dump(mode="json")],
                       "diagnostics": [model_diagnostics],
                       "reproducibility": reproducibility}
+        elif isinstance(request, WalkForwardAlphaRequest):
+            report = run_development_walk_forward(
+                request,
+                store=datasets,
+                checkpoint=bounded,
+            )
+            result = walk_forward_result_sections(report)
         elif isinstance(request, FreezeAlphaSelectionJob):
             freeze_store = FrozenResearchStore(Path(store.path).with_suffix(".freezes"))
             freeze_request = FreezeRequest(
