@@ -99,8 +99,9 @@ with the fixed iteration and no outer `valid_sets`. Ridge refits imputation, sca
 inside every fold. Directions, hyperparameters and statistical settings do not follow outer performance.
 
 Pooled OOF metrics must be unique by `(decision_at, instrument_id, candidate)` and use the same-date,
-same-instrument four-candidate common cohort. Report planned, matured-label and conditional model coverage
-separately; do not present conditional model coverage as complete validation coverage. RankIC is averaged over dates, null dates remain in coverage,
+same-instrument four-candidate common cohort. Report planned, pre-fit matured-label, successfully scored
+and conditional model coverage separately; a model failure must lower execution coverage without lowering
+the pre-fit label coverage. Do not present conditional model coverage as complete validation coverage. RankIC is averaged over dates, null dates remain in coverage,
 and paired differences use identical samples. Moving-block bootstrap must preserve the four-model row
 structure and use a centered null p-value. Holm has a fixed family of four; unestimable hypotheses remain
 in that family. `multiple_testing_scope="CURRENT_PREREGISTERED_FAMILY_ONLY"` and

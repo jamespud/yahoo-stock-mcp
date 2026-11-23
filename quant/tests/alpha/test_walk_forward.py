@@ -429,8 +429,10 @@ def test_oof_common_cohort_metrics_bootstrap_and_holm_are_bounded_and_determinis
     assert first.common_cohort["planned_session_count"] == 70
     assert first.common_cohort["valid_label_session_count"] <= first.common_cohort["planned_session_count"]
     assert first.common_cohort["valid_ic_session_count"] <= first.common_cohort["valid_label_session_count"]
-    assert first.common_cohort["planned_validation_opportunity_count"] > 0
-    assert first.common_cohort["eligible_label_opportunity_count"] > 0
+    assert first.common_cohort["planned_feature_opportunities"] > 0
+    assert first.common_cohort["eligible_matured_label_opportunities"] > 0
+    assert first.common_cohort["successfully_scored_opportunities"] > 0
+    assert first.common_cohort["common_cohort_opportunities"] > 0
     assert first.common_cohort["conditional_label_coverage"] <= 1
     assert first.common_cohort["conditional_model_coverage"] <= 1
     assert first.common_cohort["end_to_end_common_coverage"] <= 1
@@ -473,18 +475,60 @@ def test_pooled_coverage_separates_planned_label_and_model_denominators(tmp_path
         frame,
         [decision.to_pydatetime()],
         {decision: 4},
+        {decision: 4},
         request,
         "sha256:" + "0" * 64,
     )
     assert summary["planned_session_count"] == 1
     assert summary["valid_label_session_count"] == 1
     assert summary["valid_ic_session_count"] == 1
-    assert summary["planned_validation_opportunity_count"] == 4
-    assert summary["eligible_label_opportunity_count"] == 2
-    assert summary["conditional_label_coverage"] == pytest.approx(0.5)
-    assert summary["conditional_model_coverage"] == pytest.approx(1.0)
+    assert summary["planned_feature_opportunities"] == 4
+    assert summary["eligible_matured_label_opportunities"] == 4
+    assert summary["successfully_scored_opportunities"] == 2
+    assert summary["common_cohort_opportunities"] == 2
+    assert summary["conditional_label_coverage"] == pytest.approx(1.0)
+    assert summary["conditional_model_coverage"] == pytest.approx(0.5)
     assert summary["end_to_end_common_coverage"] == pytest.approx(0.5)
     assert summary["common_cohort_coverage"] == pytest.approx(0.5)
+
+
+def test_fold_model_failure_reduces_execution_not_label_coverage(tmp_path, monkeypatch):
+    import stock_quant.alpha.models.walk_forward as module
+
+    store, request, _, _, _ = _fixture(tmp_path)
+    baseline = _run(store, request)
+    original = module._fit_nested_lightgbm
+    calls = {"count": 0}
+
+    def fail_first_fold(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise AlphaError(AlphaErrorCode.INSUFFICIENT_HISTORY, "synthetic fold fit failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_fit_nested_lightgbm", fail_first_fold)
+    failed = _run(store, request)
+    assert failed.folds[0].fold_status == "FOLD_INSUFFICIENT_DATA"
+    assert (
+        failed.common_cohort["eligible_matured_label_opportunities"]
+        == baseline.common_cohort["eligible_matured_label_opportunities"]
+    )
+    assert (
+        failed.common_cohort["successfully_scored_opportunities"]
+        < baseline.common_cohort["successfully_scored_opportunities"]
+    )
+    assert (
+        failed.common_cohort["conditional_label_coverage"]
+        == baseline.common_cohort["conditional_label_coverage"]
+    )
+    assert (
+        failed.common_cohort["conditional_model_coverage"]
+        < baseline.common_cohort["conditional_model_coverage"]
+    )
+    assert (
+        failed.common_cohort["end_to_end_common_coverage"]
+        < baseline.common_cohort["end_to_end_common_coverage"]
+    )
 
 
 def test_duplicate_oof_sample_identity_fails_instead_of_double_counting():

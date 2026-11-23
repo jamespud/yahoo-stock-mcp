@@ -982,6 +982,22 @@ def _fold_failure(
     return record, [diagnostic], pd.DataFrame(), pd.DataFrame(), []
 
 
+def _fold_validation_frames(
+    features: pd.DataFrame,
+    labels: pd.DataFrame,
+    planned: PlannedFold,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    feature_validation = _subset(features, planned.outer_validation_start, planned.outer_validation_end)
+    label_validation = _subset(labels, planned.outer_validation_start, planned.outer_validation_end)
+    eligible_validation = _join_window(
+        feature_validation,
+        label_validation,
+        label_available_before=planned.outer_validation_end,
+        exit_before=planned.outer_validation_end,
+    )
+    return feature_validation, label_validation, eligible_validation
+
+
 def _execute_fold(
     planned: PlannedFold,
     *,
@@ -1014,13 +1030,8 @@ def _execute_fold(
         & (inner_fit["label_available_at"] < pd.Timestamp(planned.inner_tuning_start))
     ].copy()
     inner_tuning = _subset(eligible_train, planned.inner_tuning_start, planned.inner_tuning_end)
-    feature_validation = _subset(features, planned.outer_validation_start, planned.outer_validation_end)
-    label_validation = _subset(labels, planned.outer_validation_start, planned.outer_validation_end)
-    eligible_validation = _join_window(
-        feature_validation,
-        label_validation,
-        label_available_before=planned.outer_validation_end,
-        exit_before=planned.outer_validation_end,
+    feature_validation, _label_validation, eligible_validation = _fold_validation_frames(
+        features, labels, planned,
     )
     validation_counts = _validation_diagnostics(
         features,
@@ -1290,6 +1301,7 @@ def _pooled_metrics(
     common: pd.DataFrame,
     expected_decisions: list[datetime],
     planned_opportunity_counts: dict[pd.Timestamp, int],
+    matured_opportunity_counts: dict[pd.Timestamp, int],
     request: WalkForwardAlphaRequest,
     protocol_hash: str,
 ) -> tuple[dict, dict, list[dict], dict, list[dict]]:
@@ -1355,27 +1367,33 @@ def _pooled_metrics(
         pair_uncertainty[key] = _bootstrap_series(
             values, config=inference, seed=seed, with_pvalue=True, sample_indices=sample_indices,
         )
-    eligible_label_opportunities = len(independent) if not independent.empty else 0
     planned_feature_opportunities = sum(int(value) for value in planned_opportunity_counts.values())
-    independent_counts = independent.groupby("decision_at").size().to_dict() if not independent.empty else {}
+    eligible_matured_label_opportunities = sum(int(value) for value in matured_opportunity_counts.values())
+    successfully_scored_opportunities = len(independent) if not independent.empty else 0
+    common_cohort_opportunities = len(common) if not common.empty else 0
+    matured_counts = {pd.Timestamp(key): int(value) for key, value in matured_opportunity_counts.items()}
+    scored_counts = independent.groupby("decision_at").size().to_dict() if not independent.empty else {}
     common_counts = common.groupby("decision_at").size().to_dict() if not common.empty else {}
     common_coverage = []
     for decision in expected_decisions:
         timestamp = pd.Timestamp(decision)
         planned = int(planned_opportunity_counts.get(timestamp, 0))
-        eligible = int(independent_counts.get(timestamp, 0))
+        matured = int(matured_counts.get(timestamp, 0))
+        scored = int(scored_counts.get(timestamp, 0))
         accepted = int(common_counts.get(timestamp, 0))
         common_coverage.append({
             "decision_at": timestamp.isoformat(),
             "planned_feature_count": planned,
-            "eligible_label_count": eligible,
+            "matured_label_count": matured,
+            "successfully_scored_count": scored,
             "common_cohort_count": accepted,
-            "conditional_label_coverage": eligible / planned if planned else 0.0,
-            "conditional_model_coverage": accepted / eligible if eligible else 0.0,
+            "eligible_label_count": matured,
+            "conditional_label_coverage": matured / planned if planned else 0.0,
+            "conditional_model_coverage": scored / matured if matured else 0.0,
             "end_to_end_common_coverage": accepted / planned if planned else 0.0,
         })
     valid_label_sessions = sum(
-        int(independent_counts.get(pd.Timestamp(decision), 0)) > 0 for decision in expected_decisions
+        int(matured_counts.get(pd.Timestamp(decision), 0)) > 0 for decision in expected_decisions
     )
     common_summary = {
         "sample_identity": "(decision_at, instrument_id)",
@@ -1385,20 +1403,27 @@ def _pooled_metrics(
         "valid_label_session_count": valid_label_sessions,
         "valid_ic_session_count": len(all_candidate_valid_ic_dates),
         "planned_validation_opportunity_count": planned_feature_opportunities,
-        "eligible_label_opportunity_count": eligible_label_opportunities,
-        "common_cohort_sample_count": len(common),
+        "planned_feature_opportunities": planned_feature_opportunities,
+        "eligible_matured_label_opportunities": eligible_matured_label_opportunities,
+        "successfully_scored_opportunities": successfully_scored_opportunities,
+        "common_cohort_opportunities": common_cohort_opportunities,
+        "eligible_label_opportunity_count": eligible_matured_label_opportunities,
+        "common_cohort_sample_count": common_cohort_opportunities,
         "conditional_label_coverage": (
-            eligible_label_opportunities / planned_feature_opportunities
+            eligible_matured_label_opportunities / planned_feature_opportunities
             if planned_feature_opportunities else 0.0
         ),
         "conditional_model_coverage": (
-            len(common) / eligible_label_opportunities if eligible_label_opportunities else 0.0
+            successfully_scored_opportunities / eligible_matured_label_opportunities
+            if eligible_matured_label_opportunities else 0.0
         ),
         "end_to_end_common_coverage": (
-            len(common) / planned_feature_opportunities if planned_feature_opportunities else 0.0
+            common_cohort_opportunities / planned_feature_opportunities
+            if planned_feature_opportunities else 0.0
         ),
         "common_cohort_coverage": (
-            len(common) / planned_feature_opportunities if planned_feature_opportunities else 0.0
+            common_cohort_opportunities / planned_feature_opportunities
+            if planned_feature_opportunities else 0.0
         ),
         "coverage_by_decision": common_coverage[:MAX_DECISION_DIAGNOSTICS],
         "omitted_coverage_decisions": max(0, len(common_coverage) - MAX_DECISION_DIAGNOSTICS),
@@ -1701,10 +1726,14 @@ def run_development_walk_forward(
     folds: list[FoldRecord] = []
     expected_decisions = _planned_validation_decisions(plan)
     planned_opportunity_counts: dict[pd.Timestamp, int] = {}
+    matured_opportunity_counts: dict[pd.Timestamp, int] = {}
     for planned in plan.folds:
         window = _subset(features, planned.outer_validation_start, planned.outer_validation_end)
         for decision, count in window.groupby("decision_at").size().items():
             planned_opportunity_counts[pd.Timestamp(decision)] = int(count)
+        _, _, matured_validation = _fold_validation_frames(features, labels, planned)
+        for decision, count in matured_validation.groupby("decision_at").size().items():
+            matured_opportunity_counts[pd.Timestamp(decision)] = int(count)
     for index, planned in enumerate(plan.folds):
         try:
             record, fold_diagnostics, candidate_frame, common_frame, _ = _execute_fold(
@@ -1741,6 +1770,7 @@ def run_development_walk_forward(
         common,
         expected_decisions,
         planned_opportunity_counts,
+        matured_opportunity_counts,
         request,
         plan.walk_forward_protocol_hash,
     )

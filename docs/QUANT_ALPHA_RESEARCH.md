@@ -122,8 +122,9 @@ never select an iteration, hyperparameter, factor direction or alpha.
 
 Primary metrics use pooled non-overlapping OOF samples and the same-date, same-instrument four-candidate
 common cohort. RankIC is computed per decision date and then averaged by date. Coverage separately reports
-planned, matured-label and conditional model-common denominators so an immature or failed Fold cannot be
-hidden behind a 100% conditional model coverage value. Four fixed paired hypotheses use moving-block
+planned, pre-fit matured-label, successfully scored and conditional model-common denominators. Matured
+labels are counted before fitting, so a failed Fold lowers execution coverage without lowering label
+coverage and cannot be hidden behind a 100% conditional model coverage value. Four fixed paired hypotheses use moving-block
 bootstrap confidence intervals and Holm adjustment. The report must preserve `multiple_testing_scope =
 "CURRENT_PREREGISTERED_FAMILY_ONLY"` and `global_trial_history_complete = false`; it cannot correct all
 prior project trials or establish global statistical significance.

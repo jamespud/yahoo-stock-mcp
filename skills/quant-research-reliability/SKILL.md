@@ -47,7 +47,8 @@ first. All references required to install this skill independently live inside t
    samples. For `walk_forward_alpha`, page `walk_forward`, `diagnostics`, `trials` and `reproducibility`;
    verify the feature parent equals the stock label dataset, labels were generated from that dataset,
    outer folds do not overlap, event-time cutoffs are strict, early stopping is inner-only, Ridge preprocessing
-   is fold-local and OOF sample identities are unique. Reconstruct the full report from `walk_forward` plus
+   is fold-local and OOF sample identities are unique. Verify matured-label opportunities were counted
+   before fitting so model failures affect execution coverage, not the label denominator. Reconstruct the full report from `walk_forward` plus
    `reproducibility.report_reconstruction` before accepting the reported Hash.
 4. Audit data availability versus decisions/fills, warmup, explicit alignment, revisions, raw versus
    adjusted prices, corporate actions, historical universe and delisted-asset coverage. A local

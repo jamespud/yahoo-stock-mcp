@@ -240,10 +240,12 @@ same `(decision_at, instrument_id)`. RankIC is Spearman correlation within each 
 date. Pooled mean IC weights every valid date equally; it is not a sample-count-weighted
 or unconditional fold-mean average.
 
-Coverage distinguishes the planned validation denominator, matured-label denominator and
-conditional model-common denominator. The report includes planned/valid-label/valid-IC
-session counts, planned/eligible/common opportunity counts, conditional label coverage,
-conditional model coverage and end-to-end common coverage. Common Cohort coverage does not
+Coverage distinguishes the planned validation denominator, the pre-fit matured-label
+denominator, successfully scored OOF opportunities, and the all-candidate common cohort.
+Matured labels are counted before model fitting, so a later Fold model failure reduces model
+execution coverage without lowering label coverage. The report includes planned/valid-label/
+valid-IC session counts, planned/matured/scored/common opportunity counts, conditional label
+coverage, conditional model coverage and end-to-end common coverage. Common Cohort coverage does not
 stand in for all planned sessions when labels are immature or a Fold fails.
 
 Per-candidate independent coverage and per-fold common coverage are also returned.

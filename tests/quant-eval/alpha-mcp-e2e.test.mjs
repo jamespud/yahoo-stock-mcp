@@ -300,6 +300,10 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     assert.match(walkForwardSummary.report_hash, /^sha256:[0-9a-f]{64}$/);
     assert.ok(walkForwardSummary.fold_count >= 3);
     assert.equal(walkForwardSummary.multiple_testing.family_size, 4);
+    const walkForwardCoverage = walkForwardSummary.common_cohort;
+    assert.ok(walkForwardCoverage.planned_feature_opportunities >= walkForwardCoverage.eligible_matured_label_opportunities);
+    assert.ok(walkForwardCoverage.eligible_matured_label_opportunities >= walkForwardCoverage.successfully_scored_opportunities);
+    assert.ok(walkForwardCoverage.successfully_scored_opportunities >= walkForwardCoverage.common_cohort_opportunities);
     assert.equal(walkForwardSummary.multiple_testing.multiple_testing_scope, "CURRENT_PREREGISTERED_FAMILY_ONLY");
     assert.equal(walkForwardSummary.multiple_testing.global_trial_history_complete, false);
     const walkForwardFolds = await call("quant_get_result", {job_id: walkForward.job_id, section: "walk_forward", limit: 2});
