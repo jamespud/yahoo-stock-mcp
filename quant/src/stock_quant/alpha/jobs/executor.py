@@ -135,8 +135,20 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Job configuration integrity check failed")
         if isinstance(request, TrainAlphaModelJob):
             require_training_execution(request)
+            store.research_registry.verify_managed_execution(raw_request, job_id=claim["id"])
         if isinstance(request, WalkForwardAlphaRequest):
             require_walk_forward_execution(request)
+            store.research_registry.verify_managed_execution(raw_request, job_id=claim["id"])
+        if isinstance(request, FreezeAlphaSelectionJob):
+            registered_protocol = store.research_registry.connection.execute(
+                "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?", (request.research_protocol_hash,),
+            ).fetchone()
+            if registered_protocol is not None:
+                store.research_registry.verify_managed_freeze(
+                    protocol_hash=request.research_protocol_hash,
+                    candidate_ledger_hash=request.candidate_ledger_hash,
+                    selected_model_id=request.selected_model_ids[0],
+                )
         root = Path(store.path).with_suffix(".alpha")
         datasets = DatasetStore(root, defer_registration=True)
         final_registry = AlphaModelRegistry(Path(store.path).with_suffix(".models"))
@@ -357,6 +369,18 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "cash_ledger": run.cash_ledger, "risk_events": run.risk_events, "diagnostics": run.diagnostics}
         else:
             raise AlphaError(AlphaErrorCode.UNSUPPORTED_EXECUTION_MODEL, "Unsupported alpha job")
+        if isinstance(request, (TrainAlphaModelJob, WalkForwardAlphaRequest)):
+            store.research_registry.verify_managed_execution(raw_request, job_id=claim["id"])
+        if isinstance(request, FreezeAlphaSelectionJob):
+            registered_protocol = store.research_registry.connection.execute(
+                "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?", (request.research_protocol_hash,),
+            ).fetchone()
+            if registered_protocol is not None:
+                store.research_registry.verify_managed_freeze(
+                    protocol_hash=request.research_protocol_hash,
+                    candidate_ledger_hash=request.candidate_ledger_hash,
+                    selected_model_id=request.selected_model_ids[0],
+                )
         if not store.begin_publish(claim, result):
             return False
         staged_freeze_path = None
@@ -364,6 +388,16 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             def publish_checkpoint():
                 if not store.heartbeat(claim, .99):
                     raise RuntimeError("OWNERSHIP_LOST during publication")
+            if isinstance(request, FreezeAlphaSelectionJob):
+                registered_protocol = store.research_registry.connection.execute(
+                    "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?", (request.research_protocol_hash,),
+                ).fetchone()
+                if registered_protocol is not None:
+                    store.research_registry.verify_managed_freeze(
+                        protocol_hash=request.research_protocol_hash,
+                        candidate_ledger_hash=request.candidate_ledger_hash,
+                        selected_model_id=request.selected_model_ids[0],
+                    )
             for manifest in pending:
                 datasets.register(manifest, checkpoint=publish_checkpoint, job_path=Path(store.path))
             if staged_model is not None:
@@ -372,7 +406,11 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 freeze_store, freeze_record = staged_freeze
                 staged_freeze_path = freeze_store.stage(freeze_record, checkpoint=publish_checkpoint)
             completed = store.complete_publish(claim, dataset_ids=[manifest.dataset_id for manifest in pending])
-        except Exception as error:
+        except AlphaError as error:
+            if staged_freeze_path is not None and staged_freeze_path.exists():
+                staged_freeze_path.unlink()
+            return store.fail_publish(claim, error, error.code.value)
+        except Exception as error:  # noqa: BLE001 - any publication failure must fence the Job
             if staged_freeze_path is not None and staged_freeze_path.exists():
                 staged_freeze_path.unlink()
             return store.fail_publish(claim, error, "EXECUTION_FAILED")
@@ -384,8 +422,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             freeze_store, freeze_record = staged_freeze
             try:
                 freeze_store.finalize(freeze_record, staged_freeze_path)
-            except Exception:
-                # The completed job result is authoritative; OOS materializes from it if needed.
+            except Exception:  # noqa: BLE001, S110 - completed Job result is authoritative
+                # OOS materializes from it if needed.
                 pass
         return True
     except AlphaError as error:
@@ -402,5 +440,5 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
     except KeyError as error:
         wrapped = AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, str(error))
         return store.fail_publish(claim, wrapped, wrapped.code.value)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - executor must record every terminal failure
         return store.fail_publish(claim, error)

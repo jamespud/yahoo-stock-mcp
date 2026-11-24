@@ -510,6 +510,17 @@ class JobStore(Registry):
                     self.connection.commit()
                     job = self.get_job(existing_oos[0])
                     return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
+            if isinstance(request, FreezeAlphaSelectionJob):
+                registered_protocol = self.connection.execute(
+                    "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?",
+                    (request.research_protocol_hash,),
+                ).fetchone()
+                if registered_protocol is not None:
+                    self.research_registry.verify_managed_freeze(
+                        protocol_hash=request.research_protocol_hash,
+                        candidate_ledger_hash=request.candidate_ledger_hash,
+                        selected_model_id=request.selected_model_ids[0],
+                    )
             count = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]
             if count >= 32:
                 raise ValueError("RESOURCE_LIMIT_EXCEEDED: job queue is full")
@@ -528,12 +539,17 @@ class JobStore(Registry):
             self.connection.commit()
         except BaseException as error:
             self.connection.rollback()
-            if kind in {"train_alpha_model", "walk_forward_alpha"}:
-                from .alpha.errors import AlphaError
-                if isinstance(error, AlphaError):
+            from .alpha.errors import AlphaError
+            if isinstance(error, AlphaError):
+                if kind in {"train_alpha_model", "walk_forward_alpha"}:
                     self.research_registry.record_rejection(
                         payload, reason_code=error.code.value,
                         detail={"message": error.message, "context": error.context},
+                    )
+                if kind == "freeze_alpha_selection":
+                    self._audit_research_submission_rejection(
+                        "MANAGED_FREEZE_REJECTED", reason=error.code.value,
+                        message=error.message, freeze_id=payload["candidate_ledger_hash"],
                     )
             raise
         job = self.get_job(job_id)
@@ -564,10 +580,35 @@ class JobStore(Registry):
                 )
             self.connection.execute("UPDATE jobs SET status='failed',error_code='WORKER_LOST',finished_at=unixepoch() WHERE status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts>=3")
             active = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('running','publishing') AND lease_until>unixepoch()").fetchone()[0]
-            row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash,attempts,status FROM jobs WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
-            if row is None:
+            if active >= 4:
                 self.connection.commit()
                 return None
+            while True:
+                row = self.connection.execute(
+                    "SELECT id,request,config_hash,attempts,status FROM jobs "
+                    "WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) "
+                    "ORDER BY created_at,id LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    self.connection.commit()
+                    return None
+                available, budget_context = self.research_registry.attempt_budget_available(row[0])
+                if available:
+                    break
+                if row[4] in {"running", "publishing"}:
+                    self.research_registry.record_lifecycle(
+                        job_id=row[0], event_type="TRIAL_WORKER_LOST", attempt=row[3],
+                        reason_code="LEASE_EXPIRED", detail={"retry_available": False},
+                    )
+                self.research_registry.record_lifecycle(
+                    job_id=row[0], event_type="TRIAL_FAILED", attempt=row[3],
+                    reason_code="RESEARCH_TRIAL_BUDGET_EXCEEDED", detail=budget_context,
+                )
+                self.connection.execute(
+                    "UPDATE jobs SET status='failed',error_code='RESEARCH_TRIAL_BUDGET_EXCEEDED',"
+                    "error_message=?,finished_at=unixepoch(),lease_until=NULL WHERE id=?",
+                    ("Execution attempt budget exhausted before claim", row[0]),
+                )
             owner = uuid4().hex
             previous_attempts, previous_status = row[3], row[4]
             self.connection.execute("UPDATE jobs SET status='running',owner=?,lease_until=unixepoch()+15,attempts=attempts+1,started_at=coalesce(started_at,unixepoch()),progress=0 WHERE id=?", (owner, row[0]))
@@ -645,6 +686,20 @@ class JobStore(Registry):
 
     def complete_publish(self, claim: dict, *, dataset_ids=()) -> bool:
         with self.connection:
+            request_payload = claim["request"]
+            if request_payload.get("kind") in {"train_alpha_model", "walk_forward_alpha"}:
+                self.research_registry.verify_managed_execution(request_payload, job_id=claim["id"])
+            if request_payload.get("kind") == "freeze_alpha_selection":
+                managed = self.connection.execute(
+                    "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?",
+                    (request_payload["research_protocol_hash"],),
+                ).fetchone()
+                if managed is not None:
+                    self.research_registry.verify_managed_freeze(
+                        protocol_hash=request_payload["research_protocol_hash"],
+                        candidate_ledger_hash=request_payload["candidate_ledger_hash"],
+                        selected_model_id=request_payload["selected_model_ids"][0],
+                    )
             changed = self.connection.execute(
                 "UPDATE jobs SET status='completed',progress=1.,finished_at=unixepoch(),lease_until=NULL WHERE id=? AND owner=? AND status='publishing' AND lease_until>unixepoch()",
                 (claim["id"], claim["owner"]),

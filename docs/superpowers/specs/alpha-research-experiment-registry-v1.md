@@ -272,3 +272,70 @@ metadata and are marked `HISTORICAL_IMPORT_UNVERIFIED`; missing history remains 
 Deflated Sharpe Ratio, PBO, White Reality Check, Hansen SPA, sequential alpha spending and online FDR
 are not implemented. They require trustworthy trial and selection inputs, which this release establishes
 first.
+
+## First-review hardening
+
+### Managed Freeze TOCTOU
+
+A managed Freeze is verified at three boundaries:
+
+1. `JobStore.submit_alpha()` before a Job is created.
+2. the trusted Worker entry point before Dataset reads.
+3. the final `complete_publish()` CAS transaction.
+
+The final check executes in the same SQLite write transaction as Job completion. A stale Snapshot
+cannot become a completed Freeze even if a new Trial is registered after an earlier check.
+`authorize_oos()` repeats the managed freshness and Selection checks before `validate_frozen_record()`
+or any Test data access, so a stale managed Freeze cannot issue an OOS grant. Unregistered legacy
+Freeze/OOS behavior remains unchanged.
+
+Training and Walk-forward Workers also verify Trial–Job binding, Protocol identity, allowed Job kind
+and canonical request identity before execution. The final publication transaction repeats the managed
+request verification.
+
+### Protocol constraint enforcement
+
+Training and Walk-forward requests are normalized into one scientific shape containing canonical label,
+window, FactorSpec identity, candidate configuration, evaluation and stopping fields. Training's
+top-level label fields therefore cannot bypass `label_specifications`.
+
+The following constraints are enforced:
+
+- `candidate_definitions` and Hypothesis `candidate_constraints` as recursive subsets of the normalized
+  candidate;
+- Hypothesis `factor_spec_hash` and Protocol `factor_specifications`;
+- `evaluation_policy` fields for primary metric, thresholds, walk-forward mode and required walk-forward
+  evidence;
+- `stopping_policy.max_seconds`, sample/fold/bootstrap limits;
+- seed, hyperparameter and walk-forward inference policies.
+
+Unknown evaluation or stopping keys are rejected when the Protocol is registered. A constraint is never
+reported as enforced unless the corresponding runtime check exists.
+
+### Budgets and scheduling
+
+Campaign and Protocol budgets are both evaluated inside the registration/submission transaction.
+Campaign counters remain cumulative across Protocol revisions. Execution-attempt exhaustion is checked
+before claiming a queued or expired Job; the blocked Job is atomically marked failed with
+`RESEARCH_TRIAL_BUDGET_EXCEEDED`, then scheduling continues with the next eligible Campaign Job.
+
+### Selection evidence
+
+The sealed Snapshot preserves every Campaign Trial. The current Protocol's Eligible Selection Pool only
+contains Trials with an exact compatible Protocol hash; other-Protocol Trials remain visible with
+`PROTOCOL_NOT_COMPATIBLE_WITH_SELECTION`.
+
+Label coverage, model-execution coverage and end-to-end coverage are separate evidence fields. Training
+uses Baseline cohort counts for label and end-to-end coverage and model Validation prediction coverage
+only for model-execution coverage. Missing evidence excludes the candidate. A Protocol requiring
+walk-forward evidence excludes training-only candidates with `WALK_FORWARD_EVIDENCE_REQUIRED`.
+
+### Rejected submissions and immutable views
+
+A rejected submission appends `TRIAL_REJECTED` but changes Trial state only from `REGISTERED`. It never
+overwrites `SUBMITTED`, `RUNNING`, `COMPLETED`, `FAILED` or `CANCELLED` history.
+
+Ledger and report cursors bind a fixed watermark or Snapshot. New Trials, later Exposure events and new
+Campaigns do not change an existing Snapshot report. Live reports (no Snapshot/watermark), explicitly
+fixed-watermark reports and Snapshot reports are distinct views; only the Snapshot/fixed-watermark views
+make immutability claims.

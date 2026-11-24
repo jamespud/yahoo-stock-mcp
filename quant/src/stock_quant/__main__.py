@@ -158,6 +158,7 @@ def main():
                     result = registry.research_registry.read_research_ledger(
                         campaign_id=request["campaign_id"], section=request.get("section", "summary"),
                         limit=request.get("limit", 100), cursor=request.get("cursor"),
+                        ledger_watermark=request.get("ledger_watermark"),
                         mcp_overhead_bytes=request.get("mcp_overhead_bytes"),
                     )
                 elif method == "seal_alpha_candidate_ledger":
@@ -172,6 +173,7 @@ def main():
                     result = registry.research_registry.read_research_report(
                         campaign_id=request["campaign_id"], protocol_hash=request.get("protocol_hash"),
                         candidate_ledger_hash=request.get("candidate_ledger_hash"),
+                        ledger_watermark=request.get("ledger_watermark"),
                         section=request.get("section", "summary"), limit=request.get("limit", 100),
                         cursor=request.get("cursor"), mcp_overhead_bytes=request.get("mcp_overhead_bytes"),
                     )

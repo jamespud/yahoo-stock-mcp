@@ -71,3 +71,17 @@ observed data outside the system, cannot provide external trusted timestamps, an
 Deflated Sharpe Ratio, PBO, White Reality Check, Hansen SPA, sequential spending or online FDR.
 Campaign correction is conservatively reported as not estimable from trial count. No PR5 path reopens
 the historical Alpha v1.3 Test/OOS or automatically starts OOS evaluation.
+
+
+## First-review hardening
+
+Managed Freeze freshness is checked at submission, Worker entry and the final publication transaction;
+managed OOS authorization repeats the check before Test access. Training and walk-forward Workers
+verify Trial–Job and request identity. Campaign and Protocol budgets are cumulative and attempt
+exhaustion fails the blocked Job without blocking later Campaigns.
+
+Protocol constraints now cover candidate definitions, Hypothesis constraints, FactorSpec hash, seeds,
+evaluation/stopping policy and walk-forward mode. Unsupported policy keys fail at Protocol registration.
+Selection separates Campaign ledger from the current Protocol eligible pool and uses independent label,
+model-execution and end-to-end coverage evidence. Snapshot/fixed-watermark reports and cursors are stable
+against later Trials, Exposures and Campaigns.

@@ -11,9 +11,11 @@ def build_evidence_report(
     campaign_id: str,
     protocol_hash: str | None = None,
     candidate_ledger_hash: str | None = None,
+    ledger_watermark: int | None = None,
 ) -> ResearchEvidenceReport:
     return registry.build_evidence_report(
         campaign_id=campaign_id,
         protocol_hash=protocol_hash,
         candidate_ledger_hash=candidate_ledger_hash,
+        ledger_watermark=ledger_watermark,
     )

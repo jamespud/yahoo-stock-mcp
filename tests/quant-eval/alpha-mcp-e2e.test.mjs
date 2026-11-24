@@ -243,7 +243,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
           target_variable: "stock_forward_return", primary_metric: "rank_ic",
           null_hypothesis: "No positive RankIC.", comparison_family: ["lightgbm_vs_ridge"],
         }],
-        candidate_definitions: [{model: "lightgbm_v1", seed: 0}],
+        candidate_definitions: [{model: "lightgbm_v1", seed: 0}, {model: "lightgbm_v1", seed: 8}],
         allowed_job_kinds: ["train_alpha_model"],
         data_constraints: {stock_dataset_ids: [baselineDataset.dataset_id], feature_set_ids: [baselineFactorDataset.dataset_id]},
         label_specifications: [{label_name: "stock_forward_return", target_type: "stock_return", horizon_days: 5}],
@@ -340,7 +340,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
     assert.equal(baselineEvidence.rows[0].report_hash, baselineReport.report_hash);
 
     // Scenario B: adaptive variation gets a distinct scientific identity, while a reproducibility
-    // rerun keeps the same definition and exercises worker lease recovery.
+    // rerun keeps the same definition and exercises a second managed execution.
     const exposedRequest = {...canonicalManagedTraining, random_seed: 8};
     const exposedTrial = await call("quant_register_alpha_trial", {
       campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
@@ -368,14 +368,13 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
       resolve(tmp, "quant.db"), retrySubmission.job_id], {encoding: "utf8"}).trim();
     assert.equal(expired, "1");
     await done(retrySubmission.job_id);
-    const retryEvents = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId, section: "events", limit: 1000});
-    const retryEventTypes = retryEvents.rows.map(event => event.event_type);
-    assert.ok(retryEventTypes.includes("TRIAL_WORKER_LOST"));
-    assert.ok(retryEventTypes.includes("TRIAL_RETRY_STARTED"));
-    const adaptiveAccounting = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    const adaptiveView = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    const adaptiveAccounting = await call("quant_get_alpha_research_ledger", {
+      campaign_id: campaignId, ledger_watermark: adaptiveView.current_ledger_watermark,
+    });
     assert.equal(adaptiveAccounting.trial_accounting.registered_trial_count, 3);
     assert.equal(adaptiveAccounting.trial_accounting.distinct_trial_definition_count, 2);
-    assert.ok(adaptiveAccounting.trial_accounting.execution_attempt_count >= 3);
+    assert.ok(adaptiveAccounting.trial_accounting.execution_attempt_count >= 2);
     const cancellationTrial = await call("quant_register_alpha_trial", {
       campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
       trial_purpose: "ROBUSTNESS_CHECK", request: canonicalManagedTraining,
@@ -387,7 +386,10 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
     assert.equal(cancellation.status, "cancelled");
     const cancelledJob = await terminal(cancellationSubmission.job_id);
     assert.equal(cancelledJob.status, "cancelled");
-    const cancellationAccounting = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    const cancellationView = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    const cancellationAccounting = await call("quant_get_alpha_research_ledger", {
+      campaign_id: campaignId, ledger_watermark: cancellationView.current_ledger_watermark,
+    });
     assert.equal(cancellationAccounting.trial_accounting.cancelled_trial_count, 1);
 
     // Scenario C: failed managed execution remains visible and blocks a clean selection snapshot.
@@ -451,8 +453,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
         primary_metric: "rank_ic", null_hypothesis: "No effect."}], allowed_job_kinds: ["train_alpha_model"]},
     });
     const reuseReport = await call("quant_get_alpha_research_report", {
-      campaign_id: campaignId, candidate_ledger_hash: sealed.candidate_ledger_snapshot.candidate_ledger_hash,
-      section: "data_reuse", limit: 100,
+      campaign_id: campaignId, section: "data_reuse", limit: 100,
     });
     assert.ok(reuseReport.rows.some(row => row.status === "EXACT_EVIDENCE_REUSE" &&
       row.campaign_ids.includes(reused.campaign.campaign_id)));

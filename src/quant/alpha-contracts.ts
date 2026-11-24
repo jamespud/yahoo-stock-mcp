@@ -424,6 +424,7 @@ const researchSelectionPolicyInput = z.object({
   minimum_valid_folds: z.number().int().min(0).optional(),
   minimum_valid_ic_sessions: z.number().int().min(0).optional(),
   minimum_label_coverage: z.number().min(0).max(1).optional(),
+  minimum_model_execution_coverage: z.number().min(0).max(1).optional(),
   minimum_end_to_end_coverage: z.number().min(0).max(1).optional(),
   allowed_research_status: z.array(z.string().min(1).max(128)).optional(),
   stability_constraints: z.record(z.unknown()).optional(),
@@ -477,6 +478,7 @@ export const registerAlphaTrialInput = z.object({
 
 export const alphaResearchLedgerInput = z.object({
   campaign_id: alphaHash,
+  ledger_watermark: z.number().int().min(0).optional(),
   section: z.enum(["summary", "campaigns", "protocols", "hypotheses", "trials", "events", "evidence", "snapshots", "selections"]).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
   cursor: z.string().max(2048).optional(),
@@ -489,6 +491,7 @@ export const sealAlphaCandidateLedgerInput = z.object({
 
 export const alphaResearchReportInput = z.object({
   campaign_id: alphaHash,
+  ledger_watermark: z.number().int().min(0).optional(),
   protocol_hash: alphaHash.optional(),
   candidate_ledger_hash: alphaHash.optional(),
   section: z.enum(["summary", "hypotheses", "data_quality", "data_reuse", "exposures", "baseline_evidence", "walk_forward_evidence", "evidence", "unresolved_risks", "report"]).optional(),

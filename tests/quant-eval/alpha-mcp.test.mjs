@@ -220,17 +220,21 @@ test("Research Registry contracts bind Campaign, Protocol and Trial without call
     }],
     allowed_job_kinds: ["train_alpha_model"],
   };
-  const registered = registerAlphaResearchProtocolInput.parse({campaign, protocol});
+  const registered = registerAlphaResearchProtocolInput.parse({
+    campaign,
+    protocol: {...protocol, selection_policy: {minimum_model_execution_coverage: 0.8}},
+  });
   assert.equal(registered.campaign.campaign_name, "synthetic");
+  assert.equal(registered.protocol.selection_policy.minimum_model_execution_coverage, 0.8);
   assert.throws(() => registerAlphaResearchProtocolInput.parse({campaign, campaign_id: hash("1"), protocol}));
   assert.throws(() => registerAlphaResearchProtocolInput.parse({protocol_hash: hash("2"), campaign, protocol}));
   assert.equal(registerAlphaTrialInput.parse({
     campaign_id: hash("1"), protocol_hash: hash("2"), hypothesis_id: hash("3"),
     request: {kind: "train_alpha_model"}, trial_purpose: "INITIAL_HYPOTHESIS_TEST",
   }).trial_purpose, "INITIAL_HYPOTHESIS_TEST");
-  assert.equal(alphaResearchLedgerInput.parse({campaign_id: hash("1"), section: "events"}).section, "events");
+  assert.equal(alphaResearchLedgerInput.parse({campaign_id: hash("1"), section: "events", ledger_watermark: 7}).ledger_watermark, 7);
   assert.equal(sealAlphaCandidateLedgerInput.parse({campaign_id: hash("1"), protocol_hash: hash("2")}).protocol_hash, hash("2"));
-  assert.equal(alphaResearchReportInput.parse({campaign_id: hash("1"), section: "walk_forward_evidence"}).section, "walk_forward_evidence");
+  assert.equal(alphaResearchReportInput.parse({campaign_id: hash("1"), section: "walk_forward_evidence", ledger_watermark: 7}).ledger_watermark, 7);
   assert.equal(trainAlphaModelInputFields.parse({
     evaluation_mode: "validation_only", research_protocol_hash: hash("2"), research_trial_id: hash("3"),
     feature_set_id: hash("4"), label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: hash("5")},

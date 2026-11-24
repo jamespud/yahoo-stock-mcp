@@ -126,6 +126,7 @@ class ResearchSelectionPolicy(StrictModel):
     minimum_valid_folds: int = Field(default=0, ge=0, strict=True)
     minimum_valid_ic_sessions: int = Field(default=0, ge=0, strict=True)
     minimum_label_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_model_execution_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
     minimum_end_to_end_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
     allowed_research_status: list[str] = Field(default_factory=lambda: ["RESEARCH_DATA_VALIDATED", "RESEARCH_EXPLORATORY"])
     stability_constraints: dict[str, Any] = Field(default_factory=dict)

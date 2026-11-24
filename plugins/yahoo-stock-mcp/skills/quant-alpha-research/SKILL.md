@@ -139,3 +139,9 @@ describing it as the same Trial. Register a new Trial or Protocol revision. Neve
 name to reset trial history. Never raise budgets without a new Campaign, and never infer global
 multiple-testing correction from the number of Trials. Registry integrity and model performance are
 separate outcomes.
+
+Managed Protocol constraints are executable, not documentation-only: candidate definitions, Hypothesis
+candidate constraints, FactorSpec hash, seed/hyperparameter/inference policy, walk-forward mode, coverage
+thresholds and stopping limits are checked before Trial registration. Unsupported evaluation or stopping
+keys are rejected when the Protocol is registered. Any label, horizon, Ridge Alpha, FactorSpec, fold mode
+or evaluation-policy change requires a compatible new Trial or Protocol revision.

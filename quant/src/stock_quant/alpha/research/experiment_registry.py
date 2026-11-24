@@ -1,6 +1,7 @@
 """Append-only research Campaign, Protocol, Trial and selection registry."""
 from __future__ import annotations
 
+import base64
 import json
 import math
 import sqlite3
@@ -19,6 +20,7 @@ from .contracts import (
     ResearchCampaignRecord,
     ResearchDataReuseFinding,
     ResearchEvidenceReport,
+    ResearchHypothesisDefinition,
     ResearchLedgerEvent,
     ResearchLedgerIntegrity,
     ResearchLedgerSnapshot,
@@ -37,6 +39,7 @@ from .protocol import (
     canonical_digest,
     event_hash_for,
     hypothesis_hash_for,
+    normalized_research_request,
     protocol_hash_for,
     report_hash_for,
     selection_hash_for,
@@ -347,8 +350,11 @@ class ResearchExperimentRegistry:
         ).fetchone()
         return int(row[0])
 
-    def verify_ledger(self, campaign_id: str) -> ResearchLedgerIntegrity:
-        events = self.list_events(campaign_id)
+    def verify_ledger(self, campaign_id: str, *, watermark: int | None = None) -> ResearchLedgerIntegrity:
+        events = [
+            event for event in self.list_events(campaign_id)
+            if watermark is None or event.event_sequence <= watermark
+        ]
         previous: str | None = None
         expected_sequence = 1
         for event in events:
@@ -416,6 +422,7 @@ class ResearchExperimentRegistry:
         definition = ResearchProtocolDefinition.model_validate(raw)
         if definition.selection_policy.primary_metric != "rank_ic":
             raise ValueError("PR5 candidate selection currently supports primary_metric=rank_ic only")
+        self._validate_protocol_policy_surface(definition)
         campaign = self.get_campaign(definition.campaign_id)
         campaign_budget = campaign.definition.resource_policy
         budget_updates = {}
@@ -501,6 +508,37 @@ class ResearchExperimentRegistry:
             )
         return self.get_protocol(protocol_hash)
 
+    @staticmethod
+    def _validate_protocol_policy_surface(definition: ResearchProtocolDefinition) -> None:
+        evaluation_keys = {
+            "primary_metric", "minimum_rank_ic", "minimum_valid_folds", "minimum_valid_ic_sessions",
+            "minimum_label_coverage", "minimum_model_execution_coverage", "minimum_end_to_end_coverage",
+            "allowed_research_status", "stability_constraints", "requires_walk_forward", "walk_forward_mode",
+        }
+        stopping_keys = {
+            "max_seconds", "max_total_training_samples", "max_folds", "max_bootstrap_replicates",
+        }
+        unsupported_evaluation = sorted(set(definition.evaluation_policy) - evaluation_keys)
+        unsupported_stopping = sorted(set(definition.stopping_policy) - stopping_keys)
+        if unsupported_evaluation or unsupported_stopping:
+            raise ValueError(
+                "Unsupported Protocol evaluation/stopping constraints: "
+                + ", ".join(unsupported_evaluation + unsupported_stopping)
+            )
+        policy = definition.selection_policy.model_dump(mode="json")
+        for key in evaluation_keys - {"requires_walk_forward", "walk_forward_mode"}:
+            if key in definition.evaluation_policy and definition.evaluation_policy[key] != policy.get(key):
+                raise ValueError(f"evaluation_policy.{key} must match selection_policy")
+        if "requires_walk_forward" in definition.evaluation_policy and type(definition.evaluation_policy["requires_walk_forward"]) is not bool:
+            raise ValueError("evaluation_policy.requires_walk_forward must be boolean")
+        if "walk_forward_mode" in definition.evaluation_policy and definition.evaluation_policy["walk_forward_mode"] not in {"expanding", "rolling"}:
+            raise ValueError("evaluation_policy.walk_forward_mode must be expanding or rolling")
+        for key in stopping_keys:
+            if key in definition.stopping_policy and (
+                type(definition.stopping_policy[key]) is not int or definition.stopping_policy[key] < 1
+            ):
+                raise ValueError(f"stopping_policy.{key} must be a positive integer")
+
     def _validate_protocol_budget(self, definition: ResearchProtocolDefinition, campaign_budget) -> None:
         for field, campaign_limit in campaign_budget.hard_limits().items():
             protocol_limit = getattr(definition.trial_budget, field)
@@ -549,7 +587,7 @@ class ResearchExperimentRegistry:
         request_payload = parsed.model_dump(mode="json")
         if request_payload.get("research_trial_id"):
             raise ValueError("A Trial registration request must not bind an existing research_trial_id")
-        self._validate_protocol_constraints(protocol.definition, request_payload)
+        self._validate_protocol_constraints(protocol.definition, request_payload, hypotheses[hypothesis_id].definition)
         canonical_request, request_hash, definition_hash, evidence_scope_hash = trial_identities(request_payload)
         parent = None if parent_trial_id is None else self.get_trial(parent_trial_id)
         if parent is not None and parent.campaign_id != campaign_id:
@@ -566,7 +604,7 @@ class ResearchExperimentRegistry:
             + _utcnow().isoformat().encode()
         ).hexdigest()
         with _transaction(self.connection):
-            self._check_registration_budget(campaign, definition_hash)
+            self._check_registration_budget(campaign, protocol, definition_hash)
             watermark = self.ledger_watermark(campaign_id)
             created_at = _utcnow()
             self.connection.execute(
@@ -604,27 +642,40 @@ class ResearchExperimentRegistry:
             )
         return pattern == actual
 
-    def _validate_protocol_constraints(self, protocol: ResearchProtocolDefinition, request: dict[str, Any]) -> None:
-        label = request.get("label_spec") or {}
-        stock_id = request.get("stock_dataset_id") or label.get("stock_dataset_id")
+    def _validate_protocol_constraints(
+        self, protocol: ResearchProtocolDefinition, request: dict[str, Any],
+        hypothesis: ResearchHypothesisDefinition,
+    ) -> None:
+        normalized = normalized_research_request(request)
+        label = normalized["label_spec"]
         constraints = protocol.data_constraints
-        for key, value in (("stock_dataset_id", stock_id), ("feature_set_id", request.get("feature_set_id"))):
+        for key, value in (("stock_dataset_id", normalized["stock_dataset_id"]), ("feature_set_id", normalized["feature_set_id"])):
             allowed = constraints.get(f"{key}s") or constraints.get(key)
             if isinstance(allowed, str):
                 allowed = [allowed]
             if isinstance(allowed, list) and value not in allowed:
                 raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial data identity is outside the Protocol", {"field": key})
         labels = protocol.label_specifications
-        if labels and label and not any(self._contains(item, label) for item in labels):
+        if labels and not any(self._contains(item, label) for item in labels):
             raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial label definition is outside the Protocol", {"field": "label"})
-        window = request.get("split") or request.get("development_window")
+        window = normalized["development_window"]
         if protocol.development_windows and not any(self._contains(item, window) for item in protocol.development_windows):
             raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial development window is outside the Protocol", {"field": "development_window"})
-        if protocol.factor_specifications:
-            factor_spec = (request.get("baseline_comparison") or {}).get("factor_spec") or request.get("factor_spec")
-            if not any(self._contains(item, factor_spec) for item in protocol.factor_specifications):
-                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial FactorSpec is outside the Protocol", {"field": "factor_spec"})
-        model_config = request.get("hyperparameters") or request.get("lightgbm_hyperparameters") or {}
+        if protocol.factor_specifications and not any(
+            self._contains(item, normalized["factor_spec"]) for item in protocol.factor_specifications
+        ):
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial FactorSpec is outside the Protocol", {"field": "factor_spec"})
+        if hypothesis.factor_spec_hash is not None and normalized["factor_spec_hash"] != hypothesis.factor_spec_hash:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial FactorSpec hash differs from the Hypothesis", {
+                "expected": hypothesis.factor_spec_hash, "actual": normalized["factor_spec_hash"],
+            })
+        if protocol.candidate_definitions and not any(
+            self._contains(item, normalized["candidate"]) for item in protocol.candidate_definitions
+        ):
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial candidate is outside Protocol candidate_definitions", {"field": "candidate_definitions"})
+        if hypothesis.candidate_constraints and not self._contains(hypothesis.candidate_constraints, normalized["candidate"]):
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial candidate is outside Hypothesis candidate_constraints", {"field": "candidate_constraints"})
+        model_config = normalized["candidate"]["hyperparameters"]
         hyper = protocol.hyperparameter_constraints
         if hyper:
             fixed = hyper.get("fixed")
@@ -643,33 +694,63 @@ class ResearchExperimentRegistry:
         if seed_policy:
             allowed_seeds = seed_policy.get("allowed_seeds")
             fixed_seed = seed_policy.get("fixed_seed")
-            request_seed = request.get("random_seed", 0)
+            request_seed = normalized["candidate"]["random_seed"]
             if fixed_seed is not None and request_seed != fixed_seed:
                 raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial seed differs from the Protocol", {"field": "random_seed"})
             if isinstance(allowed_seeds, list) and request_seed not in allowed_seeds:
                 raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial seed is outside the Protocol", {"field": "random_seed"})
-        if request.get("kind") == "walk_forward_alpha" and protocol.inference_policy:
-            inference = (request.get("walk_forward_config") or {}).get("inference") or {}
+        if protocol.inference_policy:
+            inference = (normalized["candidate"].get("walk_forward_config") or {}).get("inference") or {}
             if not self._contains(protocol.inference_policy, inference):
                 raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Walk-forward inference differs from the Protocol", {"field": "walk_forward_config.inference"})
+        evaluation = protocol.evaluation_policy
+        declared_minimum_rank_ic = evaluation.get("minimum_rank_ic")
+        if declared_minimum_rank_ic is not None and request.get("min_rank_ic") is not None and request.get("min_rank_ic") < declared_minimum_rank_ic:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial minimum RankIC differs from the Protocol", {"field": "min_rank_ic"})
+        stopping = protocol.stopping_policy
+        if "max_seconds" in stopping and (request.get("max_seconds") is None or request["max_seconds"] > stopping["max_seconds"]):
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial max_seconds exceeds the Protocol", {"field": "max_seconds"})
+        budget = request.get("resource_budget") or {}
+        if "max_total_training_samples" in stopping and budget.get("max_total_training_samples", request.get("resource_budget", {}).get("max_rows")) is not None and budget.get("max_total_training_samples", request.get("resource_budget", {}).get("max_rows")) > stopping["max_total_training_samples"]:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial training-sample budget exceeds the Protocol", {"field": "resource_budget.max_total_training_samples"})
+        if request.get("kind") == "walk_forward_alpha":
+            walk = request.get("walk_forward_config") or {}
+            if "walk_forward_mode" in evaluation and walk.get("mode") != evaluation["walk_forward_mode"]:
+                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial walk-forward mode differs from the Protocol", {"field": "walk_forward_config.mode"})
+            if "max_folds" in stopping and walk.get("max_folds", 12) > stopping["max_folds"]:
+                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial max_folds exceeds the Protocol", {"field": "walk_forward_config.max_folds"})
+            inference = walk.get("inference") or {}
+            if "max_bootstrap_replicates" in stopping and inference.get("bootstrap_replicates", 1000) > stopping["max_bootstrap_replicates"]:
+                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial bootstrap budget exceeds the Protocol", {"field": "walk_forward_config.inference.bootstrap_replicates"})
 
-    def _check_registration_budget(self, campaign: ResearchCampaignRecord, definition_hash: str) -> None:
-        budget = campaign.definition.resource_policy
-        registered = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_trials WHERE campaign_id=?", (campaign.campaign_id,)
-        ).fetchone()[0]
-        if registered >= budget.max_registered_trials:
-            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, "Trial registration budget exceeded", {"limit": budget.max_registered_trials})
-        distinct = self.connection.execute(
-            "SELECT count(DISTINCT trial_definition_hash) FROM alpha_research_trials WHERE campaign_id=?",
-            (campaign.campaign_id,),
-        ).fetchone()[0]
-        exists = self.connection.execute(
-            "SELECT 1 FROM alpha_research_trials WHERE campaign_id=? AND trial_definition_hash=? LIMIT 1",
-            (campaign.campaign_id, definition_hash),
-        ).fetchone()
-        if exists is None and distinct >= budget.max_distinct_candidate_definitions:
-            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, "Distinct candidate definition budget exceeded", {"limit": budget.max_distinct_candidate_definitions})
+    def _check_registration_budget(
+        self, campaign: ResearchCampaignRecord, protocol: ResearchProtocolRecord, definition_hash: str,
+    ) -> None:
+        checks = (
+            ("campaign", campaign.definition.resource_policy),
+            ("protocol", protocol.definition.trial_budget),
+        )
+        for scope, budget in checks:
+            where = "campaign_id=?" if scope == "campaign" else "campaign_id=? AND protocol_hash=?"
+            args = (campaign.campaign_id,) if scope == "campaign" else (campaign.campaign_id, protocol.protocol_hash)
+            registered = self.connection.execute(
+                f"SELECT count(*) FROM alpha_research_trials WHERE {where}", args,
+            ).fetchone()[0]
+            if registered >= budget.max_registered_trials:
+                raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, f"{scope} Trial registration budget exceeded", {
+                    "scope": scope, "limit": budget.max_registered_trials,
+                })
+            distinct = self.connection.execute(
+                f"SELECT count(DISTINCT trial_definition_hash) FROM alpha_research_trials WHERE {where}", args,
+            ).fetchone()[0]
+            exists = self.connection.execute(
+                f"SELECT 1 FROM alpha_research_trials WHERE {where} AND trial_definition_hash=? LIMIT 1",
+                (*args, definition_hash),
+            ).fetchone()
+            if exists is None and distinct >= budget.max_distinct_candidate_definitions:
+                raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, f"{scope} distinct candidate budget exceeded", {
+                    "scope": scope, "limit": budget.max_distinct_candidate_definitions,
+                })
 
     # ------------------------------------------------------------------
     # Managed Job binding and lifecycle
@@ -700,12 +781,26 @@ class ResearchExperimentRegistry:
         if trial.status not in {"REGISTERED"}:
             raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH, "Trial is not available for submission", {"trial_id": trial_id, "status": trial.status})
         campaign = self.get_campaign(trial.campaign_id)
-        budget = campaign.definition.resource_policy
-        submitted = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_trial_jobs WHERE campaign_id=?", (trial.campaign_id,)
-        ).fetchone()[0]
-        if submitted >= min(budget.max_submitted_trials, budget.max_evaluation_jobs):
-            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, "Managed research submission budget exceeded", {"limit": min(budget.max_submitted_trials, budget.max_evaluation_jobs)})
+        protocol = self.get_protocol(trial.protocol_hash)
+        for scope, budget in (
+            ("campaign", campaign.definition.resource_policy),
+            ("protocol", protocol.definition.trial_budget),
+        ):
+            if scope == "campaign":
+                submitted = self.connection.execute(
+                    "SELECT count(*) FROM alpha_research_trial_jobs WHERE campaign_id=?", (trial.campaign_id,)
+                ).fetchone()[0]
+            else:
+                submitted = self.connection.execute(
+                    "SELECT count(*) FROM alpha_research_trial_jobs WHERE campaign_id=? AND trial_id IN "
+                    "(SELECT trial_id FROM alpha_research_trials WHERE protocol_hash=?)",
+                    (trial.campaign_id, trial.protocol_hash),
+                ).fetchone()[0]
+            limit = min(budget.max_submitted_trials, budget.max_evaluation_jobs)
+            if submitted >= limit:
+                raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, f"{scope} managed submission budget exceeded", {
+                    "scope": scope, "limit": limit,
+                })
         now = _utcnow().isoformat().replace("+00:00", "Z")
         self.connection.execute(
             "INSERT INTO alpha_research_trial_jobs(job_id,trial_id,campaign_id,job_config_hash,request_hash,created_at) "
@@ -722,6 +817,46 @@ class ResearchExperimentRegistry:
         )
         return self.get_trial(trial_id)
 
+    def verify_managed_execution(self, request: dict[str, Any], *, job_id: str) -> ResearchTrialRecord | None:
+        protocol_hash = request.get("research_protocol_hash")
+        if not protocol_hash or self.connection.execute(
+            "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?", (protocol_hash,),
+        ).fetchone() is None:
+            return None
+        trial_id = request.get("research_trial_id")
+        if not trial_id:
+            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_NOT_REGISTERED, "Managed execution requires research_trial_id", {
+                "protocol_hash": protocol_hash, "job_id": job_id,
+            })
+        trial = self.get_trial(trial_id)
+        binding = self.get_trial_job(trial_id)
+        if binding is None or binding.job_id != job_id:
+            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH, "Trial-Job binding is missing or changed", {
+                "trial_id": trial_id, "job_id": job_id,
+            })
+        _, request_hash, _, _ = trial_identities(request)
+        if request_hash != trial.canonical_request_hash or request_hash != binding.request_hash:
+            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH, "Worker request differs from the registered Trial", {
+                "trial_id": trial_id, "job_id": job_id,
+            })
+        if trial.protocol_hash != protocol_hash:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Worker Protocol differs from the Trial", {"trial_id": trial_id})
+        protocol = self.get_protocol(protocol_hash)
+        if request.get("kind") not in protocol.definition.allowed_job_kinds:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Worker Job kind is not allowed by the Protocol", {})
+        hypothesis = next(
+            (row.definition for row in protocol.registered_hypotheses if row.hypothesis_id == trial.hypothesis_id),
+            None,
+        )
+        if hypothesis is None:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Worker Trial Hypothesis is not registered", {"trial_id": trial_id})
+        self._validate_protocol_constraints(protocol.definition, request, hypothesis)
+        if trial.status not in {"RUNNING", "PUBLISHING", "COMPLETED"}:
+            raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH, "Managed Trial is not executable", {
+                "trial_id": trial_id, "status": trial.status,
+            })
+        return trial
+
     def record_rejection(self, request: dict[str, Any], *, reason_code: str, detail: dict[str, Any] | None = None) -> None:
         trial_id = request.get("research_trial_id") if isinstance(request, dict) else None
         if not trial_id:
@@ -731,11 +866,49 @@ class ResearchExperimentRegistry:
         except AlphaError:
             return
         with _transaction(self.connection):
+            current = self.get_trial(trial.trial_id)
+            preserved = current.status != "REGISTERED"
             self._append_event(
                 campaign_id=trial.campaign_id, protocol_hash=trial.protocol_hash, trial_id=trial.trial_id,
-                reason_code=reason_code, event_type="TRIAL_REJECTED", detail=detail or {},
+                reason_code=reason_code, event_type="TRIAL_REJECTED",
+                detail={
+                    **(detail or {}),
+                    "previous_status": current.status,
+                    "status_preserved": preserved,
+                },
             )
-            self.connection.execute("UPDATE alpha_research_trials SET status='REJECTED' WHERE trial_id=?", (trial.trial_id,))
+            if not preserved:
+                self.connection.execute(
+                    "UPDATE alpha_research_trials SET status='REJECTED' WHERE trial_id=? AND status='REGISTERED'",
+                    (trial.trial_id,),
+                )
+
+    def attempt_budget_available(self, job_id: str) -> tuple[bool, dict[str, Any]]:
+        trial = self.trial_for_job(job_id)
+        if trial is None:
+            return True, {}
+        campaign = self.get_campaign(trial.campaign_id)
+        protocol = self.get_protocol(trial.protocol_hash)
+        campaign_used = self.connection.execute(
+            "SELECT count(*) FROM alpha_research_events WHERE campaign_id=? AND event_type IN "
+            "('TRIAL_EXECUTION_STARTED','TRIAL_RETRY_STARTED')",
+            (trial.campaign_id,),
+        ).fetchone()[0]
+        protocol_used = self.connection.execute(
+            "SELECT count(*) FROM alpha_research_events e JOIN alpha_research_trials tr ON tr.trial_id=e.trial_id "
+            "WHERE tr.protocol_hash=? AND e.event_type IN ('TRIAL_EXECUTION_STARTED','TRIAL_RETRY_STARTED')",
+            (trial.protocol_hash,),
+        ).fetchone()[0]
+        for scope, used, budget in (
+            ("campaign", campaign_used, campaign.definition.resource_policy),
+            ("protocol", protocol_used, protocol.definition.trial_budget),
+        ):
+            if used >= budget.max_execution_attempts:
+                return False, {
+                    "scope": scope, "used": used, "limit": budget.max_execution_attempts,
+                    "trial_id": trial.trial_id, "job_id": job_id,
+                }
+        return True, {}
 
     def record_lifecycle(self, *, job_id: str, event_type: str, attempt: int | None = None,
                          result_hash: str | None = None, reason_code: str | None = None,
@@ -753,14 +926,9 @@ class ResearchExperimentRegistry:
             "TRIAL_WORKER_LOST": "FAILED",
         }
         if event_type in {"TRIAL_EXECUTION_STARTED", "TRIAL_RETRY_STARTED"}:
-            campaign = self.get_campaign(trial.campaign_id)
-            used = self.connection.execute(
-                "SELECT count(*) FROM alpha_research_events WHERE campaign_id=? AND event_type IN "
-                "('TRIAL_EXECUTION_STARTED','TRIAL_RETRY_STARTED')",
-                (trial.campaign_id,),
-            ).fetchone()[0]
-            if used >= campaign.definition.resource_policy.max_execution_attempts:
-                raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, "Execution attempt budget exceeded", {"limit": campaign.definition.resource_policy.max_execution_attempts})
+            available, context = self.attempt_budget_available(job_id)
+            if not available:
+                raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED, "Execution attempt budget exceeded", context)
         self._append_event(
             campaign_id=trial.campaign_id, protocol_hash=trial.protocol_hash, trial_id=trial.trial_id,
             job_id=job_id, attempt=attempt, result_hash=result_hash, reason_code=reason_code,
@@ -856,61 +1024,59 @@ class ResearchExperimentRegistry:
     # ------------------------------------------------------------------
     # Accounting, snapshots and selection
     # ------------------------------------------------------------------
-    def trial_accounting(self, campaign_id: str) -> TrialAccounting:
+    def trial_accounting(self, campaign_id: str, *, watermark: int | None = None) -> TrialAccounting:
         self.get_campaign(campaign_id)
-        registered = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_trials WHERE campaign_id=?", (campaign_id,)
-        ).fetchone()[0]
-        submitted = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_trial_jobs WHERE campaign_id=?", (campaign_id,)
-        ).fetchone()[0]
-        distinct = self.connection.execute(
-            "SELECT count(DISTINCT trial_definition_hash) FROM alpha_research_trials WHERE campaign_id=?",
-            (campaign_id,),
-        ).fetchone()[0]
-        attempts = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_events WHERE campaign_id=? AND event_type IN "
-            "('TRIAL_EXECUTION_STARTED','TRIAL_RETRY_STARTED')", (campaign_id,),
-        ).fetchone()[0]
-        completed = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_events WHERE campaign_id=? AND event_type='TRIAL_COMPLETED'",
-            (campaign_id,),
-        ).fetchone()[0]
-        exposure = self.connection.execute(
-            "SELECT count(DISTINCT trial_id || ':' || job_id || ':' || result_hash) FROM alpha_research_exposures "
-            "WHERE trial_id IN (SELECT trial_id FROM alpha_research_trials WHERE campaign_id=?)", (campaign_id,),
-        ).fetchone()[0]
-        access_requests = self.connection.execute(
-            "SELECT coalesce(sum(access_count),0) FROM alpha_research_exposures WHERE trial_id IN "
-            "(SELECT trial_id FROM alpha_research_trials WHERE campaign_id=?)", (campaign_id,),
-        ).fetchone()[0]
-        status_counts = dict(self.connection.execute(
-            "SELECT status,count(*) FROM alpha_research_trials WHERE campaign_id=? GROUP BY status", (campaign_id,)
-        ).fetchall())
-        rejected = self.connection.execute(
-            "SELECT count(*) FROM alpha_research_events WHERE campaign_id=? AND event_type='TRIAL_REJECTED'",
-            (campaign_id,),
-        ).fetchone()[0]
-        statistical = self.connection.execute(
-            "SELECT count(DISTINCT hypothesis_id) FROM alpha_research_trials WHERE campaign_id=?", (campaign_id,)
-        ).fetchone()[0]
-        model_fits = sum(self._model_fit_estimate(row[0]) for row in self.connection.execute(
-            "SELECT tr.trial_id FROM alpha_research_trials tr JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
-            "JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=? AND j.status='completed'", (campaign_id,)
-        ).fetchall())
+        if watermark is None:
+            registered_rows = self.connection.execute(
+                "SELECT trial_id,trial_definition_hash,hypothesis_id FROM alpha_research_trials WHERE campaign_id=?",
+                (campaign_id,),
+            ).fetchall()
+            event_sql = (
+                "SELECT event_id,event_sequence,event_type,campaign_id,protocol_hash,trial_id,job_id,attempt,"
+                "request_hash,result_hash,reason_code,detail,previous_event_hash,event_hash,created_at "
+                "FROM alpha_research_events WHERE campaign_id=?"
+            )
+            event_args = (campaign_id,)
+        else:
+            registered_rows = self.connection.execute(
+                "SELECT trial_id,trial_definition_hash,hypothesis_id FROM alpha_research_trials "
+                "WHERE campaign_id=? AND registered_ledger_watermark<=?",
+                (campaign_id, watermark),
+            ).fetchall()
+            event_sql = (
+                "SELECT event_id,event_sequence,event_type,campaign_id,protocol_hash,trial_id,job_id,attempt,"
+                "request_hash,result_hash,reason_code,detail,previous_event_hash,event_hash,created_at "
+                "FROM alpha_research_events WHERE campaign_id=? AND event_sequence<=?"
+            )
+            event_args = (campaign_id, watermark)
+        registered_ids = {row[0] for row in registered_rows}
+        events = self.connection.execute(event_sql, event_args).fetchall()
+        event_rows = [self._event_from_row(row) for row in events]
+        submitted_ids = {event.trial_id for event in event_rows if event.event_type == "TRIAL_SUBMITTED" and event.trial_id}
+        completed_ids = {event.trial_id for event in event_rows if event.event_type == "TRIAL_COMPLETED" and event.trial_id}
+        failed_ids = {event.trial_id for event in event_rows if event.event_type == "TRIAL_FAILED" and event.trial_id}
+        cancelled_ids = {event.trial_id for event in event_rows if event.event_type == "TRIAL_CANCELLED" and event.trial_id}
+        attempts = sum(event.event_type in {"TRIAL_EXECUTION_STARTED", "TRIAL_RETRY_STARTED"} for event in event_rows)
+        rejected = sum(event.event_type == "TRIAL_REJECTED" for event in event_rows)
+        exposure_events = [event for event in event_rows if event.event_type == "TRIAL_RESULT_ACCESSED"]
+        exposure = len({
+            (event.trial_id, event.job_id, event.result_hash) for event in exposure_events
+            if event.trial_id and event.job_id and event.result_hash
+        })
+        model_fits = sum(self._model_fit_estimate(trial_id) for trial_id in completed_ids & registered_ids)
         return TrialAccounting(
-            registered_trial_count=registered,
-            submitted_trial_count=submitted,
-            distinct_trial_definition_count=distinct,
+            registered_trial_count=len(registered_rows),
+            submitted_trial_count=len(submitted_ids & registered_ids),
+            distinct_trial_definition_count=len({row[1] for row in registered_rows}),
             execution_attempt_count=attempts,
-            completed_evaluation_count=completed,
+            completed_evaluation_count=len(completed_ids & registered_ids),
             result_exposure_count=exposure,
-            failed_trial_count=status_counts.get("FAILED", 0),
-            cancelled_trial_count=status_counts.get("CANCELLED", 0),
+            failed_trial_count=len(failed_ids & registered_ids),
+            cancelled_trial_count=len(cancelled_ids & registered_ids),
             rejected_submission_count=rejected,
             model_fit_count=model_fits,
-            statistical_hypothesis_count=statistical,
-            result_access_request_count=access_requests,
+            statistical_hypothesis_count=len({row[2] for row in registered_rows}),
+            result_access_request_count=len(exposure_events),
         )
 
     def _model_fit_estimate(self, trial_id: str) -> int:
@@ -993,12 +1159,22 @@ class ResearchExperimentRegistry:
             evidence_references=evidence, exclusion_reason=exclusion,
         )
 
-    def _scope_completeness(self, campaign_id: str, integrity: ResearchLedgerIntegrity) -> ScopeCompleteness:
-        trials = self.connection.execute(
-            "SELECT tr.status,tj.job_id,j.status FROM alpha_research_trials tr "
-            "LEFT JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
-            "LEFT JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=?", (campaign_id,),
-        ).fetchall()
+    def _scope_completeness(
+        self, campaign_id: str, integrity: ResearchLedgerIntegrity, *, watermark: int | None = None,
+    ) -> ScopeCompleteness:
+        if watermark is None:
+            trials = self.connection.execute(
+                "SELECT tr.status,tj.job_id,j.status FROM alpha_research_trials tr "
+                "LEFT JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
+                "LEFT JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=?", (campaign_id,),
+            ).fetchall()
+        else:
+            trials = self.connection.execute(
+                "SELECT tr.status,tj.job_id,j.status FROM alpha_research_trials tr "
+                "LEFT JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
+                "LEFT JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=? AND tr.registered_ledger_watermark<=?",
+                (campaign_id, watermark),
+            ).fetchall()
         complete = all(
             status in TERMINAL_TRIAL_STATES
             and (job_id is None or job_status in TERMINAL_JOB_STATES)
@@ -1131,11 +1307,53 @@ class ResearchExperimentRegistry:
             )
         return snapshot, selection
 
+    @staticmethod
+    def _coverage_evidence(metrics: dict[str, Any], baseline_report) -> dict[str, float | None]:
+        validation = metrics.get("validation") or {}
+        model_execution = validation.get("prediction_coverage")
+        label_coverage = metrics.get("label_coverage")
+        end_to_end = metrics.get("end_to_end_coverage")
+        if baseline_report is not None:
+            counts = baseline_report.cohort_identity
+            if counts.raw_validation_candidate_count > 0:
+                label_coverage = counts.matured_validation_label_count / counts.raw_validation_candidate_count
+                end_to_end = counts.common_cohort_sample_count / counts.raw_validation_candidate_count
+        return {
+            "label_coverage": float(label_coverage) if isinstance(label_coverage, (int, float)) else None,
+            "model_execution_coverage": float(model_execution) if isinstance(model_execution, (int, float)) else None,
+            "end_to_end_coverage": float(end_to_end) if isinstance(end_to_end, (int, float)) else None,
+        }
+
     def _selection_candidates(self, protocol: ResearchProtocolRecord) -> tuple[list[dict[str, Any]], list[ExcludedCandidate]]:
         candidates: list[dict[str, Any]] = []
         excluded: list[ExcludedCandidate] = []
         policy = protocol.definition.selection_policy
-        for trial in self._all_trials(protocol.definition.campaign_id):
+        compatible_trials = [
+            trial for trial in self._all_trials(protocol.definition.campaign_id)
+            if trial.protocol_hash == protocol.protocol_hash
+        ]
+        incompatible_trials = [
+            trial for trial in self._all_trials(protocol.definition.campaign_id)
+            if trial.protocol_hash != protocol.protocol_hash
+        ]
+        for trial in incompatible_trials:
+            excluded.append(ExcludedCandidate(
+                trial_id=trial.trial_id,
+                reason="PROTOCOL_NOT_COMPATIBLE_WITH_SELECTION",
+                detail={"trial_protocol_hash": trial.protocol_hash, "selection_protocol_hash": protocol.protocol_hash},
+            ))
+        completed_wf_evidence = []
+        for trial in compatible_trials:
+            binding = self.get_trial_job(trial.trial_id)
+            job = None if binding is None else self._job_row(binding.job_id)
+            if job is not None and job["status"] == "completed" and trial.canonical_request.get("kind") == "walk_forward_alpha":
+                completed_wf_evidence.append(self._walk_forward_evidence(trial, binding.job_id))
+        requires_walk_forward = protocol.definition.evaluation_policy.get("requires_walk_forward") is True
+        valid_walk_forward = any(
+            item is not None and item.get("status") not in {"INVALID", "WF_INVALID", "WF_INSUFFICIENT_EVIDENCE"}
+            for item in completed_wf_evidence
+        )
+        for trial in compatible_trials:
             binding = self.get_trial_job(trial.trial_id)
             if binding is None:
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, reason="TRIAL_NOT_SUBMITTED"))
@@ -1146,6 +1364,12 @@ class ResearchExperimentRegistry:
                 continue
             if trial.canonical_request.get("kind") != "train_alpha_model":
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, reason="WALK_FORWARD_NOT_A_FREEZEABLE_MODEL"))
+                continue
+            if requires_walk_forward and not valid_walk_forward:
+                excluded.append(ExcludedCandidate(
+                    trial_id=trial.trial_id, reason="WALK_FORWARD_EVIDENCE_REQUIRED",
+                    detail={"requires_walk_forward": True},
+                ))
                 continue
             result = self._job_result(binding.job_id)
             if result is None:
@@ -1169,18 +1393,50 @@ class ResearchExperimentRegistry:
             metrics = training_rows[0] if training_rows else {}
             validation = metrics.get("validation") or {}
             rank_ic = validation.get("rank_ic_mean")
-            coverage = validation.get("prediction_coverage")
             if rank_ic is None or not isinstance(rank_ic, (int, float)) or not math.isfinite(float(rank_ic)):
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="PRIMARY_METRIC_NOT_ESTIMABLE"))
                 continue
             if policy.minimum_rank_ic is not None and float(rank_ic) < policy.minimum_rank_ic:
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="BELOW_PRIMARY_METRIC_THRESHOLD"))
                 continue
-            if coverage is None or float(coverage) < policy.minimum_label_coverage:
-                excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="BELOW_COVERAGE_THRESHOLD"))
-                continue
-            if coverage is None or float(coverage) < policy.minimum_end_to_end_coverage:
-                excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="BELOW_END_TO_END_COVERAGE_THRESHOLD"))
+            parsed_baseline = None
+            baseline = metrics.get("baseline_comparison")
+            if baseline is not None:
+                try:
+                    from ..models.baseline_comparison import BaselineComparisonReport
+                    parsed_baseline = BaselineComparisonReport.model_validate(baseline)
+                except Exception as error:  # noqa: BLE001 - malformed persisted evidence is invalid evidence
+                    excluded.append(ExcludedCandidate(
+                        trial_id=trial.trial_id, model_id=model_id,
+                        reason="BASELINE_EVIDENCE_HASH_MISMATCH", detail={"message": str(error)[:512]},
+                    ))
+                    continue
+                if parsed_baseline.comparison_status == "COMPARISON_INVALID":
+                    excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="COMPARISON_INVALID"))
+                    continue
+                if parsed_baseline.comparison_status == "COMPARISON_INSUFFICIENT_DATA":
+                    excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="COMPARISON_INSUFFICIENT_DATA"))
+                    continue
+            coverage = self._coverage_evidence(metrics, parsed_baseline)
+            coverage_checks = (
+                ("label_coverage", policy.minimum_label_coverage, "LABEL_COVERAGE_NOT_ESTIMABLE", "BELOW_LABEL_COVERAGE_THRESHOLD"),
+                ("model_execution_coverage", policy.minimum_model_execution_coverage, "MODEL_EXECUTION_COVERAGE_NOT_ESTIMABLE", "BELOW_MODEL_EXECUTION_COVERAGE_THRESHOLD"),
+                ("end_to_end_coverage", policy.minimum_end_to_end_coverage, "END_TO_END_COVERAGE_NOT_ESTIMABLE", "BELOW_END_TO_END_COVERAGE_THRESHOLD"),
+            )
+            failed_coverage = None
+            for name, minimum, missing_reason, below_reason in coverage_checks:
+                value = coverage[name]
+                if minimum > 0 and value is None:
+                    failed_coverage = (missing_reason, {"coverage": name, "minimum": minimum, "coverage_evidence": coverage})
+                    break
+                if minimum > 0 and value < minimum:
+                    failed_coverage = (below_reason, {"coverage": name, "minimum": minimum, "actual": value, "coverage_evidence": coverage})
+                    break
+            if failed_coverage is not None:
+                excluded.append(ExcludedCandidate(
+                    trial_id=trial.trial_id, model_id=model_id,
+                    reason=failed_coverage[0], detail=failed_coverage[1],
+                ))
                 continue
             valid_ic_sessions = validation.get("valid_ic_date_count", validation.get("valid_ic_sessions"))
             if policy.minimum_valid_ic_sessions and (
@@ -1201,23 +1457,7 @@ class ResearchExperimentRegistry:
                 ))
                 continue
             research_status = "RESEARCH_EXPLORATORY"
-            baseline = metrics.get("baseline_comparison")
-            if baseline is not None:
-                try:
-                    from ..models.baseline_comparison import BaselineComparisonReport
-                    parsed_baseline = BaselineComparisonReport.model_validate(baseline)
-                except Exception as error:  # noqa: BLE001 - malformed persisted evidence is invalid evidence
-                    excluded.append(ExcludedCandidate(
-                        trial_id=trial.trial_id, model_id=model_id,
-                        reason="BASELINE_EVIDENCE_HASH_MISMATCH", detail={"message": str(error)[:512]},
-                    ))
-                    continue
-                if parsed_baseline.comparison_status == "COMPARISON_INVALID":
-                    excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="COMPARISON_INVALID"))
-                    continue
-                if parsed_baseline.comparison_status == "COMPARISON_INSUFFICIENT_DATA":
-                    excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="COMPARISON_INSUFFICIENT_DATA"))
-                    continue
+            if parsed_baseline is not None:
                 readiness = [
                     (parsed_baseline.data_quality.get(path) or {}).get("research_readiness")
                     for path in ("feature", "label_source")
@@ -1234,7 +1474,7 @@ class ResearchExperimentRegistry:
                 continue
             candidates.append({
                 "trial_id": trial.trial_id, "model_id": model_id, "rank_ic": float(rank_ic),
-                "coverage": float(coverage), "job_id": binding.job_id, "result_hash": job["result_hash"],
+                "coverage_evidence": coverage, "job_id": binding.job_id, "result_hash": job["result_hash"],
                 "evidence_references": [self._result_ref(trial, job)],
             })
         return candidates, excluded
@@ -1423,13 +1663,20 @@ class ResearchExperimentRegistry:
             "data_quality": report.data_quality,
         }
 
-    def _data_reuse(self, campaign: ResearchCampaignRecord) -> list[ResearchDataReuseFinding]:
+    def _data_reuse(self, campaign: ResearchCampaignRecord, cutoff: str | None = None) -> list[ResearchDataReuseFinding]:
         this_scope = campaign.definition.development_data_scope
         findings: list[ResearchDataReuseFinding] = []
-        rows = self.connection.execute(
-            "SELECT campaign_id,definition FROM alpha_research_campaigns WHERE campaign_id<>? ORDER BY created_at,campaign_id",
-            (campaign.campaign_id,),
-        ).fetchall()
+        if cutoff is None:
+            rows = self.connection.execute(
+                "SELECT campaign_id,definition FROM alpha_research_campaigns WHERE campaign_id<>? ORDER BY created_at,campaign_id",
+                (campaign.campaign_id,),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                "SELECT campaign_id,definition FROM alpha_research_campaigns WHERE campaign_id<>? AND created_at<=? "
+                "ORDER BY created_at,campaign_id",
+                (campaign.campaign_id, cutoff),
+            ).fetchall()
         for other_id, encoded in rows:
             other = ResearchCampaignDefinition.model_validate(_load(encoded)).development_data_scope
             same_stock = sorted(set(this_scope.stock_dataset_ids) & set(other.stock_dataset_ids))
@@ -1487,16 +1734,49 @@ class ResearchExperimentRegistry:
             ).fetchone()
         return None if row is None else self.get_snapshot(row[0])
 
+    def _snapshot_sealed_at(self, snapshot: ResearchLedgerSnapshot) -> str | None:
+        row = self.connection.execute(
+            "SELECT created_at FROM alpha_research_events WHERE campaign_id=? AND event_type='LEDGER_SEALED' "
+            "AND json_extract(detail,'$.candidate_ledger_hash')=? ORDER BY event_sequence LIMIT 1",
+            (snapshot.campaign_id, snapshot.candidate_ledger_hash),
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def _event_cutoff(self, campaign_id: str, watermark: int) -> str | None:
+        row = self.connection.execute(
+            "SELECT created_at FROM alpha_research_events WHERE campaign_id=? AND event_sequence<=? "
+            "ORDER BY event_sequence DESC LIMIT 1",
+            (campaign_id, watermark),
+        ).fetchone()
+        return None if row is None else row[0]
+
     def build_evidence_report(
         self,
         *,
         campaign_id: str,
         protocol_hash: str | None = None,
         candidate_ledger_hash: str | None = None,
+        ledger_watermark: int | None = None,
     ) -> ResearchEvidenceReport:
         campaign = self.get_campaign(campaign_id)
-        snapshot = self.get_snapshot(candidate_ledger_hash) if candidate_ledger_hash else self._latest_snapshot(campaign_id, protocol_hash)
+        snapshot = self.get_snapshot(candidate_ledger_hash) if candidate_ledger_hash else None
+        if snapshot is None and ledger_watermark is not None:
+            if type(ledger_watermark) is not int or ledger_watermark < 0:
+                raise ValueError("Invalid ledger watermark")
+            row = self.connection.execute(
+                "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
+                "AND ledger_watermark=? ORDER BY created_at DESC LIMIT 1",
+                (campaign_id, ledger_watermark),
+            ).fetchone()
+            snapshot = None if row is None else self.get_snapshot(row[0])
+        if snapshot is None and ledger_watermark is None:
+            # An unbound report is a live Campaign view. Callers that need immutable
+            # evidence must pass a Snapshot hash or explicit ledger watermark.
+            snapshot = None
+        data_reuse_cutoff = None
         if snapshot is not None:
+            ledger_watermark = snapshot.ledger_watermark
+            data_reuse_cutoff = self._snapshot_sealed_at(snapshot)
             protocol_hash = snapshot.protocol_hash
             integrity = ResearchLedgerIntegrity(
                 status=snapshot.scope_completeness.ledger_integrity_status,
@@ -1507,9 +1787,19 @@ class ResearchExperimentRegistry:
             completeness = snapshot.scope_completeness
             watermark = snapshot.ledger_watermark
         else:
-            integrity = self.verify_ledger(campaign_id)
-            completeness = self._scope_completeness(campaign_id, integrity)
-            watermark = integrity.ledger_watermark
+            if ledger_watermark is not None:
+                current = self.ledger_watermark(campaign_id)
+                if ledger_watermark > current:
+                    raise AlphaError(AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE, "Requested report watermark is unavailable", {
+                        "campaign_id": campaign_id, "requested_watermark": ledger_watermark, "current_watermark": current,
+                    })
+                integrity = self.verify_ledger(campaign_id, watermark=ledger_watermark)
+                watermark = ledger_watermark
+                data_reuse_cutoff = self._event_cutoff(campaign_id, watermark)
+            else:
+                integrity = self.verify_ledger(campaign_id)
+                watermark = integrity.ledger_watermark
+            completeness = self._scope_completeness(campaign_id, integrity, watermark=watermark)
         if protocol_hash is None:
             row = self.connection.execute(
                 "SELECT protocol_hash FROM alpha_research_protocols WHERE campaign_id=? ORDER BY created_at DESC LIMIT 1",
@@ -1542,7 +1832,7 @@ class ResearchExperimentRegistry:
                 walk_forward_evidence.append(walk)
                 if walk.get("data_quality"):
                     data_quality.append({"trial_id": trial.trial_id, "kind": "walk_forward", **walk["data_quality"]})
-        accounting = snapshot.trial_accounting if snapshot is not None else self.trial_accounting(campaign_id)
+        accounting = snapshot.trial_accounting if snapshot is not None else self.trial_accounting(campaign_id, watermark=watermark)
         exposures = self.connection.execute(
             "SELECT trial_id,job_id,result_hash,section,first_accessed_at,last_accessed_at,access_count "
             "FROM alpha_research_exposures WHERE trial_id IN (SELECT trial_id FROM alpha_research_trials WHERE campaign_id=?) "
@@ -1624,7 +1914,7 @@ class ResearchExperimentRegistry:
             },
             "hypothesis_summary": hypothesis_summary,
             "data_quality_summary": data_quality,
-            "data_reuse_summary": [item.model_dump(mode="json") for item in self._data_reuse(campaign)],
+            "data_reuse_summary": [item.model_dump(mode="json") for item in self._data_reuse(campaign, data_reuse_cutoff)],
             "result_exposure_summary": exposure_summary,
             "baseline_evidence": baseline_evidence,
             "walk_forward_evidence": walk_forward_evidence,
@@ -1645,13 +1935,47 @@ class ResearchExperimentRegistry:
         section: str = "summary",
         limit: int = 100,
         cursor: str | None = None,
+        ledger_watermark: int | None = None,
         mcp_overhead_bytes: int | None = None,
     ) -> dict[str, Any]:
         with _transaction(self.connection, immediate=False):
             return self._read_research_ledger_view(
                 campaign_id=campaign_id, section=section, limit=limit, cursor=cursor,
-                mcp_overhead_bytes=mcp_overhead_bytes,
+                ledger_watermark=ledger_watermark, mcp_overhead_bytes=mcp_overhead_bytes,
             )
+
+    @staticmethod
+    def _cursor_view_identity(cursor: str) -> str:
+        try:
+            parts = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            identity = parts[0]
+            if not isinstance(identity, str) or not identity.startswith("ledger-v1|"):
+                raise ValueError
+            return identity
+        except Exception as error:
+            raise ValueError("Invalid result cursor") from error
+
+    def _trial_status_at(self, trial_id: str, watermark: int) -> str:
+        status = "REGISTERED"
+        mapping = {
+            "TRIAL_REGISTERED": "REGISTERED",
+            "TRIAL_SUBMITTED": "SUBMITTED",
+            "TRIAL_EXECUTION_STARTED": "RUNNING",
+            "TRIAL_RETRY_STARTED": "RUNNING",
+            "TRIAL_PUBLISHING": "PUBLISHING",
+            "TRIAL_COMPLETED": "COMPLETED",
+            "TRIAL_FAILED": "FAILED",
+            "TRIAL_CANCELLED": "CANCELLED",
+            "TRIAL_WORKER_LOST": "FAILED",
+            "TRIAL_REJECTED": "REJECTED",
+        }
+        for row in self.connection.execute(
+            "SELECT event_type FROM alpha_research_events WHERE trial_id=? AND event_sequence<=? ORDER BY event_sequence",
+            (trial_id, watermark),
+        ).fetchall():
+            if row[0] in mapping and status != "COMPLETED":
+                status = mapping[row[0]]
+        return status
 
     def _read_research_ledger_view(
         self,
@@ -1660,24 +1984,60 @@ class ResearchExperimentRegistry:
         section: str = "summary",
         limit: int = 100,
         cursor: str | None = None,
+        ledger_watermark: int | None = None,
         mcp_overhead_bytes: int | None = None,
     ) -> dict[str, Any]:
         campaign = self.get_campaign(campaign_id)
-        integrity = self.verify_ledger(campaign_id)
-        watermark = integrity.ledger_watermark
-        snapshot = self._latest_snapshot(campaign_id)
-        snapshot_hash = None if snapshot is None else snapshot.candidate_ledger_hash
-        identity = canonical_digest({"campaign_id": campaign_id, "watermark": watermark, "snapshot": snapshot_hash})
+        if cursor is not None:
+            identity = self._cursor_view_identity(cursor)
+            _, encoded_campaign, encoded_watermark, encoded_snapshot = identity.split("|", 3)
+            if encoded_campaign != campaign_id:
+                raise ValueError("Invalid result cursor")
+            watermark = int(encoded_watermark)
+            snapshot_hash = encoded_snapshot or None
+        else:
+            snapshot = self._latest_snapshot(campaign_id)
+            if ledger_watermark is not None:
+                if type(ledger_watermark) is not int or ledger_watermark < 0:
+                    raise ValueError("Invalid ledger watermark")
+                watermark = ledger_watermark
+                snapshot = self.connection.execute(
+                    "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
+                    "AND ledger_watermark=? ORDER BY created_at DESC LIMIT 1",
+                    (campaign_id, ledger_watermark),
+                ).fetchone()
+                snapshot_hash = None if snapshot is None else snapshot[0]
+            else:
+                watermark = snapshot.ledger_watermark if snapshot is not None else self.ledger_watermark(campaign_id)
+                snapshot_hash = None if snapshot is None else snapshot.candidate_ledger_hash
+            identity = f"ledger-v1|{campaign_id}|{watermark}|{snapshot_hash or ''}"
+        current_watermark = self.ledger_watermark(campaign_id)
+        if watermark > current_watermark:
+            raise AlphaError(AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE, "Requested ledger watermark is not available", {
+                "campaign_id": campaign_id, "requested_watermark": watermark, "current_watermark": current_watermark,
+            })
+        integrity = self.verify_ledger(campaign_id, watermark=watermark)
         sections: dict[str, list[dict[str, Any]]] = {}
+        events_models = [event for event in self.list_events(campaign_id) if event.event_sequence <= watermark]
+        active_protocol_hashes = {
+            event.protocol_hash for event in events_models
+            if event.protocol_hash and event.event_type in {"PROTOCOL_REGISTERED", "PROTOCOL_REVISED"}
+        }
         protocols = [
             self.get_protocol(row[0]).model_dump(mode="json")
             for row in self.connection.execute(
                 "SELECT protocol_hash FROM alpha_research_protocols WHERE campaign_id=? ORDER BY created_at,protocol_hash",
                 (campaign_id,),
-            ).fetchall()
+            ).fetchall() if row[0] in active_protocol_hashes
         ]
-        trials = [trial.model_dump(mode="json") for trial in self._all_trials(campaign_id)]
-        events = [event.model_dump(mode="json") for event in self.list_events(campaign_id)]
+        trials = []
+        for trial in self._all_trials(campaign_id):
+            if trial.registered_ledger_watermark > watermark:
+                continue
+            encoded = trial.model_dump(mode="json")
+            encoded["status"] = self._trial_status_at(trial.trial_id, watermark)
+            trials.append(encoded)
+        events = [event.model_dump(mode="json") for event in events_models]
         hypotheses = [
             self._hypothesis_from_row(item).model_dump(mode="json")
             for item in self.connection.execute(
@@ -1688,16 +2048,18 @@ class ResearchExperimentRegistry:
         ]
         snapshots = [
             self.get_snapshot(row[0]).model_dump(mode="json") for row in self.connection.execute(
-                "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? ORDER BY ledger_watermark,created_at",
-                (campaign_id,),
+                "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
+                "AND ledger_watermark<=? ORDER BY ledger_watermark,created_at",
+                (campaign_id, watermark),
             ).fetchall()
         ]
+        allowed_snapshot_hashes = {item["candidate_ledger_hash"] for item in snapshots}
         selections = [
             ResearchSelection.model_validate(_load(row[0])).model_dump(mode="json")
             for row in self.connection.execute(
                 "SELECT payload FROM alpha_research_selections WHERE campaign_id=? ORDER BY created_at,selection_id",
                 (campaign_id,),
-            ).fetchall()
+            ).fetchall() if _load(row[0]).get("candidate_ledger_hash") in allowed_snapshot_hashes
         ]
         sections.update({
             "campaigns": [campaign.model_dump(mode="json")],
@@ -1708,14 +2070,20 @@ class ResearchExperimentRegistry:
             "snapshots": snapshots,
             "selections": selections,
         })
-        accounting = self.trial_accounting(campaign_id)
+        if snapshot_hash is not None:
+            accounting = self.get_snapshot(snapshot_hash).trial_accounting
+            completeness = self.get_snapshot(snapshot_hash).scope_completeness
+        else:
+            accounting = self.trial_accounting(campaign_id, watermark=watermark)
+            completeness = self._scope_completeness(campaign_id, integrity, watermark=watermark)
         summary = {
             "schema_version": "alpha-research-experiment-registry-v1",
             "campaign_id": campaign_id,
             "campaign_status": campaign.campaign_status,
             "ledger_watermark": watermark,
+            "current_ledger_watermark": self.ledger_watermark(campaign_id),
             "ledger_integrity": integrity.model_dump(mode="json"),
-            "scope_completeness": self._scope_completeness(campaign_id, integrity).model_dump(mode="json"),
+            "scope_completeness": completeness.model_dump(mode="json"),
             "trial_accounting": accounting.model_dump(mode="json"),
             "latest_protocol_hash": protocols[-1]["protocol_hash"] if protocols else None,
             "latest_candidate_ledger_hash": snapshot_hash,
@@ -1723,19 +2091,26 @@ class ResearchExperimentRegistry:
         if section == "summary":
             return summary
         if section == "evidence":
-            rows = [
-                {
+            rows = []
+            for trial in self._all_trials(campaign_id):
+                if trial.registered_ledger_watermark > watermark:
+                    continue
+                binding = self.get_trial_job(trial.trial_id)
+                job = None if binding is None else self._job_row(binding.job_id)
+                state = self._trial_status_at(trial.trial_id, watermark)
+                rows.append({
                     "trial_id": trial.trial_id,
-                    "job_id": binding.job_id,
-                    "job_status": (job or {}).get("status"),
-                    "job_config_hash": (job or {}).get("config_hash"),
-                    "result_hash": (job or {}).get("result_hash"),
+                    "job_id": None if binding is None else binding.job_id,
+                    "job_status": (
+                        "completed" if state == "COMPLETED" else
+                        "failed" if state in {"FAILED", "REJECTED"} else
+                        "cancelled" if state == "CANCELLED" else
+                        state.lower()
+                    ),
+                    "job_config_hash": None if binding is None else binding.job_config_hash,
+                    "result_hash": None if job is None or state != "COMPLETED" else job["result_hash"],
                     "evidence_scope_hash": trial.evidence_scope_hash,
-                }
-                for trial in self._all_trials(campaign_id)
-                for binding in [self.get_trial_job(trial.trial_id)]
-                for job in [None if binding is None else self._job_row(binding.job_id)]
-            ]
+                })
             sections[section] = rows
         if section not in sections:
             raise ValueError("Unknown research ledger section")
@@ -1755,13 +2130,15 @@ class ResearchExperimentRegistry:
         campaign_id: str,
         protocol_hash: str | None = None,
         candidate_ledger_hash: str | None = None,
+        ledger_watermark: int | None = None,
         section: str = "summary",
         limit: int = 100,
         cursor: str | None = None,
         mcp_overhead_bytes: int | None = None,
     ) -> dict[str, Any]:
         report = self.build_evidence_report(
-            campaign_id=campaign_id, protocol_hash=protocol_hash, candidate_ledger_hash=candidate_ledger_hash,
+            campaign_id=campaign_id, protocol_hash=protocol_hash,
+            candidate_ledger_hash=candidate_ledger_hash, ledger_watermark=ledger_watermark,
         )
         for reference in report.evidence_references:
             if reference.get("job_id"):

@@ -94,72 +94,114 @@ def canonical_request_payload(value: dict[str, Any]) -> dict[str, Any]:
     return _drop_paths(value, _REQUEST_RUNTIME_PATHS)
 
 
-def trial_definition_payload(value: dict[str, Any]) -> dict[str, Any]:
-    """Scientific candidate identity.
+def _factor_spec_hash(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        from ..factors.ast import FactorSpec
+        from ..factors.compiler import compile_factor_spec
+        return compile_factor_spec(FactorSpec.model_validate(value)).spec_hash
+    except Exception as error:
+        raise ValueError("RESEARCH_PROTOCOL_MISMATCH: invalid FactorSpec in managed request") from error
 
-    Runtime budgets and caller display labels are excluded. Dataset, factor, label,
-    model, seed, window, fold, inference, metric and threshold fields remain.
-    """
-    payload = canonical_request_payload(value)
-    payload.pop("kind", None)
-    payload.pop("feature_set_id", None)
-    payload.pop("stock_dataset_id", None)
-    payload.pop("horizon_days", None)
-    payload.pop("random_seed", None)
-    payload.pop("split", None)
-    payload.pop("development_window", None)
-    payload.pop("walk_forward_config", None)
-    payload.pop("baseline_comparison", None)
-    payload.pop("lightgbm_hyperparameters", None)
-    payload.pop("hyperparameters", None)
-    payload.pop("min_rank_ic", None)
-    payload.pop("label_spec", None)
-    payload.pop("label_name", None)
-    payload.pop("target_type", None)
-    identity = {
-        "request_kind": value.get("kind"),
-        "feature_set_id": value.get("feature_set_id"),
-        "stock_dataset_id": value.get("stock_dataset_id") or (value.get("label_spec") or {}).get("stock_dataset_id"),
-        "label": value.get("label_spec") or {
-            "label_name": value.get("label_name"),
-            "target_type": value.get("target_type"),
-            "horizon_days": value.get("horizon_days"),
+
+def normalized_research_request(value: dict[str, Any]) -> dict[str, Any]:
+    """One Training/Walk-forward shape for Protocol constraints and Selection."""
+    request = canonical_request_payload(value)
+    kind = request.get("kind")
+    if kind == "train_alpha_model":
+        label = {
+            "label_name": request.get("label_name"),
+            "target_type": request.get("target_type"),
+            "stock_dataset_id": request.get("stock_dataset_id"),
+            "horizon_days": request.get("horizon_days"),
+        }
+        window = request.get("split")
+        factor_spec = (request.get("baseline_comparison") or {}).get("factor_spec")
+        candidate = {
+            "kind": kind,
+            "feature_set_id": request.get("feature_set_id"),
+            "stock_dataset_id": request.get("stock_dataset_id"),
+            "label": label,
+            "factor_spec": factor_spec,
+            "factor_spec_hash": _factor_spec_hash(factor_spec),
+            "baseline_comparison": request.get("baseline_comparison"),
+            "hyperparameters": request.get("hyperparameters") or {},
+            "random_seed": request.get("random_seed", 0),
+            "seed": request.get("random_seed", 0),
+            "model": "lightgbm_v1",
+        }
+    elif kind == "walk_forward_alpha":
+        label = request.get("label_spec") or {}
+        window = request.get("development_window")
+        factor_spec = (request.get("baseline_comparison") or {}).get("factor_spec")
+        candidate = {
+            "kind": kind,
+            "feature_set_id": request.get("feature_set_id"),
+            "stock_dataset_id": request.get("stock_dataset_id") or label.get("stock_dataset_id"),
+            "label": label,
+            "factor_spec": factor_spec,
+            "factor_spec_hash": _factor_spec_hash(factor_spec),
+            "baseline_comparison": request.get("baseline_comparison"),
+            "hyperparameters": request.get("lightgbm_hyperparameters") or {},
+            "random_seed": request.get("random_seed", 0),
+            "seed": request.get("random_seed", 0),
+            "walk_forward_config": request.get("walk_forward_config"),
+        }
+    else:
+        raise TypeError("Managed Research supports training and walk-forward requests only")
+    return {
+        "kind": kind,
+        "canonical_request": request,
+        "feature_set_id": candidate["feature_set_id"],
+        "stock_dataset_id": candidate["stock_dataset_id"],
+        "label_spec": label,
+        "development_window": window,
+        "factor_spec": factor_spec,
+        "factor_spec_hash": candidate["factor_spec_hash"],
+        "candidate": candidate,
+        "evaluation": {
+            "primary_metric": "rank_ic",
+            "minimum_rank_ic": request.get("min_rank_ic"),
+            "baseline_comparison_status_policy": (request.get("baseline_comparison") or {}).get("factor_spec") is not None,
+            "multiple_testing_scope": "CURRENT_PREREGISTERED_FAMILY_ONLY",
+            "minimum_valid_folds": (request.get("walk_forward_config") or {}).get("min_folds") if kind == "walk_forward_alpha" else None,
         },
-        "development_windows": value.get("split") or value.get("development_window"),
-        "factor_and_candidate_config": value.get("baseline_comparison"),
-        "model_config": value.get("hyperparameters") or value.get("lightgbm_hyperparameters"),
-        "seed": value.get("random_seed", 0),
-        "walk_forward": value.get("walk_forward_config"),
-        "primary_metric_and_threshold": {
-            "min_rank_ic": value.get("min_rank_ic"),
-            "selection_policy": value.get("selection_policy"),
+        "stopping": {
+            "max_seconds": request.get("max_seconds"),
+            "resource_budget": request.get("resource_budget") or {},
         },
-        "inference": (value.get("walk_forward_config") or {}).get("inference") if value.get("kind") == "walk_forward_alpha" else None,
     }
-    return identity
+
+
+def trial_definition_payload(value: dict[str, Any]) -> dict[str, Any]:
+    """Scientific candidate identity shared by Training and Walk-forward registrations."""
+    normalized = normalized_research_request(value)
+    candidate = normalized["candidate"]
+    return {
+        "request_kind": normalized["kind"],
+        "feature_set_id": normalized["feature_set_id"],
+        "stock_dataset_id": normalized["stock_dataset_id"],
+        "label": normalized["label_spec"],
+        "development_windows": normalized["development_window"],
+        "factor_spec_hash": normalized["factor_spec_hash"],
+        "candidate": candidate,
+        "evaluation": normalized["evaluation"],
+    }
 
 
 def trial_identities(request: dict[str, Any]) -> tuple[dict[str, Any], str, str, str]:
     canonical_request = canonical_request_payload(request)
     request_hash = canonical_digest(canonical_request)
-    definition_payload = trial_definition_payload(request)
-    definition_hash = canonical_digest(definition_payload)
-    label = request.get("label_spec") or {
-        "label_name": request.get("label_name"),
-        "target_type": request.get("target_type"),
-        "horizon_days": request.get("horizon_days"),
-    }
+    normalized = normalized_research_request(request)
+    definition_hash = canonical_digest(trial_definition_payload(request))
     evidence_body = {
-        "feature_set_id": request.get("feature_set_id"),
-        "stock_dataset_id": request.get("stock_dataset_id") or label.get("stock_dataset_id"),
-        "label": label,
-        "development_windows": request.get("split") or request.get("development_window"),
-        "evaluation": {
-            "kind": request.get("kind"),
-            "primary_metric": request.get("min_rank_ic"),
-            "walk_forward": request.get("walk_forward_config"),
-            "baseline_comparison": request.get("baseline_comparison"),
-        },
+        "feature_set_id": normalized["feature_set_id"],
+        "stock_dataset_id": normalized["stock_dataset_id"],
+        "label": normalized["label_spec"],
+        "development_windows": normalized["development_window"],
+        "factor_spec_hash": normalized["factor_spec_hash"],
+        "evaluation": normalized["evaluation"],
     }
     return canonical_request, request_hash, definition_hash, canonical_digest(evidence_body)
 
