@@ -26,6 +26,11 @@ first. This skill directory is independently installable; all required reference
 - `quant_get_job` - monitor durable research status
 - `quant_cancel_job` - cancel an authorized queued/running experiment
 - `quant_get_result` - page research results and reproducibility artifacts
+- `quant_register_alpha_research_protocol` - create governed Alpha Campaigns and server-hashed Protocol revisions
+- `quant_register_alpha_trial` - register a canonical managed Alpha Trial
+- `quant_get_alpha_research_ledger` - inspect managed Trial accounting and integrity
+- `quant_seal_alpha_candidate_ledger` - seal governed candidate evidence
+- `quant_get_alpha_research_report` - audit deterministic research evidence
 
 ## Workflow
 
@@ -68,3 +73,16 @@ handoff contract if another skill is not installed.
 Do not rank a boolean signal, optimize against the held-out test set, infer historical constituents
 from today's symbols, confuse valid syntax with sandbox execution, or claim performance before a
 completed job returns it.
+
+## Governed Alpha Research
+
+For Alpha model or walk-forward research, do not submit directly from a Protocol hash supplied by the
+caller. Register the Campaign/Protocol and a canonical Trial first, inspect the existing Ledger, then
+bind `research_trial_id` to the submitted Job. The runtime rejects omission of that binding whenever
+the Protocol is registered.
+
+Use `quant_get_alpha_research_ledger`, `quant_seal_alpha_candidate_ledger` and
+`quant_get_alpha_research_report` after terminal execution. Keep the predeclared numeric selection
+rule, all failed and cancelled Trials, data-reuse diagnostics, exposure history and the explicit
+`global_trial_history_complete=false` boundary in the final research record. Never treat Registry
+integrity or local Holm correction as Alpha confirmation, production readiness or global significance.

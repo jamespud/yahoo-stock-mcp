@@ -197,3 +197,37 @@ See [the current research status](QUANT_ALPHA_STATUS.md), the
 [baseline models v1 design](superpowers/specs/alpha-baseline-models-v1.md) and the
 [walk-forward v1 design](superpowers/specs/alpha-walk-forward-v1.md) for exact evidence, contracts and
 limitations.
+
+## Research Experiment Registry
+
+PR5 adds a SQLite-backed governance layer on the existing JobStore. New MCP tools are:
+
+- `quant_register_alpha_research_protocol`
+- `quant_register_alpha_trial`
+- `quant_get_alpha_research_ledger`
+- `quant_seal_alpha_candidate_ledger`
+- `quant_get_alpha_research_report`
+
+A registered Protocol is managed. Training and walk-forward requests bound to it must include a
+registered `research_trial_id`, and the submitted request must match the Trial's canonical request.
+Omitting the binding or changing Seed, Horizon, FactorSpec, hyperparameters, windows, fold settings or
+inference does not create a valid managed request. An unregistered Protocol hash remains the legacy
+unmanaged path and cannot claim Registry completeness.
+
+The Registry records Campaign/Protocol/Hypothesis/Trial/Job identities separately, appends a hash-chained
+event ledger, enforces Campaign budgets under SQLite `BEGIN IMMEDIATE`, tracks result exposure, and
+preserves failed, cancelled, rejected and negative-result Trials. A Candidate Ledger Snapshot can be
+sealed only after all registered Trials and Jobs are terminal. Its system-computed
+`candidate_ledger_hash` and Selection Record are required by a managed Freeze.
+
+`quant_get_alpha_research_report` reconstructs PR3 Baseline reports and every PR4 Walk-forward fold,
+validates their hashes, reports data reuse and exposure, and keeps:
+
+```text
+global_trial_history_complete = false
+multiple_testing_scope = CURRENT_PREREGISTERED_FAMILY_ONLY
+```
+
+Registry integrity is not Alpha confirmation. Campaign-level correction is not estimated from trial
+count, and the report never reads or copies protected Test/OOS rows. See
+[the experiment-registry design](superpowers/specs/alpha-research-experiment-registry-v1.md).

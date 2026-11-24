@@ -1,6 +1,6 @@
 # Quant Alpha Research Status
 
-Updated: 2026-11-23
+Updated: 2026-11-24
 
 ## Acceptance Status
 
@@ -9,6 +9,8 @@ Updated: 2026-11-23
 | Engineering reliability | PASS |
 | Alpha research readiness | PASS |
 | Development walk-forward capability | PASS (synthetic and contract tests) |
+| Research experiment registry | IMPLEMENTED (synthetic lifecycle, concurrency and MCP E2E) |
+| Global research trial history | INCOMPLETE BY DESIGN |
 | Real-market walk-forward evidence | NOT RUN |
 | Real-market trading validity | BLOCKED |
 
@@ -55,3 +57,17 @@ canonical reconstruction path that verifies the full report hash. No real histor
 PR4. Fold models are report-only identities and are never registered, frozen or eligible for OOS grants.
 All four statistical tests are local to the current preregistered family; the report explicitly records
 that global trial-history completeness is false.
+
+
+## Research Experiment Registry v1
+
+PR5 adds server-hashed Campaigns, immutable Protocol revisions, Hypothesis/Trial registrations, a
+cross-Job ledger, hard Campaign budgets, exposure tracking, Candidate Ledger Snapshots, governed
+selection and deterministic PR3/PR4 evidence reports. Managed Training and Walk-forward Jobs require a
+canonical registered Trial; a registered Protocol cannot be downgraded by omitting that binding.
+
+Global historical trial completeness remains false. The Registry cannot prove that researchers never
+observed data outside the system, cannot provide external trusted timestamps, and does not implement
+Deflated Sharpe Ratio, PBO, White Reality Check, Hansen SPA, sequential spending or online FDR.
+Campaign correction is conservatively reported as not estimable from trial count. No PR5 path reopens
+the historical Alpha v1.3 Test/OOS or automatically starts OOS evaluation.

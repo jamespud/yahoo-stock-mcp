@@ -25,6 +25,8 @@ first. All references required to install this skill independently live inside t
 - `quant_cancel_job` - cancel authorized work or enforce agreed budgets
 - `quant_get_result` - retrieve trial records, ledgers, artifacts and reproducibility
 - `quant_freeze_alpha_selection` / `quant_evaluate_alpha_oos` - audit Validation-selected freezes and independent OOS evidence
+- `quant_get_alpha_research_ledger` - verify cross-Job Trial accounting, hash chain, budgets and lifecycle reconciliation
+- `quant_get_alpha_research_report` - audit sealed selection, PR3/PR4 evidence hashes, data reuse and unresolved statistical scope
 
 ## Workflow
 
@@ -86,3 +88,22 @@ Use `quant-strategy-research` to author a hypothesis, DSL, screen or optimizatio
 The [local examples](references/strategy-examples.json) support standalone DSL validation.
 Do not certify unseen trial history, treat missing metrics as zero, assume zero trading costs,
 compare mismatched benchmarks, or describe a simulation as a broker order or investment advice.
+
+## Managed Research Evidence
+
+When reviewing an Alpha research conclusion, prefer a sealed Candidate Ledger Snapshot over a single
+Job summary. Verify:
+
+- `ledger_integrity.status=VERIFIED` and the reported Ledger watermark;
+- Campaign/Protocol/Hypothesis/Trial/Job/Attempt identities are distinct;
+- all registered Trials are terminal and failed, cancelled, negative-IC and excluded candidates remain;
+- the selected model exists in the original Model Registry and the Selection Record matches the sealed
+  Snapshot policy;
+- `global_trial_history_complete=false` and `exposure_tracking_complete=false` are disclosed honestly;
+- PR3 Baseline and every page of PR4 Walk-forward evidence reconstruct to their report hashes;
+- `multiple_testing_scope=CURRENT_PREREGISTERED_FAMILY_ONLY` is not presented as global correction;
+- data-reuse findings are not treated as statistical independence merely because Dataset IDs differ.
+
+A sealed Snapshot after new research activity is stale. A missing Trial, fake Candidate Ledger hash,
+unregistered Protocol used to claim managed evidence, or completed Job with invalid research status
+must fail closed.

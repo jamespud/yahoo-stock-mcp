@@ -10,8 +10,9 @@ import { openDatabase } from "../../dist/storage/database.js";
 import { applySqliteMigrations } from "../../dist/storage/migrations.js";
 
 const root = resolve(import.meta.dirname, "../..");
+const pythonBinary = process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python");
 
-test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, async () => {
+test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, async () => {
   const tmp = mkdtempSync(resolve(tmpdir(), "alpha-e2e-"));
   const db = resolve(tmp, "data.db");
   const seed = openDatabase(db);
@@ -47,14 +48,14 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     assert.deepEqual(Object.keys(walkForwardSchema.properties).sort(), [
       "baseline_comparison", "development_window", "evaluation_mode", "feature_set_id", "idempotency_key",
       "label_spec", "lightgbm_hyperparameters", "max_seconds", "random_seed", "research_protocol_hash",
-      "resource_budget", "stock_dataset_id", "walk_forward_config",
+      "research_trial_id", "resource_budget", "stock_dataset_id", "walk_forward_config",
     ]);
     assert.ok(!("test_start" in walkForwardSchema.properties));
     assert.ok(!("test_feature_set_id" in walkForwardSchema.properties));
     assert.ok(!("freeze_id" in walkForwardSchema.properties));
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
       "baseline_comparison", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
-      "random_seed", "research_protocol_hash", "resource_budget", "windows",
+      "random_seed", "research_protocol_hash", "research_trial_id", "resource_budget", "windows",
     ]);
     assert.deepEqual(trainingSchema.required, ["evaluation_mode", "research_protocol_hash", "feature_set_id", "label_spec", "windows"]);
     function advertisedType(schema, type) {
@@ -79,14 +80,19 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       assert(!result.isError, JSON.stringify(result));
       return JSON.parse(result.content[0].text);
     }
-    async function done(id) {
-      for (let i = 0; i < 600; i++) {
+    async function terminal(id) {
+      for (let i = 0; i < 1200; i++) {
         const job = await call("quant_get_job", {job_id: id});
-        if (job.status === "completed") return;
+        if (["completed", "failed", "cancelled"].includes(job.status)) return job;
         assert(["queued", "running"].includes(job.status), JSON.stringify(job));
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       assert.fail("alpha job timed out");
+    }
+    async function done(id) {
+      const job = await terminal(id);
+      assert.equal(job.status, "completed", JSON.stringify(job));
+      return job;
     }
     const fakeId = "sha256:" + "1".repeat(64);
     const trainingArgs = {
@@ -212,13 +218,64 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       schema_version: "1.0", factor_spec: baselineFactorSpec,
       reversal_output: "reversal_source", rsi_output: "rsi_source", ridge_alpha: 1.0,
     };
+    const windows = {train_start: "2024-01-02T00:00:00Z", train_end: "2024-04-01T00:00:00Z",
+      validation_start: "2024-04-01T00:00:00Z", validation_end: "2024-05-01T00:00:00Z"};
+    const registeredResearch = await call("quant_register_alpha_research_protocol", {
+      campaign: {
+        campaign_name: "synthetic governed baseline",
+        research_objective: "Verify that the selected development model is backed by a complete managed ledger.",
+        research_scope: {synthetic: true},
+        development_data_scope: {
+          asset_class: "equity", market: "US",
+          development_start: "2024-01-02T00:00:00Z", development_end: "2024-05-02T00:00:00Z",
+          data_provider: "local-yahoo-fixture",
+          stock_dataset_ids: [baselineDataset.dataset_id],
+          feature_dataset_ids: [baselineFactorDataset.dataset_id],
+          label_definitions: [{label_name: "stock_forward_return", horizon_days: 5}],
+        },
+        resource_policy: {max_registered_trials: 4, max_submitted_trials: 4, max_distinct_candidate_definitions: 4,
+          max_evaluation_jobs: 4, max_execution_attempts: 8, max_protocol_revisions: 2},
+      },
+      protocol: {
+        hypothesis_definitions: [{
+          hypothesis_key: "synthetic_reversal", title: "Synthetic development reversal",
+          economic_rationale: "Synthetic fixture only.", expected_direction: "positive",
+          target_variable: "stock_forward_return", primary_metric: "rank_ic",
+          null_hypothesis: "No positive RankIC.", comparison_family: ["lightgbm_vs_ridge"],
+        }],
+        candidate_definitions: [{model: "lightgbm_v1", seed: 0}],
+        allowed_job_kinds: ["train_alpha_model"],
+        data_constraints: {stock_dataset_ids: [baselineDataset.dataset_id], feature_set_ids: [baselineFactorDataset.dataset_id]},
+        label_specifications: [{label_name: "stock_forward_return", target_type: "stock_return", horizon_days: 5}],
+        development_windows: [windows],
+        selection_policy: {primary_metric: "rank_ic", minimum_rank_ic: -1, minimum_label_coverage: 0,
+          allowed_research_status: ["RESEARCH_EXPLORATORY", "RESEARCH_DATA_VALIDATED"]},
+      },
+    });
+    const campaignId = registeredResearch.campaign.campaign_id;
+    const protocolHash = registeredResearch.protocol.protocol_hash;
+    const hypothesisId = registeredResearch.protocol.registered_hypotheses[0].hypothesis_id;
+    const canonicalManagedTraining = {
+      kind: "train_alpha_model", feature_set_id: baselineFactorDataset.dataset_id,
+      label_name: "stock_forward_return", target_type: "stock_return",
+      stock_dataset_id: baselineDataset.dataset_id, horizon_days: 5,
+      evaluation_mode: "validation_only", research_protocol_hash: protocolHash,
+      split: windows, hyperparameters: {n_estimators: 20, min_child_samples: 2},
+      random_seed: 0, min_rank_ic: -1,
+      resource_budget: {max_seconds: 120, max_rows: 50000},
+      baseline_comparison: baselineConfig,
+    };
+    const registeredTrial = await call("quant_register_alpha_trial", {
+      campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
+      trial_purpose: "INITIAL_HYPOTHESIS_TEST", request: canonicalManagedTraining,
+    });
     const baselineTrainingArgs = {
       evaluation_mode: "validation_only",
-      research_protocol_hash: "sha256:" + "4".repeat(64),
+      research_protocol_hash: protocolHash,
+      research_trial_id: registeredTrial.trial_id,
       feature_set_id: baselineFactorDataset.dataset_id,
       label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: baselineDataset.dataset_id, horizon_days: 5},
-      windows: {train_start: "2024-01-02T00:00:00Z", train_end: "2024-04-01T00:00:00Z",
-                validation_start: "2024-04-01T00:00:00Z", validation_end: "2024-05-01T00:00:00Z"},
+      windows,
       hyperparameters: {n_estimators: 20, min_child_samples: 2},
       min_rank_ic: -1,
       resource_budget: {max_seconds: 120, max_rows: 50000},
@@ -252,15 +309,203 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const comparisonModel = (await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "model_registry"})).rows[0];
     assert.equal(comparisonModel.test_window, null);
     assert.ok(!("oos" in comparisonModel.metrics));
+    const ledgerSummary = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    assert.equal(ledgerSummary.trial_accounting.registered_trial_count, 1);
+    assert.equal(ledgerSummary.trial_accounting.submitted_trial_count, 1);
+    assert.equal(ledgerSummary.trial_accounting.completed_evaluation_count, 1);
+    assert.equal(ledgerSummary.ledger_integrity.status, "VERIFIED");
+    const ledgerEvents = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId, section: "events", limit: 100});
+    const eventTypes = ledgerEvents.rows.map(event => event.event_type);
+    for (const eventType of ["TRIAL_REGISTERED", "TRIAL_SUBMITTED", "TRIAL_EXECUTION_STARTED", "TRIAL_PUBLISHING", "TRIAL_COMPLETED"]) {
+      assert.ok(eventTypes.includes(eventType), eventType);
+    }
+    const sealed = await call("quant_seal_alpha_candidate_ledger", {campaign_id: campaignId, protocol_hash: protocolHash});
+    assert.equal(sealed.selection.selected_model_id, comparisonModel.model_id);
+    assert.equal(sealed.selection.selection_status, "CANDIDATE_SELECTED_FOR_FURTHER_RESEARCH");
+    const reportSummary = await call("quant_get_alpha_research_report", {
+      campaign_id: campaignId, candidate_ledger_hash: sealed.candidate_ledger_snapshot.candidate_ledger_hash,
+    });
+    assert.equal(reportSummary.research_verdict, "RESEARCH_EXPLORATORY_ONLY");
+    assert.equal(reportSummary.multiple_testing_scope, "CURRENT_PREREGISTERED_FAMILY_ONLY");
+    assert.match(reportSummary.report_hash, /^sha256:[0-9a-f]{64}$/);
+    const repeatedReport = await call("quant_get_alpha_research_report", {
+      campaign_id: campaignId, candidate_ledger_hash: sealed.candidate_ledger_snapshot.candidate_ledger_hash,
+    });
+    assert.equal(repeatedReport.report_hash, reportSummary.report_hash);
+    const baselineEvidence = await call("quant_get_alpha_research_report", {
+      campaign_id: campaignId, candidate_ledger_hash: sealed.candidate_ledger_snapshot.candidate_ledger_hash,
+      section: "baseline_evidence",
+    });
+    assert.equal(baselineEvidence.total_count, 1);
+    assert.equal(baselineEvidence.rows[0].report_hash, baselineReport.report_hash);
+
+    // Scenario B: adaptive variation gets a distinct scientific identity, while a reproducibility
+    // rerun keeps the same definition and exercises worker lease recovery.
+    const exposedRequest = {...canonicalManagedTraining, random_seed: 8};
+    const exposedTrial = await call("quant_register_alpha_trial", {
+      campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
+      trial_purpose: "PARAMETER_VARIATION", request: exposedRequest,
+    });
+    assert.equal(exposedTrial.preregistration_status, "REGISTERED_AFTER_PRIOR_EXPOSURE");
+    assert.notEqual(exposedTrial.trial_definition_hash, registeredTrial.trial_definition_hash);
+    const reproducibilityTrial = await call("quant_register_alpha_trial", {
+      campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
+      trial_purpose: "REPRODUCIBILITY_CHECK", request: canonicalManagedTraining,
+    });
+    assert.equal(reproducibilityTrial.trial_definition_hash, registeredTrial.trial_definition_hash);
+    const retrySubmission = await call("quant_train_alpha_model", {
+      ...baselineTrainingArgs, research_trial_id: reproducibilityTrial.trial_id,
+    });
+    let retryJob = null;
+    for (let i = 0; i < 400; i++) {
+      retryJob = await call("quant_get_job", {job_id: retrySubmission.job_id});
+      if (retryJob.status === "running") break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(retryJob.status, "running", JSON.stringify(retryJob));
+    const expired = execFileSync(pythonBinary, ["-c",
+      "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); n=c.execute(\"update jobs set lease_until=0 where id=? and status='running'\",(sys.argv[2],)).rowcount; c.commit(); print(n)",
+      resolve(tmp, "quant.db"), retrySubmission.job_id], {encoding: "utf8"}).trim();
+    assert.equal(expired, "1");
+    await done(retrySubmission.job_id);
+    const retryEvents = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId, section: "events", limit: 1000});
+    const retryEventTypes = retryEvents.rows.map(event => event.event_type);
+    assert.ok(retryEventTypes.includes("TRIAL_WORKER_LOST"));
+    assert.ok(retryEventTypes.includes("TRIAL_RETRY_STARTED"));
+    const adaptiveAccounting = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    assert.equal(adaptiveAccounting.trial_accounting.registered_trial_count, 3);
+    assert.equal(adaptiveAccounting.trial_accounting.distinct_trial_definition_count, 2);
+    assert.ok(adaptiveAccounting.trial_accounting.execution_attempt_count >= 3);
+    const cancellationTrial = await call("quant_register_alpha_trial", {
+      campaign_id: campaignId, protocol_hash: protocolHash, hypothesis_id: hypothesisId,
+      trial_purpose: "ROBUSTNESS_CHECK", request: canonicalManagedTraining,
+    });
+    const cancellationSubmission = await call("quant_train_alpha_model", {
+      ...baselineTrainingArgs, research_trial_id: cancellationTrial.trial_id,
+    });
+    const cancellation = await call("quant_cancel_job", {job_id: cancellationSubmission.job_id});
+    assert.equal(cancellation.status, "cancelled");
+    const cancelledJob = await terminal(cancellationSubmission.job_id);
+    assert.equal(cancelledJob.status, "cancelled");
+    const cancellationAccounting = await call("quant_get_alpha_research_ledger", {campaign_id: campaignId});
+    assert.equal(cancellationAccounting.trial_accounting.cancelled_trial_count, 1);
+
+    // Scenario C: failed managed execution remains visible and blocks a clean selection snapshot.
+    const failureIds = {feature: "sha256:" + "b".repeat(64), stock: "sha256:" + "c".repeat(64)};
+    const failureRegistration = await call("quant_register_alpha_research_protocol", {
+      campaign: {
+        campaign_name: "synthetic failure ledger", research_objective: "Preserve failed and cancelled trials.",
+        development_data_scope: {asset_class: "equity", market: "US", data_provider: "synthetic-missing"},
+        resource_policy: {max_registered_trials: 4, max_submitted_trials: 4, max_distinct_candidate_definitions: 4,
+          max_evaluation_jobs: 4, max_execution_attempts: 8, max_protocol_revisions: 2},
+      },
+      protocol: {
+        hypothesis_definitions: [{hypothesis_key: "failure", title: "Failure retention",
+          economic_rationale: "Synthetic failure.", expected_direction: "positive",
+          target_variable: "stock_forward_return", primary_metric: "rank_ic", null_hypothesis: "No effect."}],
+        allowed_job_kinds: ["train_alpha_model"],
+        selection_policy: {primary_metric: "rank_ic", minimum_rank_ic: -1, minimum_label_coverage: 0},
+      },
+    });
+    const failureProtocol = failureRegistration.protocol.protocol_hash;
+    const failureHypothesis = failureRegistration.protocol.registered_hypotheses[0].hypothesis_id;
+    const failureRequest = {
+      kind: "train_alpha_model", feature_set_id: failureIds.feature, label_name: "stock_forward_return",
+      target_type: "stock_return", stock_dataset_id: failureIds.stock, horizon_days: 5,
+      evaluation_mode: "validation_only", research_protocol_hash: failureProtocol,
+      split: windows, hyperparameters: {n_estimators: 5}, random_seed: 0, min_rank_ic: -1,
+      resource_budget: {max_seconds: 10, max_rows: 1000},
+    };
+    const failureTrial = await call("quant_register_alpha_trial", {
+      campaign_id: failureRegistration.campaign.campaign_id, protocol_hash: failureProtocol,
+      hypothesis_id: failureHypothesis, trial_purpose: "INITIAL_HYPOTHESIS_TEST", request: failureRequest,
+    });
+    const failureTrain = await call("quant_train_alpha_model", {
+      evaluation_mode: "validation_only", research_protocol_hash: failureProtocol,
+      research_trial_id: failureTrial.trial_id, feature_set_id: failureIds.feature,
+      label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: failureIds.stock, horizon_days: 5},
+      windows, hyperparameters: {n_estimators: 5}, min_rank_ic: -1, resource_budget: {max_seconds: 10, max_rows: 1000},
+    });
+    const failedJob = await terminal(failureTrain.job_id);
+    assert.equal(failedJob.status, "failed", JSON.stringify(failedJob));
+    const failureLedger = await call("quant_get_alpha_research_ledger", {campaign_id: failureRegistration.campaign.campaign_id});
+    assert.equal(failureLedger.trial_accounting.failed_trial_count, 1);
+    assert.equal(failureLedger.trial_accounting.completed_evaluation_count, 0);
+    const failureSeal = await client.callTool({name: "quant_seal_alpha_candidate_ledger", arguments: {
+      campaign_id: failureRegistration.campaign.campaign_id, protocol_hash: failureProtocol,
+    }});
+    assert.ok(!failureSeal.isError);
+
+    // Scenario D: a renamed Campaign does not create independence, and fake ledger evidence cannot Freeze.
+    const reused = await call("quant_register_alpha_research_protocol", {
+      campaign: {
+        campaign_name: "renamed synthetic reuse", research_objective: "Reuse evidence without independence.",
+        development_data_scope: {
+          asset_class: "equity", market: "US", data_provider: "local-yahoo-fixture",
+          development_start: "2024-01-02T00:00:00Z", development_end: "2024-05-02T00:00:00Z",
+          stock_dataset_ids: [baselineDataset.dataset_id], feature_dataset_ids: [baselineFactorDataset.dataset_id],
+        },
+      },
+      protocol: {hypothesis_definitions: [{hypothesis_key: "reuse", title: "Reuse",
+        economic_rationale: "Synthetic reuse.", expected_direction: "positive", target_variable: "stock_forward_return",
+        primary_metric: "rank_ic", null_hypothesis: "No effect."}], allowed_job_kinds: ["train_alpha_model"]},
+    });
+    const reuseReport = await call("quant_get_alpha_research_report", {
+      campaign_id: campaignId, candidate_ledger_hash: sealed.candidate_ledger_snapshot.candidate_ledger_hash,
+      section: "data_reuse", limit: 100,
+    });
+    assert.ok(reuseReport.rows.some(row => row.status === "EXACT_EVIDENCE_REUSE" &&
+      row.campaign_ids.includes(reused.campaign.campaign_id)));
+    const jobsBeforeFakeFreeze = Number(execFileSync(pythonBinary, ["-c",
+      "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from jobs').fetchone()[0])",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}).trim());
+    const fakeFreeze = await client.callTool({name: "quant_freeze_alpha_selection", arguments: {
+      research_protocol_hash: protocolHash, candidate_ledger_hash: "sha256:" + "d".repeat(64),
+      selected_model_ids: [comparisonModel.model_id], test_feature_set_id: failureIds.feature,
+      test_label_source_dataset_id: failureIds.stock, test_start: "2024-05-01T00:00:00Z",
+      test_end: "2024-06-28T00:00:00Z", selection_reason: "forged ledger",
+      label_name: "stock_forward_return", target_type: "stock_return", horizon_days: 5,
+    }});
+    assert.ok(fakeFreeze.isError);
+    assert.match(fakeFreeze.content[0].text, /RESEARCH_EVIDENCE_HASH_MISMATCH/);
+    const jobsAfterFakeFreeze = Number(execFileSync(pythonBinary, ["-c",
+      "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select count(*) from jobs').fetchone()[0])",
+      resolve(tmp, "quant.db")], {encoding: "utf8"}).trim());
+    assert.equal(jobsAfterFakeFreeze, jobsBeforeFakeFreeze);
 
     const modelRoot = resolve(tmp, "quant.models");
     const countModelArtifacts = () => existsSync(modelRoot)
       ? readdirSync(modelRoot).filter(name => existsSync(join(modelRoot, name, "metadata.json"))).length
       : 0;
     const modelsBeforeWalkForward = countModelArtifacts();
+    const wfRegistration = await call("quant_register_alpha_research_protocol", {
+      campaign: {
+        campaign_name: "synthetic governed walk-forward",
+        research_objective: "Reconstruct complete PR4 evidence from a managed Snapshot.",
+        development_data_scope: {
+          asset_class: "equity", market: "US", data_provider: "local-yahoo-fixture",
+          development_start: "2024-01-02T00:00:00Z", development_end: "2024-05-02T00:00:00Z",
+          stock_dataset_ids: [baselineDataset.dataset_id], feature_dataset_ids: [baselineFactorDataset.dataset_id],
+        },
+      },
+      protocol: {
+        hypothesis_definitions: [{
+          hypothesis_key: "synthetic_walk_forward", title: "Synthetic walk-forward family",
+          economic_rationale: "Synthetic fixture only.", expected_direction: "positive",
+          target_variable: "stock_forward_return", primary_metric: "rank_ic", null_hypothesis: "No paired effect.",
+          comparison_family: ["H1", "H2", "H3", "H4"],
+        }],
+        allowed_job_kinds: ["walk_forward_alpha"],
+        data_constraints: {stock_dataset_ids: [baselineDataset.dataset_id], feature_set_ids: [baselineFactorDataset.dataset_id]},
+        label_specifications: [{label_name: "stock_forward_return", target_type: "stock_return", horizon_days: 5}],
+        selection_policy: {primary_metric: "rank_ic", minimum_rank_ic: -1, minimum_label_coverage: 0},
+      },
+    });
+    const wfProtocolHash = wfRegistration.protocol.protocol_hash;
+    const wfHypothesisId = wfRegistration.protocol.registered_hypotheses[0].hypothesis_id;
     const walkForwardArgs = {
       evaluation_mode: "validation_only",
-      research_protocol_hash: "sha256:" + "7".repeat(64),
+      research_protocol_hash: wfProtocolHash,
       feature_set_id: baselineFactorDataset.dataset_id,
       stock_dataset_id: baselineDataset.dataset_id,
       label_spec: {
@@ -288,6 +533,12 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       },
       max_seconds: 120,
     };
+    const canonicalWalkForward = {kind: "walk_forward_alpha", ...walkForwardArgs};
+    const wfTrial = await call("quant_register_alpha_trial", {
+      campaign_id: wfRegistration.campaign.campaign_id, protocol_hash: wfProtocolHash,
+      hypothesis_id: wfHypothesisId, trial_purpose: "INITIAL_HYPOTHESIS_TEST", request: canonicalWalkForward,
+    });
+    walkForwardArgs.research_trial_id = wfTrial.trial_id;
     const invalidWalkForward = await client.callTool({name: "quant_run_alpha_walk_forward", arguments: {
       ...walkForwardArgs,
       development_window: {...walkForwardArgs.development_window, test_start: "2024-05-02T00:00:00Z"},
@@ -330,6 +581,18 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     }});
     assert.equal(Boolean(noFoldModels.isError), true);
     assert.match(noFoldModels.content[0].text, /RESULT_SECTION_UNAVAILABLE/);
+    const wfSealed = await call("quant_seal_alpha_candidate_ledger", {
+      campaign_id: wfRegistration.campaign.campaign_id, protocol_hash: wfProtocolHash,
+    });
+    assert.equal(wfSealed.selection.selection_status, "NO_ELIGIBLE_CANDIDATE");
+    const wfEvidence = await call("quant_get_alpha_research_report", {
+      campaign_id: wfRegistration.campaign.campaign_id,
+      candidate_ledger_hash: wfSealed.candidate_ledger_snapshot.candidate_ledger_hash,
+      section: "walk_forward_evidence", limit: 100,
+    });
+    assert.equal(wfEvidence.total_count, 1);
+    assert.equal(wfEvidence.rows[0].report_hash, walkForwardSummary.report_hash);
+    assert.equal(wfEvidence.rows[0].multiple_testing.multiple_testing_scope, "CURRENT_PREREGISTERED_FAMILY_ONLY");
     const invalidBaseline = await client.callTool({name: "quant_train_alpha_model", arguments: {
       ...baselineTrainingArgs,
       baseline_comparison: {

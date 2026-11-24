@@ -109,6 +109,10 @@ class JobStore(Registry):
             CREATE INDEX IF NOT EXISTS alpha_research_audit_freeze
                 ON alpha_research_audit(freeze_id, event_id);
         ''')
+        from .alpha.research.experiment_registry import ResearchExperimentRegistry
+        self.research_registry = ResearchExperimentRegistry(
+            self.connection, job_store=self, artifact_store=self.artifacts,
+        )
 
     def import_snapshot(self, bars: list[dict], calendar_version: str, actions: list[dict] | None = None, calendars: list[dict] | None = None) -> dict:
         if not 1 <= len(bars) <= 10000:
@@ -180,7 +184,7 @@ class JobStore(Registry):
         registered = self.compile(strategy_id, parameters, symbol)
         plan = self.load_plan(registered["plan_id"])
         if isinstance(plan, PythonPlan):
-            raise ValueError("UNSUPPORTED_EXECUTION_MODEL: Python signals require a stateful backtest lifecycle")
+            raise ValueError("UNSUPPORTED_EXECUTION_MODEL: Python signals require a stateful backtest lifecycle")  # noqa: TRY004
         snapshot = self.get_snapshot(snapshot_id)
         errors, dependencies = [], []
         for dependency in plan.requirements:
@@ -222,9 +226,12 @@ class JobStore(Registry):
                     raise ValueError("UNSUPPORTED_EXECUTION_MODEL: broker requires raw prices; provider basis is adjusted or unverified")
                 if not execution_rows:
                     raise ValueError("DATA_UNAVAILABLE: missing execution series")
-            if any(isinstance(p, PythonPlan) for p in loaded):
-                if not all(isinstance(p, PythonPlan) for p in loaded) or len({p.execution_identity for p in loaded}) != 1 or request.config.signal_backend != "pit":
-                    raise ValueError("UNSUPPORTED_EXECUTION_MODEL: a Python job uses one shared artifact and the event/PIT path")
+            if any(isinstance(p, PythonPlan) for p in loaded) and (
+                not all(isinstance(p, PythonPlan) for p in loaded)
+                or len({p.execution_identity for p in loaded}) != 1
+                or request.config.signal_backend != "pit"
+            ):
+                raise ValueError("UNSUPPORTED_EXECUTION_MODEL: a Python job uses one shared artifact and the event/PIT path")
             if request.config.fill_policy != "next_bar_open":
                 raise ValueError("UNSUPPORTED_EXECUTION_MODEL")
         else:
@@ -358,6 +365,7 @@ class JobStore(Registry):
             from .alpha.errors import AlphaError, AlphaErrorCode
             from .alpha.jobs.requests import (
                 ALPHA_REQUEST_ADAPTER,
+                FreezeAlphaSelectionJob,
                 PredictAlphaJob,
                 TrainAlphaModelJob,
                 WalkForwardAlphaRequest,
@@ -380,12 +388,18 @@ class JobStore(Registry):
                 require_training_submission_raw(raw)
             except ResearchAdmissionError as error:
                 self.audit_training_rejection("runtime", error.fields, error.code.value)
+                self.research_registry.record_rejection(
+                    raw, reason_code=error.code.value, detail={"fields": error.fields},
+                )
                 raise ValueError(str(error)) from error
         if kind == "walk_forward_alpha":
             try:
                 require_walk_forward_submission_raw(raw)
             except ResearchAdmissionError as error:
                 self.audit_walk_forward_rejection("runtime", error.fields, error.code.value)
+                self.research_registry.record_rejection(
+                    raw, reason_code=error.code.value, detail={"fields": error.fields},
+                )
                 raise ValueError(str(error)) from error
         try:
             request = ALPHA_REQUEST_ADAPTER.validate_python(raw)
@@ -395,8 +409,14 @@ class JobStore(Registry):
                           for issue in error.errors(include_input=False)]
                 if kind == "walk_forward_alpha":
                     self.audit_walk_forward_rejection("runtime", fields)
+                    self.research_registry.record_rejection(
+                        raw, reason_code="INVALID_REQUEST", detail={"fields": fields[:20]},
+                    )
                     raise ValueError(f"Invalid Alpha walk-forward fields: {', '.join(fields[:20])}") from error
                 self.audit_training_rejection("runtime", fields)
+                self.research_registry.record_rejection(
+                    raw, reason_code="INVALID_REQUEST", detail={"fields": fields[:20]},
+                )
                 raise ValueError(f"Invalid Alpha training fields: {', '.join(fields[:20])}") from error
             raise
         if isinstance(request, TrainAlphaModelJob):
@@ -414,6 +434,24 @@ class JobStore(Registry):
         payload = request.model_dump(mode="json")
         job_id = "alpha_" + uuid4().hex
         is_oos = request.kind == "evaluate_alpha_oos"
+        if isinstance(request, FreezeAlphaSelectionJob):
+            registered_protocol = self.research_registry.connection.execute(
+                "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?",
+                (request.research_protocol_hash,),
+            ).fetchone()
+            if registered_protocol is not None:
+                try:
+                    self.research_registry.verify_managed_freeze(
+                        protocol_hash=request.research_protocol_hash,
+                        candidate_ledger_hash=request.candidate_ledger_hash,
+                        selected_model_id=request.selected_model_ids[0],
+                    )
+                except AlphaError as error:
+                    self._audit_research_submission_rejection(
+                        "MANAGED_FREEZE_REJECTED", reason=error.code.value,
+                        message=error.message, freeze_id=request.candidate_ledger_hash,
+                    )
+                    raise ValueError(str(error)) from error
         freeze_id = getattr(request, "freeze_id", None)
         if isinstance(request, PredictAlphaJob):
             model_registry = AlphaModelRegistry(Path(self.path).with_suffix(".models"))
@@ -478,14 +516,25 @@ class JobStore(Registry):
             self.connection.execute("INSERT INTO jobs(id,status,request,config_hash) VALUES (?, 'queued', ?, ?)", (job_id, json.dumps(payload, allow_nan=False), digest(payload)))
             if request.idempotency_key:
                 self.connection.execute("INSERT INTO job_requests VALUES (?, ?, ?)", (request.idempotency_key, job_id, digest(payload)))
+            if kind in {"train_alpha_model", "walk_forward_alpha"}:
+                self.research_registry.validate_managed_submission(
+                    payload, job_id=job_id, job_config_hash=digest(payload),
+                )
             if is_oos:
                 self._record_alpha_research_audit(
                     event_type="OOS_SUBMISSION", freeze_id=freeze_id, job_id=job_id,
                     idempotency_key=request.idempotency_key, detail={"config_hash": digest(payload)},
                 )
             self.connection.commit()
-        except BaseException:
+        except BaseException as error:
             self.connection.rollback()
+            if kind in {"train_alpha_model", "walk_forward_alpha"}:
+                from .alpha.errors import AlphaError
+                if isinstance(error, AlphaError):
+                    self.research_registry.record_rejection(
+                        payload, reason_code=error.code.value,
+                        detail={"message": error.message, "context": error.context},
+                    )
             raise
         job = self.get_job(job_id)
         return {**job, "job_type": "alpha_" + request.kind, "schema_version": "1.0"}
@@ -505,22 +554,41 @@ class JobStore(Registry):
                         job_id=exhausted_id, idempotency_key=request_payload.get("idempotency_key"),
                         attempt=attempt, detail={"status": "failed", "error_code": "WORKER_LOST"},
                     )
+                self.research_registry.record_lifecycle(
+                    job_id=exhausted_id, event_type="TRIAL_WORKER_LOST", attempt=attempt,
+                    reason_code="WORKER_LOST", detail={"retry_exhausted": True},
+                )
+                self.research_registry.record_lifecycle(
+                    job_id=exhausted_id, event_type="TRIAL_FAILED", attempt=attempt,
+                    reason_code="WORKER_LOST", detail={"status": "failed"},
+                )
             self.connection.execute("UPDATE jobs SET status='failed',error_code='WORKER_LOST',finished_at=unixepoch() WHERE status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts>=3")
             active = self.connection.execute("SELECT count(*) FROM jobs WHERE status IN ('running','publishing') AND lease_until>unixepoch()").fetchone()[0]
-            row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash FROM jobs WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
+            row = None if active >= 4 else self.connection.execute("SELECT id,request,config_hash,attempts,status FROM jobs WHERE status='queued' OR (status IN ('running','publishing') AND lease_until<=unixepoch() AND attempts<3) ORDER BY created_at,id LIMIT 1").fetchone()
             if row is None:
                 self.connection.commit()
                 return None
             owner = uuid4().hex
+            previous_attempts, previous_status = row[3], row[4]
             self.connection.execute("UPDATE jobs SET status='running',owner=?,lease_until=unixepoch()+15,attempts=attempts+1,started_at=coalesce(started_at,unixepoch()),progress=0 WHERE id=?", (owner, row[0]))
             request_payload = json.loads(row[1])
+            attempt = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (row[0],)).fetchone()[0]
+            if previous_status in {"running", "publishing"}:
+                self.research_registry.record_lifecycle(
+                    job_id=row[0], event_type="TRIAL_WORKER_LOST", attempt=previous_attempts,
+                    reason_code="LEASE_EXPIRED", detail={"retry_available": True},
+                )
             if request_payload.get("kind") == "evaluate_alpha_oos":
-                attempt = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (row[0],)).fetchone()[0]
                 self._record_alpha_research_audit(
                     event_type="OOS_EXECUTION_ATTEMPT", freeze_id=request_payload["freeze_id"],
                     job_id=row[0], idempotency_key=request_payload.get("idempotency_key"),
                     attempt=attempt, detail={"owner": owner, "config_hash": row[2]},
                 )
+            self.research_registry.record_lifecycle(
+                job_id=row[0],
+                event_type="TRIAL_EXECUTION_STARTED" if attempt == 1 else "TRIAL_RETRY_STARTED",
+                attempt=attempt, detail={"owner": owner, "config_hash": row[2]},
+            )
             self.connection.commit()
             return {"id": row[0], "owner": owner, "request": request_payload, "config_hash": row[2]}
         except BaseException:
@@ -556,7 +624,7 @@ class JobStore(Registry):
             compact, references = self._serialize_result(claim, result)
         except OwnershipLost:
             return False
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - serialization failure is terminal for this claim
             self.fail_publish(claim, error)
             return False
         encoded = json.dumps(compact, allow_nan=False)
@@ -569,6 +637,10 @@ class JobStore(Registry):
                 self.connection.execute("DELETE FROM result_artifacts WHERE job_id=?", (claim["id"],))
                 for section, reference in references.items():
                     self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
+                self.research_registry.record_lifecycle(
+                    job_id=claim["id"], event_type="TRIAL_PUBLISHING",
+                    detail={"result_hash": digest(compact)},
+                )
         return changed.rowcount == 1
 
     def complete_publish(self, claim: dict, *, dataset_ids=()) -> bool:
@@ -589,6 +661,12 @@ class JobStore(Registry):
                     job_id=claim["id"], idempotency_key=claim["request"].get("idempotency_key"),
                     attempt=row[0] if row else None, detail={"status": "completed"},
                 )
+            if changed.rowcount == 1:
+                row = self.connection.execute("SELECT result_hash,attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self.research_registry.record_lifecycle(
+                    job_id=claim["id"], event_type="TRIAL_COMPLETED", attempt=row[1] if row else None,
+                    result_hash=row[0] if row else None, detail={"status": "completed"},
+                )
         return changed.rowcount == 1
 
     def fail_publish(self, claim: dict, error: Exception, error_code: str | None = None) -> bool:
@@ -605,6 +683,12 @@ class JobStore(Registry):
                     attempt=row[0] if row else None,
                     detail={"status": "failed", "error_code": error_code or "EXECUTION_FAILED"},
                 )
+            if changed.rowcount == 1:
+                row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self.research_registry.record_lifecycle(
+                    job_id=claim["id"], event_type="TRIAL_FAILED", attempt=row[0] if row else None,
+                    reason_code=error_code or "EXECUTION_FAILED", detail={"status": "failed"},
+                )
         return changed.rowcount == 1
 
     def finish(self, claim: dict, result: dict | None = None, error: Exception | None = None, error_code: str | None = None) -> bool:
@@ -616,7 +700,7 @@ class JobStore(Registry):
                 result, references = self._serialize_result(claim, result)
         except OwnershipLost:
             return False
-        except Exception as serialization_error:
+        except Exception as serialization_error:  # noqa: BLE001 - serialization failure is terminal for this claim
             error, result, references = serialization_error, None, {}
         status = "failed" if error else "completed"
         encoded = json.dumps(result, allow_nan=False) if result is not None else None
@@ -635,6 +719,14 @@ class JobStore(Registry):
                     idempotency_key=claim["request"].get("idempotency_key"),
                     attempt=row[0] if row else None,
                     detail={"status": "failed" if error else "completed", "error_code": error_code} if error else {"status": "completed"},
+                )
+            if changed.rowcount == 1:
+                row = self.connection.execute("SELECT attempts,result_hash FROM jobs WHERE id=?", (claim["id"],)).fetchone()
+                self.research_registry.record_lifecycle(
+                    job_id=claim["id"], event_type="TRIAL_FAILED" if error else "TRIAL_COMPLETED",
+                    attempt=row[0] if row else None, result_hash=None if error or row is None else row[1],
+                    reason_code=(error_code or "EXECUTION_FAILED") if error else None,
+                    detail={"status": "failed" if error else "completed"},
                 )
         return changed.rowcount == 1
 
@@ -664,9 +756,14 @@ class JobStore(Registry):
                         job_id=job_id, idempotency_key=request_payload.get("idempotency_key"),
                         detail={"status": "cancelled"},
                     )
+                self.research_registry.record_lifecycle(
+                    job_id=job_id, event_type="TRIAL_CANCELLED",
+                    reason_code="CANCELLED", detail={"status": "cancelled"},
+                )
         return self.get_job(job_id)
 
-    def get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
+    def _get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None,
+                    record_exposure: bool = True) -> dict:
         sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
@@ -693,16 +790,28 @@ class JobStore(Registry):
         if reference is None and not isinstance(value, list):
             if cursor:
                 raise ValueError("Object sections do not accept cursors")
+            if record_exposure:
+                self.research_registry.record_result_access(job_id=job_id, section=section)
             return value
         count = reference["row_count"] if reference else len(value)
         def read_rows(offset, size):
             if reference:
                 return self.artifacts.read_rows(reference, offset, size, byte_limit=MAX_RESPONSE_ROW_BYTES)
             return value[offset:offset + size]
-        return result_page(job_id, section, row[1], count, limit, None if cursor == "" else cursor, read_rows,
+        page = result_page(job_id, section, row[1], count, limit, None if cursor == "" else cursor, read_rows,
                            resource_uri=f"quant://results/{job_id}/{section}", byte_limit=MAX_RESPONSE_ROW_BYTES,
                            mcp_overhead_bytes=mcp_overhead_bytes)
+        if record_exposure:
+            self.research_registry.record_result_access(job_id=job_id, section=section)
+        return page
 
+    def get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
+        return self._get_result(job_id, section, limit, cursor, mcp_overhead_bytes=mcp_overhead_bytes,
+                                record_exposure=True)
+
+    def get_result_unexposed(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None) -> dict:
+        return self._get_result(job_id, section, limit, cursor, mcp_overhead_bytes=mcp_overhead_bytes,
+                                record_exposure=False)
 
 
 def execute_job(store: JobStore, claim: dict) -> bool:
@@ -801,5 +910,5 @@ def execute_job(store: JobStore, claim: dict) -> bool:
         return store.finish(claim, result)
     except OwnershipLost:
         return False
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - worker must fence any execution failure
         return store.finish(claim, error=error)
