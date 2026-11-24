@@ -685,7 +685,10 @@ class JobStore(Registry):
         return changed.rowcount == 1
 
     def complete_publish(self, claim: dict, *, dataset_ids=()) -> bool:
-        with self.connection:
+        owns_transaction = not self.connection.in_transaction
+        if owns_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        try:
             request_payload = claim["request"]
             if request_payload.get("kind") in {"train_alpha_model", "walk_forward_alpha"}:
                 self.research_registry.verify_managed_execution(request_payload, job_id=claim["id"])
@@ -709,11 +712,11 @@ class JobStore(Registry):
                     "INSERT OR IGNORE INTO alpha_dataset_publications VALUES (?, ?)",
                     [(dataset_id, claim["id"]) for dataset_id in dataset_ids],
                 )
-            if changed.rowcount == 1 and claim["request"].get("kind") == "evaluate_alpha_oos":
+            if changed.rowcount == 1 and request_payload.get("kind") == "evaluate_alpha_oos":
                 row = self.connection.execute("SELECT attempts FROM jobs WHERE id=?", (claim["id"],)).fetchone()
                 self._record_alpha_research_audit(
-                    event_type="OOS_COMPLETED", freeze_id=claim["request"]["freeze_id"],
-                    job_id=claim["id"], idempotency_key=claim["request"].get("idempotency_key"),
+                    event_type="OOS_COMPLETED", freeze_id=request_payload["freeze_id"],
+                    job_id=claim["id"], idempotency_key=request_payload.get("idempotency_key"),
                     attempt=row[0] if row else None, detail={"status": "completed"},
                 )
             if changed.rowcount == 1:
@@ -722,7 +725,13 @@ class JobStore(Registry):
                     job_id=claim["id"], event_type="TRIAL_COMPLETED", attempt=row[1] if row else None,
                     result_hash=row[0] if row else None, detail={"status": "completed"},
                 )
-        return changed.rowcount == 1
+            if owns_transaction:
+                self.connection.commit()
+            return changed.rowcount == 1
+        except BaseException:
+            if owns_transaction:
+                self.connection.rollback()
+            raise
 
     def fail_publish(self, claim: dict, error: Exception, error_code: str | None = None) -> bool:
         with self.connection:

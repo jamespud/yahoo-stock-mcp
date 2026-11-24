@@ -145,3 +145,9 @@ candidate constraints, FactorSpec hash, seed/hyperparameter/inference policy, wa
 thresholds and stopping limits are checked before Trial registration. Unsupported evaluation or stopping
 keys are rejected when the Protocol is registered. Any label, horizon, Ridge Alpha, FactorSpec, fold mode
 or evaluation-policy change requires a compatible new Trial or Protocol revision.
+
+When a Protocol requires Walk-forward evidence, PR5 currently fails closed with
+`WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED` because separate Training and Walk-forward Trials do not
+yet provide a trustworthy shared candidate binding. Do not treat any other Walk-forward Job in the
+Protocol as evidence for a Training Candidate. Historical reports must be requested by Snapshot hash or
+explicit Watermark; live reports are mutable views.

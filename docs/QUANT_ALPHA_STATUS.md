@@ -85,3 +85,13 @@ evaluation/stopping policy and walk-forward mode. Unsupported policy keys fail a
 Selection separates Campaign ledger from the current Protocol eligible pool and uses independent label,
 model-execution and end-to-end coverage evidence. Snapshot/fixed-watermark reports and cursors are stable
 against later Trials, Exposures and Campaigns.
+
+
+## Second-review hardening
+
+Freeze completion now holds an explicit SQLite `BEGIN IMMEDIATE` across final freshness verification and
+the CAS status update. Walk-forward-required selection fails closed because this version cannot prove a
+Training Candidate-to-Walk-forward configuration binding; unrelated walk-forward evidence cannot admit a
+candidate. Historical ledger/report views use actual event sequences for Trial, Protocol, Hypothesis,
+submission, completion, result and Exposure evidence, and fixed-watermark report cursors rebuild the same
+immutable historical view.

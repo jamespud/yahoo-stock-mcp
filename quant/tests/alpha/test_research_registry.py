@@ -696,6 +696,13 @@ def _factor_hash() -> str:
     return compile_factor_spec(FactorSpec.model_validate(_factor_spec())).spec_hash
 
 
+def _factor_spec_with_extra() -> dict:
+    spec = _factor_spec()
+    spec["nodes"].append({"id": "extra", "operator": "rolling_std", "inputs": ["ret"], "params": {"period": 5}})
+    spec["outputs"].append("extra")
+    return spec
+
+
 def _freeze_request_for_selection(protocol, selection, model_id):
     return {
         "kind": "freeze_alpha_selection",
@@ -959,7 +966,12 @@ def test_walk_forward_requirement_blocks_training_only_selection(tmp_path):
             campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash,
         )
         assert selection.selection_status == "NO_ELIGIBLE_CANDIDATE"
-        assert snapshot.excluded_candidates[0]["reason"] == "WALK_FORWARD_EVIDENCE_REQUIRED"
+        assert snapshot.excluded_candidates[0]["reason"] == "WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED"
+        report = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        assert any("WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED" in risk for risk in report.unresolved_risks)
     finally:
         jobs.connection.close()
 
@@ -1342,4 +1354,306 @@ def test_unsupported_protocol_constraints_are_rejected_at_registration(tmp_path)
                 stopping_policy={"max_seconds": 60, "patience": 3},
             ))
     finally:
+        jobs.connection.close()
+
+
+
+@pytest.mark.parametrize("variant", ["horizon", "factor_spec", "model_config"])
+def test_unrelated_walk_forward_evidence_never_binds_training_candidate(tmp_path, monkeypatch, variant):
+    jobs, registry, campaign, _protocol_default = _setup_registry(tmp_path)
+    try:
+        policy = {
+            "primary_metric": "rank_ic", "minimum_rank_ic": -1.0,
+            "minimum_label_coverage": 0.0, "minimum_model_execution_coverage": 0.0,
+            "minimum_end_to_end_coverage": 0.0,
+        }
+        protocol = registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            protocol_revision=2,
+            parent_protocol_hash=_protocol_default.protocol_hash,
+            modification_reason="Require candidate-bound walk-forward evidence.",
+            allowed_job_kinds=["train_alpha_model", "walk_forward_alpha"],
+            label_specifications=[],
+            candidate_definitions=[],
+            selection_policy=policy,
+            evaluation_policy={**policy, "requires_walk_forward": True},
+        ))
+        request = _training_request(research_protocol_hash=protocol.protocol_hash)
+        if variant == "horizon":
+            request["horizon_days"] = 10
+        elif variant == "factor_spec":
+            spec = _factor_spec_with_extra()
+            request["baseline_comparison"] = {
+                "schema_version": "1.0", "factor_spec": spec,
+                "reversal_output": "ret", "rsi_output": "rsi", "ridge_alpha": 1.0,
+            }
+        else:
+            request["hyperparameters"] = {"n_estimators": 10, "num_leaves": 7}
+        training_trial = registry.register_trial(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+            request=request,
+            trial_purpose="INITIAL_HYPOTHESIS_TEST",
+        )
+        _publish_training(jobs, request, training_trial)
+        wf_request = _walk_forward_request(protocol.protocol_hash)
+        wf_request["max_seconds"] = 60
+        wf_trial = registry.register_trial(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+            request=wf_request,
+            trial_purpose="ROBUSTNESS_CHECK",
+        )
+        wf_job = jobs.submit_alpha({**wf_request, "research_trial_id": wf_trial.trial_id})
+        claim = jobs.claim()
+        assert claim is not None
+        assert jobs.begin_publish(claim, {"summary": {"status": "WF_COMPLETED"}, "walk_forward": [], "reproducibility": {}})
+        assert jobs.complete_publish(claim)
+        monkeypatch.setattr(
+            registry, "_walk_forward_evidence",
+            lambda trial, job_id: {"trial_id": trial.trial_id, "job_id": job_id, "status": "WF_COMPLETED"},
+        )
+        snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash,
+        )
+        training_exclusions = [
+            item for item in snapshot.excluded_candidates
+            if item["trial_id"] == training_trial.trial_id
+        ]
+        assert training_exclusions[0]["reason"] == "WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED"
+        assert selection.selection_status == "NO_ELIGIBLE_CANDIDATE"
+        assert wf_job["job_id"] == registry.get_trial_job(wf_trial.trial_id).job_id
+    finally:
+        jobs.connection.close()
+
+
+def test_trial_at_actual_registration_event_is_in_historical_view_but_later_trial_is_not(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        _request, first_trial = _register_trial(registry, protocol)
+        registered_event = next(
+            event for event in registry.list_events(campaign.campaign_id)
+            if event.event_type == "TRIAL_REGISTERED" and event.trial_id == first_trial.trial_id
+        )
+        w1 = registered_event.event_sequence
+        history = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="trials", ledger_watermark=w1, limit=100,
+        )
+        assert [row["trial_id"] for row in history["rows"]] == [first_trial.trial_id]
+        _register_trial(registry, protocol, seed=8, purpose="PARAMETER_VARIATION")
+        history_again = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="trials", ledger_watermark=w1, limit=100,
+        )
+        assert [row["trial_id"] for row in history_again["rows"]] == [first_trial.trial_id]
+    finally:
+        jobs.connection.close()
+
+
+def test_running_trial_does_not_leak_later_completion_into_fixed_watermark_report(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        jobs.submit_alpha({**request, "research_trial_id": trial.trial_id})
+        claim = jobs.claim()
+        assert claim is not None
+        w1 = registry.ledger_watermark(campaign.campaign_id)
+        before = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        assert before.trial_accounting.completed_evaluation_count == 0
+        assert before.evidence_references == []
+        assert before.baseline_evidence == []
+        assert jobs.begin_publish(claim, {"summary": {"status": "completed"}})
+        assert jobs.complete_publish(claim)
+        after = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        assert after.report_hash == before.report_hash
+        assert after.evidence_references == []
+    finally:
+        jobs.connection.close()
+
+
+def test_historical_exposure_summary_is_reconstructed_from_events_at_watermark(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        submission, _model = _publish_training(jobs, request, trial)
+        jobs.get_result(submission["job_id"], "summary")
+        w1 = registry.ledger_watermark(campaign.campaign_id)
+        before = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        assert before.result_exposure_summary["access_request_count"] == 1
+        jobs.get_result(submission["job_id"], "summary")
+        after = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        assert after.report_hash == before.report_hash
+        assert after.result_exposure_summary["access_request_count"] == 1
+        assert after.result_exposure_summary["accesses"][0]["access_count"] == 1
+    finally:
+        jobs.connection.close()
+
+
+def test_later_protocol_and_hypothesis_are_excluded_from_historical_views_and_report(tmp_path):
+    jobs, registry, campaign, first = _setup_registry(tmp_path)
+    try:
+        _register_trial(registry, first)
+        w1 = registry.ledger_watermark(campaign.campaign_id)
+        report_before = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, ledger_watermark=w1,
+        )
+        protocols_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="protocols", ledger_watermark=w1,
+        )
+        hypotheses_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="hypotheses", ledger_watermark=w1,
+        )
+        second = registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            protocol_revision=2,
+            parent_protocol_hash=first.protocol_hash,
+            modification_reason="Later revision must not rewrite history.",
+            hypothesis_definitions=[
+                _protocol(campaign.campaign_id)["hypothesis_definitions"][0],
+                {
+                    **_protocol(campaign.campaign_id)["hypothesis_definitions"][0],
+                    "hypothesis_key": "later_hypothesis",
+                    "title": "Later Hypothesis",
+                },
+            ],
+        ))
+        assert second.definition.protocol_revision == 2
+        report_after = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, ledger_watermark=w1,
+        )
+        protocols_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="protocols", ledger_watermark=w1,
+        )
+        hypotheses_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="hypotheses", ledger_watermark=w1,
+        )
+        assert report_after.report_hash == report_before.report_hash
+        assert [row["protocol_hash"] for row in protocols_after["rows"]] == [
+            row["protocol_hash"] for row in protocols_before["rows"]
+        ]
+        assert [row["hypothesis_id"] for row in hypotheses_after["rows"]] == [
+            row["hypothesis_id"] for row in hypotheses_before["rows"]
+        ]
+        assert "later_hypothesis" not in json.dumps(report_after.hypothesis_summary)
+    finally:
+        jobs.connection.close()
+
+
+def test_historical_report_pagination_cursor_rebuilds_fixed_view_after_new_activity(tmp_path):
+    jobs, registry, _default_campaign, _default_protocol = _setup_registry(tmp_path)
+    try:
+        campaign = registry.register_campaign(_campaign(campaign_name="Historical pagination", resource_policy={
+            "max_registered_trials": 4, "max_submitted_trials": 4,
+            "max_distinct_candidate_definitions": 4, "max_evaluation_jobs": 4,
+            "max_execution_attempts": 8, "max_protocol_revisions": 3,
+        }))
+        first = registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            hypothesis_definitions=[
+                _protocol(campaign.campaign_id)["hypothesis_definitions"][0],
+                {
+                    **_protocol(campaign.campaign_id)["hypothesis_definitions"][0],
+                    "hypothesis_key": "second_hypothesis",
+                    "title": "Second Hypothesis",
+                },
+            ],
+        ))
+        report = registry.build_evidence_report(campaign_id=campaign.campaign_id)
+        w1 = report.ledger_watermark
+        first_page = registry.read_research_report(
+            campaign_id=campaign.campaign_id, ledger_watermark=w1,
+            section="hypotheses", limit=1,
+        )
+        assert first_page["next_cursor"]
+        _register_trial(registry, first, seed=8, purpose="PARAMETER_VARIATION")
+        registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            protocol_revision=2,
+            parent_protocol_hash=first.protocol_hash,
+            modification_reason="Later activity after fixed report page.",
+        ))
+        second_page = registry.read_research_report(
+            campaign_id=campaign.campaign_id, ledger_watermark=w1,
+            section="hypotheses", limit=1, cursor=first_page["next_cursor"],
+        )
+        assert second_page["report_hash"] == first_page["report_hash"]
+        assert first_page["rows"][0]["hypothesis_id"] != second_page["rows"][0]["hypothesis_id"]
+    finally:
+        jobs.connection.close()
+
+
+def test_complete_publish_holds_immediate_write_lock_against_new_trial(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        _submission, model = _publish_training(jobs, request, trial)
+        _snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash,
+        )
+        freeze_request = _freeze_request_for_selection(protocol, selection, model["model_id"])
+        freeze_job = jobs.submit_alpha(freeze_request)
+        checked = Event()
+        release = Event()
+        publisher_ready = Event()
+        outcome: dict[str, object] = {}
+
+        def publish():
+            with JobStore(jobs.path) as publisher:
+                claim = publisher.claim()
+                outcome["claim"] = claim
+                assert claim is not None
+                assert publisher.begin_publish(claim, {"summary": {"status": "completed"}})
+                original = publisher.research_registry.verify_managed_freeze
+
+                def checked_then_wait(**kwargs):
+                    result = original(**kwargs)
+                    checked.set()
+                    assert release.wait(5)
+                    return result
+
+                monkeypatch.setattr(
+                    publisher.research_registry, "verify_managed_freeze", checked_then_wait,
+                )
+                publisher_ready.set()
+                outcome["completed"] = publisher.complete_publish(claim)
+
+        def register_new_trial():
+            assert checked.wait(5)
+            with JobStore(jobs.path) as second:
+                return second.research_registry.register_trial(
+                    campaign_id=campaign.campaign_id,
+                    protocol_hash=protocol.protocol_hash,
+                    hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+                    request=_training_request(
+                        research_protocol_hash=protocol.protocol_hash, random_seed=8,
+                    ),
+                    trial_purpose="REPRODUCIBILITY_CHECK",
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publish_future = pool.submit(publish)
+            assert publisher_ready.wait(5)
+            trial_future = pool.submit(register_new_trial)
+            assert checked.wait(5)
+            assert not trial_future.done(), "new Trial entered the final freshness-check/CAS window"
+            release.set()
+            assert publish_future.result(timeout=10) is None
+            new_trial = trial_future.result(timeout=10)
+        assert outcome["completed"] is True
+        assert jobs.get_job(freeze_job["job_id"])["status"] == "completed"
+        assert registry.get_trial(new_trial.trial_id).registered_ledger_watermark > _snapshot.ledger_watermark
+    finally:
+        release.set()
         jobs.connection.close()

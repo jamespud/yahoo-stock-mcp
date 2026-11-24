@@ -1038,11 +1038,13 @@ class ResearchExperimentRegistry:
             )
             event_args = (campaign_id,)
         else:
-            registered_rows = self.connection.execute(
-                "SELECT trial_id,trial_definition_hash,hypothesis_id FROM alpha_research_trials "
-                "WHERE campaign_id=? AND registered_ledger_watermark<=?",
-                (campaign_id, watermark),
-            ).fetchall()
+            registered_rows = [
+                row for row in self.connection.execute(
+                    "SELECT trial_id,trial_definition_hash,hypothesis_id FROM alpha_research_trials WHERE campaign_id=?",
+                    (campaign_id,),
+                ).fetchall()
+                if (self._trial_registered_sequence(row[0]) or 0) <= watermark
+            ]
             event_sql = (
                 "SELECT event_id,event_sequence,event_type,campaign_id,protocol_hash,trial_id,job_id,attempt,"
                 "request_hash,result_hash,reason_code,detail,previous_event_hash,event_hash,created_at "
@@ -1162,24 +1164,27 @@ class ResearchExperimentRegistry:
     def _scope_completeness(
         self, campaign_id: str, integrity: ResearchLedgerIntegrity, *, watermark: int | None = None,
     ) -> ScopeCompleteness:
-        if watermark is None:
-            trials = self.connection.execute(
-                "SELECT tr.status,tj.job_id,j.status FROM alpha_research_trials tr "
-                "LEFT JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
-                "LEFT JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=?", (campaign_id,),
-            ).fetchall()
-        else:
-            trials = self.connection.execute(
-                "SELECT tr.status,tj.job_id,j.status FROM alpha_research_trials tr "
-                "LEFT JOIN alpha_research_trial_jobs tj ON tj.trial_id=tr.trial_id "
-                "LEFT JOIN jobs j ON j.id=tj.job_id WHERE tr.campaign_id=? AND tr.registered_ledger_watermark<=?",
-                (campaign_id, watermark),
-            ).fetchall()
-        complete = all(
-            status in TERMINAL_TRIAL_STATES
-            and (job_id is None or job_status in TERMINAL_JOB_STATES)
-            for status, job_id, job_status in trials
-        )
+        target = self.ledger_watermark(campaign_id) if watermark is None else watermark
+        rows = self.connection.execute(
+            "SELECT trial_id FROM alpha_research_trials WHERE campaign_id=?", (campaign_id,),
+        ).fetchall()
+        complete = True
+        for (trial_id,) in rows:
+            if (self._trial_registered_sequence(trial_id) or 0) > target:
+                continue
+            state = self._trial_status_at(trial_id, target)
+            if state not in TERMINAL_TRIAL_STATES:
+                complete = False
+                break
+            if state == "REJECTED":
+                continue
+            submitted = self._trial_submitted_sequence(trial_id)
+            if submitted is None or submitted > target:
+                complete = False
+                break
+            if state in {"SUBMITTED", "RUNNING", "PUBLISHING"}:
+                complete = False
+                break
         return ScopeCompleteness(
             managed_campaign_history_complete=bool(complete and integrity.status == "VERIFIED"),
             job_lifecycle_reconciled=bool(complete and integrity.status == "VERIFIED"),
@@ -1342,17 +1347,7 @@ class ResearchExperimentRegistry:
                 reason="PROTOCOL_NOT_COMPATIBLE_WITH_SELECTION",
                 detail={"trial_protocol_hash": trial.protocol_hash, "selection_protocol_hash": protocol.protocol_hash},
             ))
-        completed_wf_evidence = []
-        for trial in compatible_trials:
-            binding = self.get_trial_job(trial.trial_id)
-            job = None if binding is None else self._job_row(binding.job_id)
-            if job is not None and job["status"] == "completed" and trial.canonical_request.get("kind") == "walk_forward_alpha":
-                completed_wf_evidence.append(self._walk_forward_evidence(trial, binding.job_id))
         requires_walk_forward = protocol.definition.evaluation_policy.get("requires_walk_forward") is True
-        valid_walk_forward = any(
-            item is not None and item.get("status") not in {"INVALID", "WF_INVALID", "WF_INSUFFICIENT_EVIDENCE"}
-            for item in completed_wf_evidence
-        )
         for trial in compatible_trials:
             binding = self.get_trial_job(trial.trial_id)
             if binding is None:
@@ -1365,10 +1360,15 @@ class ResearchExperimentRegistry:
             if trial.canonical_request.get("kind") != "train_alpha_model":
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, reason="WALK_FORWARD_NOT_A_FREEZEABLE_MODEL"))
                 continue
-            if requires_walk_forward and not valid_walk_forward:
+            if requires_walk_forward:
                 excluded.append(ExcludedCandidate(
-                    trial_id=trial.trial_id, reason="WALK_FORWARD_EVIDENCE_REQUIRED",
-                    detail={"requires_walk_forward": True},
+                    trial_id=trial.trial_id,
+                    reason="WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED",
+                    detail={
+                        "requires_walk_forward": True,
+                        "bound_walk_forward_trial_id": None,
+                        "bound_walk_forward_report_hash": None,
+                    },
                 ))
                 continue
             result = self._job_result(binding.job_id)
@@ -1750,6 +1750,15 @@ class ResearchExperimentRegistry:
         ).fetchone()
         return None if row is None else row[0]
 
+    def _latest_protocol_at(self, campaign_id: str, watermark: int) -> str | None:
+        rows = self.connection.execute(
+            "SELECT protocol_hash,event_sequence FROM alpha_research_events WHERE campaign_id=? "
+            "AND event_sequence<=? AND event_type IN ('PROTOCOL_REGISTERED','PROTOCOL_REVISED') "
+            "AND protocol_hash IS NOT NULL ORDER BY event_sequence DESC LIMIT 1",
+            (campaign_id, watermark),
+        ).fetchone()
+        return None if rows is None else rows[0]
+
     def build_evidence_report(
         self,
         *,
@@ -1801,22 +1810,37 @@ class ResearchExperimentRegistry:
                 watermark = integrity.ledger_watermark
             completeness = self._scope_completeness(campaign_id, integrity, watermark=watermark)
         if protocol_hash is None:
-            row = self.connection.execute(
-                "SELECT protocol_hash FROM alpha_research_protocols WHERE campaign_id=? ORDER BY created_at DESC LIMIT 1",
-                (campaign_id,),
-            ).fetchone()
-            if row is None:
-                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_NOT_REGISTERED, "Campaign has no Protocol", {})
-            protocol_hash = row[0]
+            protocol_hash = self._latest_protocol_at(campaign_id, watermark)
+            if protocol_hash is None:
+                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_NOT_REGISTERED, "Campaign has no Protocol at this watermark", {})
         protocol = self.get_protocol(protocol_hash)
-        trials = [trial for trial in self._all_trials(campaign_id) if trial.registered_ledger_watermark <= watermark]
+        protocol_sequence = self.connection.execute(
+            "SELECT min(event_sequence) FROM alpha_research_events WHERE campaign_id=? AND protocol_hash=? "
+            "AND event_type IN ('PROTOCOL_REGISTERED','PROTOCOL_REVISED')",
+            (campaign_id, protocol_hash),
+        ).fetchone()[0]
+        if protocol_sequence is None or protocol_sequence > watermark:
+            raise AlphaError(AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE, "Protocol is not registered at this watermark", {
+                "campaign_id": campaign_id, "protocol_hash": protocol_hash, "watermark": watermark,
+            })
+        hypotheses = [
+            hypothesis for hypothesis in protocol.registered_hypotheses
+            if (self._hypothesis_registered_sequence(hypothesis.hypothesis_id) or 0) <= watermark
+        ]
+        trials = [
+            trial for trial in self._all_trials(campaign_id)
+            if (self._trial_registered_sequence(trial.trial_id) or 0) <= watermark
+        ]
         baseline_evidence: list[dict[str, Any]] = []
         walk_forward_evidence: list[dict[str, Any]] = []
         evidence_references: list[dict[str, Any]] = []
         data_quality: list[dict[str, Any]] = []
         for trial in trials:
             binding = self.get_trial_job(trial.trial_id)
-            if binding is None:
+            submitted_sequence = self._trial_submitted_sequence(trial.trial_id)
+            if binding is None or submitted_sequence is None or submitted_sequence > watermark:
+                continue
+            if self._trial_status_at(trial.trial_id, watermark) != "COMPLETED":
                 continue
             job = self._job_row(binding.job_id)
             if job is None or job["status"] != "completed":
@@ -1833,24 +1857,35 @@ class ResearchExperimentRegistry:
                 if walk.get("data_quality"):
                     data_quality.append({"trial_id": trial.trial_id, "kind": "walk_forward", **walk["data_quality"]})
         accounting = snapshot.trial_accounting if snapshot is not None else self.trial_accounting(campaign_id, watermark=watermark)
-        exposures = self.connection.execute(
-            "SELECT trial_id,job_id,result_hash,section,first_accessed_at,last_accessed_at,access_count "
-            "FROM alpha_research_exposures WHERE trial_id IN (SELECT trial_id FROM alpha_research_trials WHERE campaign_id=?) "
-            "AND last_access_event_sequence<=? ORDER BY first_accessed_at,trial_id",
-            (campaign_id, watermark),
-        ).fetchall()
+        access_events = [
+            event for event in self.list_events(campaign_id)
+            if event.event_sequence <= watermark and event.event_type == "TRIAL_RESULT_ACCESSED"
+        ]
+        exposure_groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for event in access_events:
+            if not (event.trial_id and event.job_id and event.result_hash):
+                continue
+            section = str(event.detail.get("section", "unknown"))
+            key = (event.trial_id, event.job_id, event.result_hash, section)
+            created = event.created_at.isoformat().replace("+00:00", "Z")
+            if key not in exposure_groups:
+                exposure_groups[key] = {
+                    "trial_id": key[0], "job_id": key[1], "result_hash": key[2], "section": key[3],
+                    "first_accessed_at": created, "last_accessed_at": created, "access_count": 1,
+                }
+            else:
+                exposure_groups[key]["last_accessed_at"] = created
+                exposure_groups[key]["access_count"] += 1
+        accessed_results = {
+            (event.trial_id, event.job_id, event.result_hash)
+            for event in access_events if event.trial_id and event.job_id and event.result_hash
+        }
         exposure_summary = {
             "evaluation_generated_count": accounting.completed_evaluation_count,
-            "evaluation_accessed_result_count": accounting.result_exposure_count,
-            "access_request_count": accounting.result_access_request_count,
+            "evaluation_accessed_result_count": len(accessed_results),
+            "access_request_count": len(access_events),
             "exposure_tracking_complete": completeness.exposure_tracking_complete,
-            "accesses": [
-                {
-                    "trial_id": row[0], "job_id": row[1], "result_hash": row[2], "section": row[3],
-                    "first_accessed_at": row[4], "last_accessed_at": row[5], "access_count": row[6],
-                }
-                for row in exposures
-            ],
+            "accesses": list(exposure_groups.values()),
         }
         selection = None
         if snapshot is not None:
@@ -1859,7 +1894,7 @@ class ResearchExperimentRegistry:
             except AlphaError:
                 selection = None
         hypothesis_summary = []
-        for hypothesis in protocol.registered_hypotheses:
+        for hypothesis in hypotheses:
             related = [trial for trial in trials if trial.hypothesis_id == hypothesis.hypothesis_id]
             hypothesis_summary.append({
                 "hypothesis_id": hypothesis.hypothesis_id,
@@ -1900,9 +1935,17 @@ class ResearchExperimentRegistry:
         ]
         if not completeness.exposure_tracking_complete:
             unresolved.append("Result exposure tracking is incomplete because not every possible public read path is instrumented.")
+        if protocol.definition.evaluation_policy.get("requires_walk_forward") is True:
+            unresolved.append(
+                "Walk-forward candidate binding is not supported; training candidates fail closed with "
+                "WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED."
+            )
         body = {
             "campaign_identity": campaign.model_dump(mode="json"),
-            "protocol_identity": protocol.model_dump(mode="json"),
+            "protocol_identity": {
+                **protocol.model_dump(mode="json"),
+                "registered_hypotheses": [item.model_dump(mode="json") for item in hypotheses],
+            },
             "ledger_watermark": watermark,
             "ledger_integrity": integrity.model_dump(mode="json"),
             "scope_completeness": completeness.model_dump(mode="json"),
@@ -1977,6 +2020,36 @@ class ResearchExperimentRegistry:
                 status = mapping[row[0]]
         return status
 
+    def _event_sequence(self, *, trial_id: str | None = None, event_type: str | None = None,
+                        protocol_hash: str | None = None) -> int | None:
+        clauses, args = [], []
+        if trial_id is not None:
+            clauses.append("trial_id=?")
+            args.append(trial_id)
+        if event_type is not None:
+            clauses.append("event_type=?")
+            args.append(event_type)
+        if protocol_hash is not None:
+            clauses.append("protocol_hash=?")
+            args.append(protocol_hash)
+        row = self.connection.execute(
+            f"SELECT min(event_sequence) FROM alpha_research_events WHERE {' AND '.join(clauses)}", args,
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def _trial_registered_sequence(self, trial_id: str) -> int | None:
+        return self._event_sequence(trial_id=trial_id, event_type="TRIAL_REGISTERED")
+
+    def _trial_submitted_sequence(self, trial_id: str) -> int | None:
+        return self._event_sequence(trial_id=trial_id, event_type="TRIAL_SUBMITTED")
+
+    def _hypothesis_registered_sequence(self, hypothesis_id: str) -> int | None:
+        row = self.connection.execute(
+            "SELECT min(event_sequence) FROM alpha_research_events WHERE event_type='HYPOTHESIS_REGISTERED' "
+            "AND json_extract(detail,'$.hypothesis_id')=?", (hypothesis_id,),
+        ).fetchone()
+        return None if row is None else row[0]
+
     def _read_research_ledger_view(
         self,
         *,
@@ -2001,12 +2074,9 @@ class ResearchExperimentRegistry:
                 if type(ledger_watermark) is not int or ledger_watermark < 0:
                     raise ValueError("Invalid ledger watermark")
                 watermark = ledger_watermark
-                snapshot = self.connection.execute(
-                    "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
-                    "AND ledger_watermark=? ORDER BY created_at DESC LIMIT 1",
-                    (campaign_id, ledger_watermark),
-                ).fetchone()
-                snapshot_hash = None if snapshot is None else snapshot[0]
+                # An explicit watermark is an immutable event view; a Snapshot
+                # created later must not retroactively change its rows or hash.
+                snapshot_hash = None
             else:
                 watermark = snapshot.ledger_watermark if snapshot is not None else self.ledger_watermark(campaign_id)
                 snapshot_hash = None if snapshot is None else snapshot.candidate_ledger_hash
@@ -2032,7 +2102,7 @@ class ResearchExperimentRegistry:
         ]
         trials = []
         for trial in self._all_trials(campaign_id):
-            if trial.registered_ledger_watermark > watermark:
+            if (self._trial_registered_sequence(trial.trial_id) or 0) > watermark:
                 continue
             encoded = trial.model_dump(mode="json")
             encoded["status"] = self._trial_status_at(trial.trial_id, watermark)
@@ -2045,6 +2115,7 @@ class ResearchExperimentRegistry:
                 "FROM alpha_research_hypotheses WHERE campaign_id=? ORDER BY created_at,hypothesis_id",
                 (campaign_id,),
             ).fetchall()
+            if (self._hypothesis_registered_sequence(item[0]) or 0) <= watermark
         ]
         snapshots = [
             self.get_snapshot(row[0]).model_dump(mode="json") for row in self.connection.execute(
@@ -2093,7 +2164,7 @@ class ResearchExperimentRegistry:
         if section == "evidence":
             rows = []
             for trial in self._all_trials(campaign_id):
-                if trial.registered_ledger_watermark > watermark:
+                if (self._trial_registered_sequence(trial.trial_id) or 0) > watermark:
                     continue
                 binding = self.get_trial_job(trial.trial_id)
                 job = None if binding is None else self._job_row(binding.job_id)
@@ -2124,6 +2195,18 @@ class ResearchExperimentRegistry:
             mcp_overhead_bytes=mcp_overhead_bytes,
         )
 
+    @staticmethod
+    def _report_cursor_view(cursor: str) -> tuple[str, int, str | None, str | None, str]:
+        try:
+            parts = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            identity = parts[0]
+            if not isinstance(identity, str) or not identity.startswith("report-v1|"):
+                raise ValueError
+            _, campaign_id, watermark, candidate, protocol, report_hash = identity.split("|", 5)
+            return campaign_id, int(watermark), candidate or None, protocol or None, report_hash
+        except Exception as error:
+            raise ValueError("Invalid result cursor") from error
+
     def read_research_report(
         self,
         *,
@@ -2136,10 +2219,21 @@ class ResearchExperimentRegistry:
         cursor: str | None = None,
         mcp_overhead_bytes: int | None = None,
     ) -> dict[str, Any]:
+        cursor_report_hash = None
+        if cursor is not None:
+            encoded_campaign, ledger_watermark, candidate_ledger_hash, protocol_hash, cursor_report_hash = (
+                self._report_cursor_view(cursor)
+            )
+            if encoded_campaign != campaign_id:
+                raise ValueError("Invalid result cursor")
         report = self.build_evidence_report(
             campaign_id=campaign_id, protocol_hash=protocol_hash,
             candidate_ledger_hash=candidate_ledger_hash, ledger_watermark=ledger_watermark,
         )
+        if cursor_report_hash is not None and report.report_hash != cursor_report_hash:
+            raise AlphaError(AlphaErrorCode.RESEARCH_EVIDENCE_HASH_MISMATCH, "Fixed historical report changed", {
+                "expected_report_hash": cursor_report_hash, "actual_report_hash": report.report_hash,
+            })
         for reference in report.evidence_references:
             if reference.get("job_id"):
                 self.record_result_access(job_id=reference["job_id"], section="research_report")
@@ -2171,7 +2265,10 @@ class ResearchExperimentRegistry:
         if section not in rows_by_section:
             raise ValueError("Unknown research report section")
         rows = rows_by_section[section]
-        identity = digest({"report_hash": report.report_hash, "section": section})
+        identity = (
+            f"report-v1|{campaign_id}|{report.ledger_watermark}|"
+            f"{candidate_ledger_hash or ''}|{protocol_hash or ''}|{report.report_hash}"
+        )
         return result_page(
             identity, section, report.report_hash, len(rows), limit, cursor,
             lambda offset, size: rows[offset:offset + size],

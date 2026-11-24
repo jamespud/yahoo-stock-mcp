@@ -339,3 +339,36 @@ Ledger and report cursors bind a fixed watermark or Snapshot. New Trials, later 
 Campaigns do not change an existing Snapshot report. Live reports (no Snapshot/watermark), explicitly
 fixed-watermark reports and Snapshot reports are distinct views; only the Snapshot/fixed-watermark views
 make immutability claims.
+
+## Second-review hardening
+
+### Atomic final Freeze publication
+
+`complete_publish()` now opens an explicit `BEGIN IMMEDIATE` when the connection is not already in a
+transaction. Managed request/freeze verification and the final completed-state CAS UPDATE execute in
+that same write transaction. A separate SQLite connection cannot register a new Trial between the final
+freshness check and CAS completion. Existing lease ownership and PR1 OOS rules are unchanged.
+
+### Walk-forward candidate binding
+
+A valid Walk-forward Job elsewhere in the Protocol is not evidence for every Training Candidate. This
+release cannot yet prove a candidate-to-Walk-forward scientific-configuration binding across separate
+Trials. When `requires_walk_forward=true`, Training Candidates therefore fail closed with
+`WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED`. Unrelated Walk-forward evidence, including different
+Horizon, FactorSpec or model configuration, cannot unlock selection. No Final Refit system was added.
+
+### Historical watermark views
+
+Historical Trial existence uses the actual `TRIAL_REGISTERED` event sequence. Submission, completion,
+result evidence, Exposure summaries and Hypothesis/Protocol registration are also bounded by the target
+Watermark:
+
+- a Trial registered after W1 is absent from the W1 ledger view;
+- a Trial running at W1 has no result evidence even if it completes at W2;
+- Exposure counts are rebuilt from `TRIAL_RESULT_ACCESSED` events at or before W1;
+- Protocol revisions and Hypotheses registered after W1 do not enter W1 history;
+- fixed-watermark report pagination encodes Campaign, Watermark, Protocol/Snapshot identity and Report
+  Hash in its cursor and rebuilds the same immutable view.
+
+An explicit Watermark does not retroactively adopt a Snapshot created later at the same numeric
+watermark. Snapshot reports require an explicit Snapshot hash.
