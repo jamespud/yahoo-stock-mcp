@@ -1165,7 +1165,8 @@ def test_ledger_pagination_and_snapshot_report_are_stable_across_new_evidence(tm
             campaign_id=campaign.campaign_id,
             ledger_watermark=snapshot.ledger_watermark,
         )
-        assert rebuilt.report_hash == report_before["report_hash"]
+        assert rebuilt.report_hash != report_before["report_hash"]
+        assert rebuilt.candidate_selection is None
     finally:
         jobs.connection.close()
 
@@ -1472,6 +1473,100 @@ def test_running_trial_does_not_leak_later_completion_into_fixed_watermark_repor
         )
         assert after.report_hash == before.report_hash
         assert after.evidence_references == []
+    finally:
+        jobs.connection.close()
+
+
+def test_fixed_watermark_report_and_ledger_sections_ignore_later_seal(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        _publish_training(jobs, request, trial)
+        w1 = registry.ledger_watermark(campaign.campaign_id)
+        report_before = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        snapshots_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="snapshots", ledger_watermark=w1,
+        )
+        selections_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="selections", ledger_watermark=w1,
+        )
+        assert snapshots_before["rows"] == []
+        assert selections_before["rows"] == []
+
+        snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash,
+        )
+        report_after = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash, ledger_watermark=w1,
+        )
+        snapshots_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="snapshots", ledger_watermark=w1,
+        )
+        selections_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="selections", ledger_watermark=w1,
+        )
+        assert report_after.model_dump(mode="json") == report_before.model_dump(mode="json")
+        assert report_after.report_hash == report_before.report_hash
+        assert report_after.candidate_selection is None
+        assert snapshots_after["rows"] == []
+        assert selections_after["rows"] == []
+
+        seal_watermark = registry.ledger_watermark(campaign.campaign_id)
+        current_snapshots = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="snapshots", ledger_watermark=seal_watermark,
+        )
+        current_selections = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="selections", ledger_watermark=seal_watermark,
+        )
+        assert [row["candidate_ledger_hash"] for row in current_snapshots["rows"]] == [
+            snapshot.candidate_ledger_hash,
+        ]
+        assert [row["selection_id"] for row in current_selections["rows"]] == [selection.selection_id]
+
+        snapshot_report = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        assert snapshot_report.report_hash != report_after.report_hash
+        assert snapshot_report.candidate_selection is not None
+    finally:
+        jobs.connection.close()
+
+
+def test_fixed_watermark_evidence_hides_trial_submission_registered_later(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        w1 = registry.ledger_watermark(campaign.campaign_id)
+        evidence_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="evidence", ledger_watermark=w1,
+        )
+        trials_before = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="trials", ledger_watermark=w1,
+        )
+        assert evidence_before["rows"] == [{
+            "trial_id": trial.trial_id,
+            "job_id": None,
+            "job_status": None,
+            "job_config_hash": None,
+            "result_hash": None,
+            "evidence_scope_hash": trial.evidence_scope_hash,
+        }]
+        assert [row["status"] for row in trials_before["rows"]] == ["REGISTERED"]
+
+        jobs.submit_alpha({**request, "research_trial_id": trial.trial_id})
+        evidence_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="evidence", ledger_watermark=w1,
+        )
+        trials_after = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id, section="trials", ledger_watermark=w1,
+        )
+        assert evidence_after == evidence_before
+        assert trials_after == trials_before
+        assert evidence_after["rows"][0]["job_id"] is None
+        assert evidence_after["rows"][0]["job_config_hash"] is None
+        assert evidence_after["rows"][0]["result_hash"] is None
     finally:
         jobs.connection.close()
 

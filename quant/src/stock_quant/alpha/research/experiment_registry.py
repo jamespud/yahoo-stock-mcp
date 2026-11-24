@@ -1769,19 +1769,8 @@ class ResearchExperimentRegistry:
     ) -> ResearchEvidenceReport:
         campaign = self.get_campaign(campaign_id)
         snapshot = self.get_snapshot(candidate_ledger_hash) if candidate_ledger_hash else None
-        if snapshot is None and ledger_watermark is not None:
-            if type(ledger_watermark) is not int or ledger_watermark < 0:
-                raise ValueError("Invalid ledger watermark")
-            row = self.connection.execute(
-                "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
-                "AND ledger_watermark=? ORDER BY created_at DESC LIMIT 1",
-                (campaign_id, ledger_watermark),
-            ).fetchone()
-            snapshot = None if row is None else self.get_snapshot(row[0])
-        if snapshot is None and ledger_watermark is None:
-            # An unbound report is a live Campaign view. Callers that need immutable
-            # evidence must pass a Snapshot hash or explicit ledger watermark.
-            snapshot = None
+        if ledger_watermark is not None and (type(ledger_watermark) is not int or ledger_watermark < 0):
+            raise ValueError("Invalid ledger watermark")
         data_reuse_cutoff = None
         if snapshot is not None:
             ledger_watermark = snapshot.ledger_watermark
@@ -2117,20 +2106,27 @@ class ResearchExperimentRegistry:
             ).fetchall()
             if (self._hypothesis_registered_sequence(item[0]) or 0) <= watermark
         ]
-        snapshots = [
-            self.get_snapshot(row[0]).model_dump(mode="json") for row in self.connection.execute(
-                "SELECT candidate_ledger_hash FROM alpha_research_ledger_snapshots WHERE campaign_id=? "
-                "AND ledger_watermark<=? ORDER BY ledger_watermark,created_at",
-                (campaign_id, watermark),
-            ).fetchall()
-        ]
-        allowed_snapshot_hashes = {item["candidate_ledger_hash"] for item in snapshots}
+        sealed_snapshot_hashes: list[str] = []
+        registered_selection_ids: set[str] = set()
+        for event in events_models:
+            if event.event_type == "LEDGER_SEALED":
+                snapshot_hash_value = event.detail.get("candidate_ledger_hash")
+                if isinstance(snapshot_hash_value, str) and snapshot_hash_value not in sealed_snapshot_hashes:
+                    sealed_snapshot_hashes.append(snapshot_hash_value)
+            elif event.event_type == "SELECTION_REGISTERED":
+                selection_id_value = event.detail.get("selection_id")
+                if isinstance(selection_id_value, str):
+                    registered_selection_ids.add(selection_id_value)
+        snapshots = [self.get_snapshot(value).model_dump(mode="json") for value in sealed_snapshot_hashes]
+        allowed_snapshot_hashes = set(sealed_snapshot_hashes)
         selections = [
             ResearchSelection.model_validate(_load(row[0])).model_dump(mode="json")
             for row in self.connection.execute(
                 "SELECT payload FROM alpha_research_selections WHERE campaign_id=? ORDER BY created_at,selection_id",
                 (campaign_id,),
-            ).fetchall() if _load(row[0]).get("candidate_ledger_hash") in allowed_snapshot_hashes
+            ).fetchall()
+            if _load(row[0]).get("selection_id") in registered_selection_ids
+            and _load(row[0]).get("candidate_ledger_hash") in allowed_snapshot_hashes
         ]
         sections.update({
             "campaigns": [campaign.model_dump(mode="json")],
@@ -2167,19 +2163,26 @@ class ResearchExperimentRegistry:
                 if (self._trial_registered_sequence(trial.trial_id) or 0) > watermark:
                     continue
                 binding = self.get_trial_job(trial.trial_id)
-                job = None if binding is None else self._job_row(binding.job_id)
+                submitted_sequence = self._trial_submitted_sequence(trial.trial_id)
+                binding_visible = (
+                    binding is not None and submitted_sequence is not None and submitted_sequence <= watermark
+                )
+                job = None if not binding_visible else self._job_row(binding.job_id)
                 state = self._trial_status_at(trial.trial_id, watermark)
                 rows.append({
                     "trial_id": trial.trial_id,
-                    "job_id": None if binding is None else binding.job_id,
+                    "job_id": binding.job_id if binding_visible else None,
                     "job_status": (
+                        None if not binding_visible else
                         "completed" if state == "COMPLETED" else
                         "failed" if state in {"FAILED", "REJECTED"} else
                         "cancelled" if state == "CANCELLED" else
                         state.lower()
                     ),
-                    "job_config_hash": None if binding is None else binding.job_config_hash,
-                    "result_hash": None if job is None or state != "COMPLETED" else job["result_hash"],
+                    "job_config_hash": binding.job_config_hash if binding_visible else None,
+                    "result_hash": (
+                        None if job is None or state != "COMPLETED" else job["result_hash"]
+                    ),
                     "evidence_scope_hash": trial.evidence_scope_hash,
                 })
             sections[section] = rows
