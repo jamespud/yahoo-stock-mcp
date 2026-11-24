@@ -10,8 +10,11 @@ This is a single-user research runtime; supported models and limits are detailed
 
 The optional Alpha subsystem adds immutable stock/option datasets, FactorSpec DAGs, QuantLib option
 analytics, deterministic LightGBM model sets, frozen predictions, Top-K stock portfolios and long-only
-historical option backtests. It extends the existing MCP control plane with nine asynchronous Alpha
-tools. Yahoo current option snapshots are observation-only and cannot satisfy historical quote
+historical option backtests. It extends the existing MCP control plane with Alpha training,
+walk-forward and governed research-registry tools. The experiment registry adds server-hashed
+Campaign/Protocol definitions, canonical Trials, cross-Job lifecycle accounting, hard budgets,
+Candidate Ledger Snapshots, deterministic selection and PR3/PR4 evidence reports. Yahoo current option
+snapshots are observation-only and cannot satisfy historical quote
 admission. See [`docs/QUANT_ALPHA_RESEARCH.md`](../docs/QUANT_ALPHA_RESEARCH.md) and the
 [`research status`](../docs/QUANT_ALPHA_STATUS.md).
 

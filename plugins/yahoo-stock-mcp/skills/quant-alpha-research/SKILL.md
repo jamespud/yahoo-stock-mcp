@@ -35,6 +35,11 @@ first. For factor, option, model and reporting details read the local references
 - `quant_backtest_alpha_portfolio` - simulate a constrained Top-K stock portfolio only after scoped raw-price attestation and complete corporate-action coverage are supplied.
 - `quant_backtest_options` - simulate long calls/puts using valid historical Ask entries and Bid exits.
 - `quant_get_job` / `quant_cancel_job` / `quant_get_result` - poll, cancel and retrieve only terminal evidence.
+- `quant_register_alpha_research_protocol` - create/reference a Campaign and register a server-hashed immutable Protocol revision.
+- `quant_register_alpha_trial` - register a canonical training/walk-forward request before execution.
+- `quant_get_alpha_research_ledger` - inspect Campaign/Protocol/Trial/Event integrity, budgets, lifecycle and exposure with bound cursors.
+- `quant_seal_alpha_candidate_ledger` - reconcile terminal Trials, seal an immutable Snapshot and apply the predeclared selection rule.
+- `quant_get_alpha_research_report` - build a deterministic, paginated PR3/PR4 evidence report bound to a Snapshot.
 
 ## Workflow
 
@@ -109,3 +114,40 @@ first. For factor, option, model and reporting details read the local references
 Route rule-based DSL and DSL parameter-search walk-forward to `quant-strategy-research`; Alpha model
 walk-forward belongs to this skill. Route independent
 leakage, benchmark, accounting and reproducibility audits to `quant-research-reliability`.
+
+## Governed Research Registry
+
+Use the Registry for any research whose result could influence candidate selection, even when the
+individual model is only exploratory. The governed sequence is:
+
+1. Declare the objective, data scope, development windows and numeric selection rule.
+2. Inspect `quant_get_alpha_research_ledger` before registering a new Protocol.
+3. Register the Campaign/Protocol with `quant_register_alpha_research_protocol`. Never supply a
+   Protocol hash; the server computes it. A revision must name its parent and cannot increase Campaign
+   budgets.
+4. Register the canonical training or walk-forward request with `quant_register_alpha_trial`.
+5. Pass the returned `research_trial_id` to `quant_train_alpha_model` or
+   `quant_run_alpha_walk_forward`.
+6. Read the complete terminal result and preserve failures, negative IC and insufficient evidence.
+7. After all Trials are terminal, call `quant_seal_alpha_candidate_ledger`. A selected candidate is
+   evidence for further research, not Alpha certification.
+8. Generate `quant_get_alpha_research_report` from the sealed Snapshot and disclose its unresolved
+   risks, data reuse findings, exposure tracking gap and `global_trial_history_complete=false`.
+
+Never change Seed, Horizon, FactorSpec, model depth, windows or inference after seeing a result while
+describing it as the same Trial. Register a new Trial or Protocol revision. Never create a new Campaign
+name to reset trial history. Never raise budgets without a new Campaign, and never infer global
+multiple-testing correction from the number of Trials. Registry integrity and model performance are
+separate outcomes.
+
+Managed Protocol constraints are executable, not documentation-only: candidate definitions, Hypothesis
+candidate constraints, FactorSpec hash, seed/hyperparameter/inference policy, walk-forward mode, coverage
+thresholds and stopping limits are checked before Trial registration. Unsupported evaluation or stopping
+keys are rejected when the Protocol is registered. Any label, horizon, Ridge Alpha, FactorSpec, fold mode
+or evaluation-policy change requires a compatible new Trial or Protocol revision.
+
+When a Protocol requires Walk-forward evidence, PR5 currently fails closed with
+`WALK_FORWARD_CANDIDATE_BINDING_NOT_SUPPORTED` because separate Training and Walk-forward Trials do not
+yet provide a trustworthy shared candidate binding. Do not treat any other Walk-forward Job in the
+Protocol as evidence for a Training Candidate. Historical reports must be requested by Snapshot hash or
+explicit Watermark; live reports are mutable views.

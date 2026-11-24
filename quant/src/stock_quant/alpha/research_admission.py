@@ -177,6 +177,16 @@ def authorize_oos(
             raise ValueError("Completed freeze job returned a different freeze ID")
         freeze_store = FrozenResearchStore(Path(job_store.path).with_suffix(".freezes"))
         record = freeze_store.materialize(completed_record)
+        research_registry = getattr(job_store, "research_registry", None)
+        managed = research_registry is not None and research_registry.connection.execute(
+            "SELECT 1 FROM alpha_research_protocols WHERE protocol_hash=?", (record.research_protocol_hash,),
+        ).fetchone() is not None
+        if managed:
+            research_registry.verify_managed_freeze(
+                protocol_hash=record.research_protocol_hash,
+                candidate_ledger_hash=record.candidate_ledger_hash,
+                selected_model_id=record.frozen_model_ids[0],
+            )
         validated = validate_frozen_record(record, store=datasets, model_registry=model_registry)
         return _issue_frozen_oos_grant(validated)
     except AlphaError as error:

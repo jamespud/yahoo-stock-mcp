@@ -11,8 +11,13 @@ import {
   captureOptionsSnapshotInput,
   computeFactorsInput,
   computeOptionFactorsInput,
+  alphaResearchLedgerInput,
+  alphaResearchReportInput,
   freezeAlphaSelectionInput,
   predictAlphaInput,
+  registerAlphaResearchProtocolInput,
+  registerAlphaTrialInput,
+  sealAlphaCandidateLedgerInput,
   prepareAlphaDatasetInput,
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
@@ -198,4 +203,41 @@ test("Validation-only training contract is explicit and rejects Test windows", (
     ...input,
     windows: {...windows, embargo_days: -1},
   }));
+});
+
+test("Research Registry contracts bind Campaign, Protocol and Trial without caller hashes", () => {
+  const hash = (digit) => "sha256:" + digit.repeat(64);
+  const campaign = {
+    campaign_name: "synthetic",
+    research_objective: "Test a falsifiable hypothesis.",
+    development_data_scope: {asset_class: "equity", market: "US"},
+  };
+  const protocol = {
+    hypothesis_definitions: [{
+      hypothesis_key: "reversal", title: "Reversal", economic_rationale: "Liquidity shock.",
+      expected_direction: "positive", target_variable: "stock_forward_return",
+      primary_metric: "rank_ic", null_hypothesis: "No rank IC.",
+    }],
+    allowed_job_kinds: ["train_alpha_model"],
+  };
+  const registered = registerAlphaResearchProtocolInput.parse({
+    campaign,
+    protocol: {...protocol, selection_policy: {minimum_model_execution_coverage: 0.8}},
+  });
+  assert.equal(registered.campaign.campaign_name, "synthetic");
+  assert.equal(registered.protocol.selection_policy.minimum_model_execution_coverage, 0.8);
+  assert.throws(() => registerAlphaResearchProtocolInput.parse({campaign, campaign_id: hash("1"), protocol}));
+  assert.throws(() => registerAlphaResearchProtocolInput.parse({protocol_hash: hash("2"), campaign, protocol}));
+  assert.equal(registerAlphaTrialInput.parse({
+    campaign_id: hash("1"), protocol_hash: hash("2"), hypothesis_id: hash("3"),
+    request: {kind: "train_alpha_model"}, trial_purpose: "INITIAL_HYPOTHESIS_TEST",
+  }).trial_purpose, "INITIAL_HYPOTHESIS_TEST");
+  assert.equal(alphaResearchLedgerInput.parse({campaign_id: hash("1"), section: "events", ledger_watermark: 7}).ledger_watermark, 7);
+  assert.equal(sealAlphaCandidateLedgerInput.parse({campaign_id: hash("1"), protocol_hash: hash("2")}).protocol_hash, hash("2"));
+  assert.equal(alphaResearchReportInput.parse({campaign_id: hash("1"), section: "walk_forward_evidence", ledger_watermark: 7}).ledger_watermark, 7);
+  assert.equal(trainAlphaModelInputFields.parse({
+    evaluation_mode: "validation_only", research_protocol_hash: hash("2"), research_trial_id: hash("3"),
+    feature_set_id: hash("4"), label_spec: {label_name: "stock_forward_return", target_type: "stock_return", stock_dataset_id: hash("5")},
+    windows: {train_start: "2024-01-01T00:00:00Z", train_end: "2024-02-01T00:00:00Z", validation_start: "2024-02-01T00:00:00Z", validation_end: "2024-03-01T00:00:00Z"},
+  }).research_trial_id, hash("3"));
 });

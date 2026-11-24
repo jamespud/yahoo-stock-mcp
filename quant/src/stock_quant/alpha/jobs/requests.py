@@ -79,6 +79,7 @@ class ComputeOptionFactorsJob(AlphaJobBase):
 
 class TrainAlphaModelJob(AlphaJobBase):
     kind: Literal["train_alpha_model"]
+    research_trial_id: Hash | None = None
     feature_set_id: Hash
     label_name: str = Field(min_length=1, max_length=128)
     target_type: str

@@ -28,6 +28,12 @@ class AlphaCapabilities(StrictModel):
     lightgbm_enabled: bool
     walk_forward_validation_enabled: bool
     walk_forward_job_kind: str
+    research_experiment_registry_enabled: bool = True
+    managed_research_admission_enabled: bool = True
+    research_ledger_snapshot_enabled: bool = True
+    research_evidence_report_enabled: bool = True
+    research_global_trial_history_complete: bool = False
+    research_exposure_tracking_complete: bool = False
     supported_model_types: list[str]
     supported_factor_operators: list[str]
     supported_label_types: list[str]

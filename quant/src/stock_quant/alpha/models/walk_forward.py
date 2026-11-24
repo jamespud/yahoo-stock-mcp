@@ -124,6 +124,7 @@ class WalkForwardResourceBudget(StrictModel):
 
 class WalkForwardAlphaRequest(StrictModel):
     kind: Literal["walk_forward_alpha"] = "walk_forward_alpha"
+    research_trial_id: Hash | None = None
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
     evaluation_mode: Literal["validation_only"]
     research_protocol_hash: Hash

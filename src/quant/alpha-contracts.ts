@@ -184,6 +184,7 @@ const lightgbmHyperparameters = z.object({
 export const trainAlphaModelInputFields = z.object({
   evaluation_mode: z.literal("validation_only"),
   research_protocol_hash: alphaHash,
+  research_trial_id: alphaHash.optional(),
   feature_set_id: alphaHash,
   label_spec: labelSpec,
   windows: developmentWindows,
@@ -212,6 +213,7 @@ const training = trainAlphaModelInputFields.shape;
 export const trainAlphaModelToolFields = z.object({
   evaluation_mode: auditableField(training.evaluation_mode),
   research_protocol_hash: auditableField(training.research_protocol_hash),
+  research_trial_id: auditableField(training.research_trial_id.describe("Optional registered Trial binding required for a managed Protocol.")),
   feature_set_id: auditableField(training.feature_set_id.describe("Required feature set content ID.")),
   label_spec: auditableField(training.label_spec.describe("Required label specification.")),
   windows: auditableField(training.windows.describe("Required chronological windows.")),
@@ -300,6 +302,7 @@ const walkForwardResourceBudget = z.object({
 const walkForwardAlphaInputBase = z.object({
   evaluation_mode: z.literal("validation_only"),
   research_protocol_hash: alphaHash,
+  research_trial_id: alphaHash.optional(),
   feature_set_id: alphaHash,
   stock_dataset_id: alphaHash,
   label_spec: walkForwardLabelSpec,
@@ -323,6 +326,7 @@ const walkForward = walkForwardAlphaInputBase.shape;
 export const walkForwardAlphaToolFields = z.object({
   evaluation_mode: auditableField(walkForward.evaluation_mode),
   research_protocol_hash: auditableField(walkForward.research_protocol_hash),
+  research_trial_id: auditableField(walkForward.research_trial_id.describe("Optional registered Trial binding required for a managed Protocol.")),
   feature_set_id: auditableField(walkForward.feature_set_id.describe("Required development feature set content ID.")),
   stock_dataset_id: auditableField(walkForward.stock_dataset_id.describe("Required stock label dataset content ID.")),
   label_spec: auditableField(walkForward.label_spec),
@@ -361,4 +365,136 @@ export const backtestOptionsInput = z.object({
   prediction_set_id: alphaHash,
   option_dataset_id: alphaHash,
   execution_config: optionExecutionConfig.optional(),
+}).strict();
+
+
+const instant = z.string().datetime({ offset: true });
+
+const researchTrialBudgetInput = z.object({
+  max_registered_trials: z.number().int().min(1).max(1_000_000).optional(),
+  max_submitted_trials: z.number().int().min(1).max(1_000_000).optional(),
+  max_distinct_candidate_definitions: z.number().int().min(1).max(1_000_000).optional(),
+  max_evaluation_jobs: z.number().int().min(1).max(1_000_000).optional(),
+  max_execution_attempts: z.number().int().min(1).max(10_000_000).optional(),
+  max_protocol_revisions: z.number().int().min(1).max(10_000).optional(),
+  max_model_fits: z.number().int().min(0).optional(),
+  max_total_training_samples: z.number().int().min(0).optional(),
+  max_total_runtime_seconds: z.number().int().min(0).optional(),
+}).strict();
+
+export const researchCampaignInput = z.object({
+  campaign_name: z.string().min(1).max(160),
+  research_objective: z.string().min(1).max(4096),
+  research_scope: z.record(z.unknown()).optional(),
+  development_data_scope: z.object({
+    asset_class: z.string().min(1).max(64),
+    market: z.string().min(1).max(64),
+    universe_definition: z.record(z.unknown()).optional(),
+    development_start: instant.optional(),
+    development_end: instant.optional(),
+    data_provider: z.string().min(1).max(128).optional(),
+    provider_version: z.string().min(1).max(128).optional(),
+    stock_dataset_ids: z.array(alphaHash).optional(),
+    feature_dataset_ids: z.array(alphaHash).optional(),
+    parent_dataset_ids: z.array(alphaHash).optional(),
+    price_basis: z.string().min(1).max(64).optional(),
+    label_definitions: z.array(z.record(z.unknown())).optional(),
+    calendar_version: z.string().min(1).max(128).optional(),
+  }).strict(),
+  related_campaign_ids: z.array(alphaHash).optional(),
+  resource_policy: researchTrialBudgetInput.optional(),
+}).strict();
+
+const researchHypothesisInput = z.object({
+  hypothesis_key: z.string().min(1).max(128),
+  title: z.string().min(1).max(512),
+  economic_rationale: z.string().min(1).max(4096),
+  expected_direction: z.enum(["positive", "negative", "two_sided"]),
+  target_variable: z.string().min(1).max(128),
+  factor_spec_hash: alphaHash.optional(),
+  primary_metric: z.string().min(1).max(128),
+  null_hypothesis: z.string().min(1).max(2048),
+  comparison_family: z.array(z.string().min(1).max(128)).optional(),
+  candidate_constraints: z.record(z.unknown()).optional(),
+}).strict();
+
+const researchSelectionPolicyInput = z.object({
+  primary_metric: z.string().min(1).max(128).optional(),
+  minimum_rank_ic: z.number().min(-1).max(1).optional(),
+  minimum_valid_folds: z.number().int().min(0).optional(),
+  minimum_valid_ic_sessions: z.number().int().min(0).optional(),
+  minimum_label_coverage: z.number().min(0).max(1).optional(),
+  minimum_model_execution_coverage: z.number().min(0).max(1).optional(),
+  minimum_end_to_end_coverage: z.number().min(0).max(1).optional(),
+  allowed_research_status: z.array(z.string().min(1).max(128)).optional(),
+  stability_constraints: z.record(z.unknown()).optional(),
+  tie_break_rule: z.enum(["highest_primary_metric_then_earliest_trial", "earliest_trial"]).optional(),
+}).strict();
+
+export const researchProtocolInput = z.object({
+  protocol_revision: z.number().int().min(1).optional(),
+  parent_protocol_hash: alphaHash.optional(),
+  modification_reason: z.string().min(1).max(4096).optional(),
+  hypothesis_definitions: z.array(researchHypothesisInput).min(1).max(512),
+  candidate_definitions: z.array(z.record(z.unknown())).max(512).optional(),
+  allowed_job_kinds: z.array(z.enum(["train_alpha_model", "walk_forward_alpha"])).min(1),
+  data_constraints: z.record(z.unknown()).optional(),
+  development_windows: z.array(z.record(z.unknown())).optional(),
+  label_specifications: z.array(z.record(z.unknown())).optional(),
+  factor_specifications: z.array(z.record(z.unknown())).optional(),
+  hyperparameter_constraints: z.record(z.unknown()).optional(),
+  seed_policy: z.record(z.unknown()).optional(),
+  evaluation_policy: z.record(z.unknown()).optional(),
+  selection_policy: researchSelectionPolicyInput.optional(),
+  inference_policy: z.record(z.unknown()).optional(),
+  stopping_policy: z.record(z.unknown()).optional(),
+  resource_policy: researchTrialBudgetInput.optional(),
+  trial_budget: researchTrialBudgetInput.optional(),
+}).strict();
+
+export const registerAlphaResearchProtocolFields = z.object({
+  campaign: researchCampaignInput.optional(),
+  campaign_id: alphaHash.optional(),
+  protocol: researchProtocolInput,
+}).strict();
+
+export const registerAlphaResearchProtocolInput = registerAlphaResearchProtocolFields.superRefine((value, context) => {
+  if ((value.campaign === undefined) === (value.campaign_id === undefined)) {
+    context.addIssue({code: z.ZodIssueCode.custom, message: "Provide exactly one of campaign or campaign_id"});
+  }
+});
+
+export const registerAlphaTrialInput = z.object({
+  campaign_id: alphaHash,
+  protocol_hash: alphaHash,
+  hypothesis_id: alphaHash,
+  request: z.record(z.unknown()),
+  trial_purpose: z.enum([
+    "INITIAL_HYPOTHESIS_TEST", "PARAMETER_VARIATION", "DATA_VARIATION", "FACTOR_VARIATION",
+    "ROBUSTNESS_CHECK", "REPRODUCIBILITY_CHECK", "FINAL_REFIT", "POST_HOC_EXPLORATION",
+  ]).optional(),
+  parent_trial_id: alphaHash.optional(),
+}).strict();
+
+export const alphaResearchLedgerInput = z.object({
+  campaign_id: alphaHash,
+  ledger_watermark: z.number().int().min(0).optional(),
+  section: z.enum(["summary", "campaigns", "protocols", "hypotheses", "trials", "events", "evidence", "snapshots", "selections"]).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+  cursor: z.string().max(2048).optional(),
+}).strict();
+
+export const sealAlphaCandidateLedgerInput = z.object({
+  campaign_id: alphaHash,
+  protocol_hash: alphaHash,
+}).strict();
+
+export const alphaResearchReportInput = z.object({
+  campaign_id: alphaHash,
+  ledger_watermark: z.number().int().min(0).optional(),
+  protocol_hash: alphaHash.optional(),
+  candidate_ledger_hash: alphaHash.optional(),
+  section: z.enum(["summary", "hypotheses", "data_quality", "data_reuse", "exposures", "baseline_evidence", "walk_forward_evidence", "evidence", "unresolved_risks", "report"]).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+  cursor: z.string().max(2048).optional(),
 }).strict();

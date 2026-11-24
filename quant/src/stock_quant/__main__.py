@@ -10,6 +10,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from .alpha.capabilities import AlphaCapabilities
+from .alpha.errors import AlphaError
 from .calendar import CALENDAR_PROVIDER_VERSION, CalendarSchedule, generate_calendar
 from .compiler import OPERATORS, CompileError, validate_strategy
 from .contracts import Strategy
@@ -105,7 +106,7 @@ def main():
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))
-        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "audit_training_rejection", "audit_walk_forward_rejection", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
+        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "audit_training_rejection", "audit_walk_forward_rejection", "register_alpha_research_protocol", "register_alpha_trial", "get_alpha_research_ledger", "seal_alpha_candidate_ledger", "get_alpha_research_report", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
             with JobStore(request["registry_path"]) as registry:
                 if method == "register":
                     result = registry.register(request["strategy"])
@@ -130,6 +131,52 @@ def main():
                 elif method == "submit_alpha":
                     result = registry.submit_alpha(request["job"])
                     wake_worker(request["registry_path"])
+                elif method == "register_alpha_research_protocol":
+                    if request.get("campaign") is not None:
+                        campaign = registry.research_registry.register_campaign(request["campaign"])
+                        campaign_id = campaign.campaign_id
+                    else:
+                        campaign = registry.research_registry.get_campaign(request["campaign_id"])
+                        campaign_id = campaign.campaign_id
+                    protocol = registry.research_registry.register_protocol({
+                        **request["protocol"], "campaign_id": campaign_id,
+                    })
+                    result = {
+                        "campaign": campaign.model_dump(mode="json"),
+                        "protocol": protocol.model_dump(mode="json"),
+                    }
+                elif method == "register_alpha_trial":
+                    result = registry.research_registry.register_trial(
+                        campaign_id=request["campaign_id"],
+                        protocol_hash=request["protocol_hash"],
+                        hypothesis_id=request["hypothesis_id"],
+                        request=request["request"],
+                        trial_purpose=request.get("trial_purpose", "INITIAL_HYPOTHESIS_TEST"),
+                        parent_trial_id=request.get("parent_trial_id"),
+                    ).model_dump(mode="json")
+                elif method == "get_alpha_research_ledger":
+                    result = registry.research_registry.read_research_ledger(
+                        campaign_id=request["campaign_id"], section=request.get("section", "summary"),
+                        limit=request.get("limit", 100), cursor=request.get("cursor"),
+                        ledger_watermark=request.get("ledger_watermark"),
+                        mcp_overhead_bytes=request.get("mcp_overhead_bytes"),
+                    )
+                elif method == "seal_alpha_candidate_ledger":
+                    snapshot, selection = registry.research_registry.seal_candidate_ledger(
+                        campaign_id=request["campaign_id"], protocol_hash=request["protocol_hash"],
+                    )
+                    result = {
+                        "candidate_ledger_snapshot": snapshot.model_dump(mode="json"),
+                        "selection": selection.model_dump(mode="json"),
+                    }
+                elif method == "get_alpha_research_report":
+                    result = registry.research_registry.read_research_report(
+                        campaign_id=request["campaign_id"], protocol_hash=request.get("protocol_hash"),
+                        candidate_ledger_hash=request.get("candidate_ledger_hash"),
+                        ledger_watermark=request.get("ledger_watermark"),
+                        section=request.get("section", "summary"), limit=request.get("limit", 100),
+                        cursor=request.get("cursor"), mcp_overhead_bytes=request.get("mcp_overhead_bytes"),
+                    )
                 elif method == "audit_training_rejection":
                     fields = request["fields"]
                     if not isinstance(fields, list) or not 1 <= len(fields) <= 20 or any(not isinstance(field, str) for field in fields):
@@ -161,7 +208,10 @@ def main():
         print(encoded)
     except CompileError as error:
         print(json.dumps({"error": error.diagnostic}))
-    except Exception as error:
+    except AlphaError as error:
+        print(json.dumps({"error": error.to_dict()}))
+        sys.exit(1)
+    except Exception as error:  # noqa: BLE001 - JSON bridge must return a bounded error
         print(json.dumps({"error": {"code": "REQUEST_FAILED", "message": str(error)}}))
         sys.exit(1)
 

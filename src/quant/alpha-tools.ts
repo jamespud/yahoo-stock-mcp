@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 import {
+  alphaResearchLedgerInput,
+  alphaResearchReportInput,
+  registerAlphaResearchProtocolFields,
+  registerAlphaResearchProtocolInput,
+  registerAlphaTrialInput,
+  sealAlphaCandidateLedgerInput,
   freezeAlphaSelectionInput,
   evaluateAlphaOOSInput,
   alphaModelDiagnosticsInput,
@@ -141,6 +147,47 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
       kind: "freeze_alpha_selection", ...args,
       idempotency_key: `alpha_freeze:${createHash("sha256").update(JSON.stringify(args)).digest("hex")}`,
     }),
+  );
+
+  server.tool(
+    "quant_register_alpha_research_protocol",
+    "Create or reference a Research Campaign and register an immutable server-hashed Protocol. The first Protocol is preregistered; later revisions must name their parent and preserve Campaign budgets.",
+    registerAlphaResearchProtocolFields.shape,
+    async (args) => {
+      const parsed = registerAlphaResearchProtocolInput.safeParse(args);
+      if (!parsed.success) {
+        return {isError: true, content: [{type: "text" as const, text: parsed.error.issues.map((issue) => issue.message).join("; ")}]};
+      }
+      return runtime.stored({ method: "register_alpha_research_protocol", ...parsed.data });
+    },
+  );
+
+  server.tool(
+    "quant_register_alpha_trial",
+    "Register a canonical research request without executing it. A managed Protocol requires this Trial before training or walk-forward submission.",
+    registerAlphaTrialInput.shape,
+    async (args) => runtime.stored({ method: "register_alpha_trial", ...args }),
+  );
+
+  server.tool(
+    "quant_get_alpha_research_ledger",
+    "Read the paginated Campaign ledger, lifecycle events, integrity status, budget use and evidence references.",
+    alphaResearchLedgerInput.shape,
+    async (args) => runtime.stored({ method: "get_alpha_research_ledger", ...args }),
+  );
+
+  server.tool(
+    "quant_seal_alpha_candidate_ledger",
+    "Reconcile a Campaign, seal an immutable Candidate Ledger Snapshot only when all trials are terminal, and apply the predeclared candidate selection rule. Never starts Freeze or OOS.",
+    sealAlphaCandidateLedgerInput.shape,
+    async (args) => runtime.stored({ method: "seal_alpha_candidate_ledger", ...args }),
+  );
+
+  server.tool(
+    "quant_get_alpha_research_report",
+    "Build a deterministic evidence report bound to a sealed Snapshot or current watermark, with paginated hypotheses, reuse, exposure, PR3 and reconstructed PR4 evidence.",
+    alphaResearchReportInput.shape,
+    async (args) => runtime.stored({ method: "get_alpha_research_report", ...args }),
   );
 
   server.tool(
