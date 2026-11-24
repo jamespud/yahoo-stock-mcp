@@ -1,10 +1,8 @@
 """Honest, dependency-aware Alpha capability discovery."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib.util import find_spec
-from typing import Mapping
-
-from pydantic import Field
 
 from ..contracts import StrictModel
 from .contracts import FACTOR_OPERATORS, LABEL_TYPES, ProviderCoverage
@@ -28,6 +26,8 @@ class AlphaCapabilities(StrictModel):
     option_pricing_enabled: bool
     option_backtesting_enabled: bool
     lightgbm_enabled: bool
+    walk_forward_validation_enabled: bool
+    walk_forward_job_kind: str
     supported_model_types: list[str]
     supported_factor_operators: list[str]
     supported_label_types: list[str]
@@ -40,7 +40,7 @@ class AlphaCapabilities(StrictModel):
         *,
         modules: Mapping[str, bool] | None = None,
         provider_coverage: Mapping[str, Mapping] | None = None,
-    ) -> "AlphaCapabilities":
+    ) -> AlphaCapabilities:
         installed = dict(modules) if modules is not None else {
             name: find_spec(module) is not None for name, module in _MODULES.items()
         }
@@ -63,6 +63,8 @@ class AlphaCapabilities(StrictModel):
             option_pricing_enabled=pricing,
             option_backtesting_enabled=historical and pricing and bool(installed.get("httpx")),
             lightgbm_enabled=models,
+            walk_forward_validation_enabled=models,
+            walk_forward_job_kind="walk_forward_alpha",
             supported_model_types=["lightgbm_regressor"] if models else [],
             supported_factor_operators=list(FACTOR_OPERATORS),
             supported_label_types=list(LABEL_TYPES),
@@ -71,6 +73,8 @@ class AlphaCapabilities(StrictModel):
                 "max_symbols": 1000,
                 "max_factor_nodes": 128,
                 "max_training_seconds": 1800,
+                "max_walk_forward_folds": 12,
+                "max_walk_forward_bootstrap_replicates": 2000,
                 "max_memory_bytes": 8 * 1024 * 1024 * 1024,
                 "max_artifact_bytes": 16 * 1024 * 1024 * 1024,
                 "max_request_bytes": 1048576,

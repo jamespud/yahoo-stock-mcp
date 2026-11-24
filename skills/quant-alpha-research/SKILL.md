@@ -1,6 +1,6 @@
 ---
 name: quant-alpha-research
-description: Run evidence-backed stock, option, and joint Alpha research through immutable datasets, FactorSpec DAGs, LightGBM model sets, fixed development baseline comparisons, frozen predictions, Top-K portfolios, and historical long-option backtests. Use for factor pipelines, ML Alpha research, baseline model comparison, model OOS evaluation, option volatility factors, and portfolio simulation; not for rule-DSL authoring or generic backtest auditing.
+description: Run evidence-backed stock, option, and joint Alpha research through immutable datasets, FactorSpec DAGs, LightGBM model sets, fixed development baseline comparisons, leakage-safe development walk-forward validation, frozen predictions, Top-K portfolios, and historical long-option backtests. Use for factor pipelines, ML Alpha research, baseline model comparison, walk-forward validation, model OOS evaluation, option volatility factors, and portfolio simulation; not for rule-DSL authoring or generic backtest auditing.
 ---
 
 # Quant Alpha Research
@@ -27,6 +27,7 @@ first. For factor, option, model and reporting details read the local references
 - `quant_compute_factors` - compile and run a FactorSpec DAG over stock data.
 - `quant_compute_option_factors` - calculate option volatility, liquidity and Greek factors with explicit pricing inputs.
 - `quant_train_alpha_model` - train deterministic LightGBM only in explicit Validation-only mode with a research protocol hash and Train/Validation windows. Optional `baseline_comparison` adds the fixed short-reversal, RSI, Ridge and LightGBM development comparison without registering extra deployable models. New legacy inline-Test submissions are rejected.
+- `quant_run_alpha_walk_forward` - run fixed four-candidate expanding or rolling development folds with event-time purge/embargo, nested LightGBM early stopping, pooled common-cohort OOF RankIC, moving-block confidence intervals and fixed-family Holm adjustment. Fold models are never registered or frozen.
 - `quant_get_alpha_model_diagnostics` - read a verified frozen model, recompute gain/split importance, and report stability as NOT_TESTED until independent development-window folds exist.
 - `quant_freeze_alpha_selection` - freeze a Validation-selected model and Test identities into a content-addressed immutable record.
 - `quant_evaluate_alpha_oos` - submit one independent OOS evaluation authorized only by a completed Freeze Job; repeated requests reuse the authoritative Job.
@@ -67,16 +68,24 @@ first. For factor, option, model and reporting details read the local references
    development-only lineage ending by Validation. The primary four-candidate metrics use the all-model
    common cohort; individual coverage stays separate. Fixed reversal/RSI directions and Train-only
    Ridge preprocessing cannot be selected from Validation.
-7. Do not use ordinary prediction on a Validation-only research model. Complete a Freeze Job first,
+7. Run `quant_run_alpha_walk_forward` when the question is cross-time repeatability rather than one
+   Validation cohort. Use only a half-open `development_window`; require the feature panel's parent to equal
+   the stock label dataset and labels to be dataset-generated, not caller-injected. Require at least the requested complete
+   folds, preserve all `FOLD_INSUFFICIENT_DATA`/`FOLD_INVALID` records, and page `walk_forward`,
+   `diagnostics`, `trials` and `reproducibility`. Verify nested LightGBM early stopping used only inner
+   tuning, final models were refit without outer Validation, Ridge preprocessing was fold-local and each
+   OOF `(decision_at, instrument_id)` appears once. Treat `WF_COMPLETED`/`WF_EXPLORATORY` as development
+   evidence only. Holm covers the four current hypotheses; `global_trial_history_complete=false`.
+8. Do not use ordinary prediction on a Validation-only research model. Complete a Freeze Job first,
    then run OOS through `quant_evaluate_alpha_oos`. Historical legacy or mode-less prediction remains
    only a compatibility path and cannot be frozen as new formal evidence. Verify feature names, order
    and types match the registry. Reject missing/corrupt models and never let a future fold predict past decisions.
-8. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
+9. Backtest from frozen predictions only. Keep ranking, target weights, orders, fills and actual
    positions separate. Stock fills use the next eligible open; option buys use next valid Ask and sells
    use next valid Bid. Stock execution requires both a scoped raw-OHLC price attestation and complete
    split/dividend/action coverage; a declared `raw_attested` field alone is not admission. Reconcile
    cash, positions, commissions, slippage and equity every day. Leave unresolved option positions visible.
-9. Read only completed job sections. Page list sections with returned cursors. Report data source,
+10. Read only completed job sections. Page list sections with returned cursors. Report data source,
    dataset/model/job IDs, window, price basis, costs, unresolved diagnostics and every `BLOCKED`,
    `SKIPPED` or `NOT_TESTED` acceptance item. Use the [report template](references/report-template.md).
 
@@ -88,11 +97,15 @@ first. For factor, option, model and reporting details read the local references
   dates and reconcile sample-level and date-level OOS exclusions.
 - Feature gain/split importance does not imply stability, and hidden corporate-action gaps block a
   total-return claim even when raw prices are attested.
-- `COMPARISON_EXPLORATORY`, `COMPARISON_COMPLETED` and pairwise IC are development diagnostics, not
-  independent OOS, statistical significance, Alpha confirmation or trading validity.
+- `COMPARISON_EXPLORATORY`, `COMPARISON_COMPLETED`, `WF_EXPLORATORY` and `WF_COMPLETED` are
+  development diagnostics, not independent OOS, global statistical significance, Alpha confirmation
+  or trading validity.
+- Walk-forward fold models are report identities only. They are not ModelSets, Freeze candidates,
+  OOS grants or production models.
 - Do not claim historical option Alpha from Yahoo current snapshots or synthetic fills.
 - Do not claim ThetaData acceptance without real authorized data. Offline fixture passes remain fixture evidence.
 - Do not infer provider coverage from an installed adapter or tool presence.
 
-Route rule-based DSL, parameter search and walk-forward to `quant-strategy-research`. Route independent
+Route rule-based DSL and DSL parameter-search walk-forward to `quant-strategy-research`; Alpha model
+walk-forward belongs to this skill. Route independent
 leakage, benchmark, accounting and reproducibility audits to `quant-research-reliability`.

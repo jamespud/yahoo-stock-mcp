@@ -10,6 +10,9 @@
 | cash_ledger / corporate_actions | Cash flows, entitlements, splits and action terms |
 | exposures / risk_events | Position limits and rejected/limited orders |
 | daily_returns / equity_curve | UTC daily sampling versus recorded event observations |
+| walk_forward | Paginated Alpha Fold windows, identities, candidate metrics, pair deltas and Fold status |
+| diagnostics | Paginated daily IC, coverage, paired differences and gain-importance stability |
+| trials | Fixed hypothesis family, raw/Holm-adjusted p-values, family size and estimability |
 | reproducibility | Plan/data/code/environment identities and execution settings |
 | artifacts | Committed section hashes, row counts and pagination references |
 
@@ -27,4 +30,6 @@ sampling conditions, not zero performance. Describe the returned metric definiti
 Replay with identical plan, snapshot, parameters, window, costs, seed and code/environment identity.
 A strategy name or a JSON source file alone cannot establish reproducibility. Preserve artifact
 hashes; a report claiming a full ledger must fetch every page. Synthetic fixture success proves the
-test behavior only, not provider coverage or future investment performance.
+test behavior only, not provider coverage or future investment performance. For walk-forward, report
+`WF_COMPLETED`/`WF_EXPLORATORY` as development evidence only, distinguish pooled OOF from per-Fold
+diagnostics, and keep both fixed-family Holm scope and incomplete global trial history explicit.

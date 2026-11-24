@@ -10,6 +10,7 @@ from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, Quote
 from ..models.baseline_comparison import BaselineComparisonConfig
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
 from ..models.temporal_split import ModelDevelopmentSplit
+from ..models.walk_forward import WalkForwardAlphaRequest
 
 
 class AlphaJobBase(StrictModel):
@@ -149,13 +150,13 @@ class BacktestOptionsJob(AlphaJobBase):
 
 AlphaJobRequest = Annotated[
     PrepareStockDatasetJob | CaptureOptionChainJob | PrepareOptionsDatasetJob | ComputeFactorsJob |
-    ComputeOptionFactorsJob | TrainAlphaModelJob | FreezeAlphaSelectionJob | EvaluateAlphaOOSJob |
-    PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
+    ComputeOptionFactorsJob | TrainAlphaModelJob | WalkForwardAlphaRequest | FreezeAlphaSelectionJob |
+    EvaluateAlphaOOSJob | PredictAlphaJob | BacktestAlphaPortfolioJob | BacktestOptionsJob,
     Field(discriminator="kind"),
 ]
 ALPHA_REQUEST_ADAPTER = TypeAdapter(AlphaJobRequest)
 ALPHA_KINDS = {
     "prepare_dataset", "capture_option_chain", "prepare_options_dataset", "compute_factors",
-    "compute_option_factors", "train_alpha_model", "freeze_alpha_selection", "evaluate_alpha_oos",
-    "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
+    "compute_option_factors", "train_alpha_model", "walk_forward_alpha", "freeze_alpha_selection",
+    "evaluate_alpha_oos", "predict_alpha", "backtest_alpha_portfolio", "backtest_options",
 }

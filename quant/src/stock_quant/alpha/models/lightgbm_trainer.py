@@ -113,23 +113,27 @@ def _environment_hash() -> str:
     })
 
 
-def _params(request: TrainAlphaRequest):
+def lightgbm_parameters(hyperparameters: dict, random_seed: int):
     return {
         "objective": "regression",
         "metric": "l2",
         "verbosity": -1,
-        "seed": request.random_seed,
+        "seed": random_seed,
         "deterministic": True,
         "force_col_wise": True,
         "num_threads": 1,
         "feature_fraction": 1.0,
         "bagging_fraction": 1.0,
         "bagging_freq": 0,
-        "learning_rate": float(request.hyperparameters.get("learning_rate", 0.05)),
-        "num_leaves": int(request.hyperparameters.get("num_leaves", 31)),
-        "max_depth": int(request.hyperparameters.get("max_depth", -1)),
-        "min_child_samples": int(request.hyperparameters.get("min_child_samples", 20)),
-    }, int(request.hyperparameters.get("n_estimators", 100))
+        "learning_rate": float(hyperparameters.get("learning_rate", 0.05)),
+        "num_leaves": int(hyperparameters.get("num_leaves", 31)),
+        "max_depth": int(hyperparameters.get("max_depth", -1)),
+        "min_child_samples": int(hyperparameters.get("min_child_samples", 20)),
+    }, int(hyperparameters.get("n_estimators", 100))
+
+
+def _params(request: TrainAlphaRequest):
+    return lightgbm_parameters(request.hyperparameters, request.random_seed)
 
 
 def _model_manifest(

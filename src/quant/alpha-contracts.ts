@@ -239,6 +239,109 @@ export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((valu
   }
 });
 
+
+export const walkForwardDevelopmentWindow = z.object({
+  development_start: z.string().datetime({ offset: true }),
+  development_end: z.string().datetime({ offset: true }),
+}).strict().superRefine((value, context) => {
+  if (!(Date.parse(value.development_start) < Date.parse(value.development_end))) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["development_end"], message: "development_start must be before development_end"});
+  }
+});
+
+export const walkForwardLabelSpec = z.object({
+  label_name: z.string().min(1).max(128),
+  target_type: z.literal("stock_return"),
+  stock_dataset_id: alphaHash,
+  horizon_days: z.number().int().min(1).max(252).optional(),
+  label_version: z.enum(["observed-record-v1", "session-aligned-v2"]).optional(),
+}).strict();
+
+const walkForwardBootstrapInference = z.object({
+  bootstrap_method: z.literal("moving_block").optional(),
+  bootstrap_block_sessions: z.number().int().min(1).max(252).optional(),
+  bootstrap_replicates: z.number().int().min(1).max(2000).optional(),
+  confidence_level: z.number().min(0.5).max(0.999).optional(),
+  multiple_testing_method: z.literal("holm").optional(),
+}).strict();
+
+const walkForwardConfig = z.object({
+  schema_version: z.literal("1.0").optional(),
+  mode: z.enum(["expanding", "rolling"]),
+  train_sessions: z.number().int().min(6).max(5000),
+  validation_sessions: z.number().int().min(5).max(1000),
+  inner_validation_sessions: z.number().int().min(2).max(1000),
+  step_sessions: z.number().int().min(5).max(1000),
+  embargo_days: z.number().int().min(0).max(252).optional(),
+  min_folds: z.number().int().min(3).max(12).optional(),
+  max_folds: z.number().int().min(1).max(12).optional(),
+  inference: walkForwardBootstrapInference.optional(),
+}).strict().superRefine((value, context) => {
+  if (value.step_sessions !== value.validation_sessions) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["step_sessions"], message: "step_sessions must equal validation_sessions"});
+  }
+  if (value.inner_validation_sessions >= value.train_sessions) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["inner_validation_sessions"], message: "inner validation must leave a non-empty inner-fit window"});
+  }
+  if ((value.min_folds ?? 3) > (value.max_folds ?? 12)) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["min_folds"], message: "min_folds must not exceed max_folds"});
+  }
+});
+
+const walkForwardResourceBudget = z.object({
+  max_seconds: z.number().int().min(1).max(86400).optional(),
+  max_total_physical_rows: z.number().int().min(1).optional(),
+  max_total_training_samples: z.number().int().min(1).optional(),
+  max_partitions: z.number().int().min(1).optional(),
+  max_lineage_nodes: z.number().int().min(1).optional(),
+  max_bootstrap_replicates: z.number().int().min(1).max(2000).optional(),
+}).strict();
+
+const walkForwardAlphaInputBase = z.object({
+  evaluation_mode: z.literal("validation_only"),
+  research_protocol_hash: alphaHash,
+  feature_set_id: alphaHash,
+  stock_dataset_id: alphaHash,
+  label_spec: walkForwardLabelSpec,
+  development_window: walkForwardDevelopmentWindow,
+  baseline_comparison: baselineComparisonInput,
+  lightgbm_hyperparameters: lightgbmHyperparameters.optional(),
+  random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
+  walk_forward_config: walkForwardConfig,
+  resource_budget: walkForwardResourceBudget.optional(),
+  max_seconds: z.number().int().min(1).max(86400).optional(),
+  idempotency_key: z.string().min(1).max(128).optional(),
+}).strict();
+
+export const walkForwardAlphaInputFields = walkForwardAlphaInputBase.superRefine((value, context) => {
+  if (value.label_spec.stock_dataset_id !== value.stock_dataset_id) {
+    context.addIssue({code: z.ZodIssueCode.custom, path: ["label_spec", "stock_dataset_id"], message: "must equal stock_dataset_id"});
+  }
+});
+
+const walkForward = walkForwardAlphaInputBase.shape;
+export const walkForwardAlphaToolFields = z.object({
+  evaluation_mode: auditableField(walkForward.evaluation_mode),
+  research_protocol_hash: auditableField(walkForward.research_protocol_hash),
+  feature_set_id: auditableField(walkForward.feature_set_id.describe("Required development feature set content ID.")),
+  stock_dataset_id: auditableField(walkForward.stock_dataset_id.describe("Required stock label dataset content ID.")),
+  label_spec: auditableField(walkForward.label_spec),
+  development_window: auditableField(walkForward.development_window),
+  baseline_comparison: auditableField(walkForward.baseline_comparison),
+  lightgbm_hyperparameters: auditableField(walkForward.lightgbm_hyperparameters),
+  random_seed: auditableField(walkForward.random_seed),
+  walk_forward_config: auditableField(walkForward.walk_forward_config),
+  resource_budget: auditableField(walkForward.resource_budget),
+  max_seconds: auditableField(walkForward.max_seconds),
+  idempotency_key: auditableField(walkForward.idempotency_key),
+}).passthrough();
+
+const parseWalkForwardInput = walkForwardAlphaToolFields.safeParseAsync.bind(walkForwardAlphaToolFields);
+walkForwardAlphaToolFields.safeParseAsync = (data, params) =>
+  parseWalkForwardInput(data === undefined ? {} : data, params);
+
+export const walkForwardAlphaInput = walkForwardAlphaInputFields;
+
 export const predictAlphaInput = z.object({
   model_set_id: alphaHash,
   feature_set_id: alphaHash,

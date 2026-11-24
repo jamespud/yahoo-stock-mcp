@@ -15,6 +15,8 @@ import {
   prepareOptionsDatasetInput,
   trainAlphaModelInput,
   trainAlphaModelToolFields,
+  walkForwardAlphaInput,
+  walkForwardAlphaToolFields,
 } from "./alpha-contracts.js";
 import { developmentWindows } from "./alpha-contracts.js";
 import { canInlineAlphaRows, stageAlphaRows } from "./alpha-artifacts.js";
@@ -99,6 +101,28 @@ export function registerAlphaTools(server: McpServer, runtime: AlphaToolsRuntime
       return submit({
         kind: "train_alpha_model", ...rest, ...label_spec, split,
       });
+    },
+  );
+
+  server.registerTool(
+    "quant_run_alpha_walk_forward",
+    {
+      description: "Run leakage-safe development walk-forward validation for the fixed short-reversal, RSI, Ridge and nested-tuned LightGBM candidates. Outer validation is never used for fitting or early stopping, and fold models are never registered or frozen.",
+      inputSchema: walkForwardAlphaToolFields,
+    },
+    async (args) => {
+      const parsed = walkForwardAlphaInput.safeParse(args);
+      if (!parsed.success) {
+        const fields = [...new Set(parsed.error.issues.flatMap((issue) =>
+          issue.code === "unrecognized_keys"
+            ? issue.keys.map((key) => [...issue.path, key].join("."))
+            : [issue.path.join(".") || "request"],
+        ).map((field) => field.slice(0, 128)))].sort().slice(0, 20);
+        const audit = await runtime.stored({method: "audit_walk_forward_rejection", fields});
+        const suffix = audit.isError ? "; rejection could not be recorded" : "";
+        return {isError: true, content: [{type: "text", text: `Invalid Alpha walk-forward fields: ${fields.join(", ")}${suffix}`}]};
+      }
+      return submit({kind: "walk_forward_alpha", ...parsed.data});
     },
   );
 

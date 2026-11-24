@@ -84,3 +84,27 @@ bound to the feature panel, fixed factor directions and Train-only Ridge preproc
 coverage separate from common-cohort metrics. Reject composite or underspecified provenance rather than
 guessing a source. A comparison status is descriptive development evidence and is not independent OOS,
 statistical significance, Alpha confirmation or trading validity.
+
+### Development walk-forward
+
+Use Alpha walk-forward only to test cross-time repeatability on a declared development window. The
+feature panel must have one parent equal to the requested stock label dataset, and labels must be generated
+from that dataset rather than accepted as external rows. The planner must be deterministic, use a
+trading/decision-session axis, reject ambiguous sessions and keep outer validation non-overlapping. Incomplete tail windows are exclusions, not shortened folds.
+
+Purge uses actual label event times, not horizon days. Train labels require `exit_at` and
+`label_available_at` strictly before `outer_validation_start - embargo_days`; inner fit uses the
+inner-tuning first decision. LightGBM chooses iterations only on inner tuning, then refits on outer Train
+with the fixed iteration and no outer `valid_sets`. Ridge refits imputation, scaling and fixed-alpha model
+inside every fold. Directions, hyperparameters and statistical settings do not follow outer performance.
+
+Pooled OOF metrics must be unique by `(decision_at, instrument_id, candidate)` and use the same-date,
+same-instrument four-candidate common cohort. Report planned, pre-fit matured-label, successfully scored
+and conditional model coverage separately; a model failure must lower execution coverage without lowering
+the pre-fit label coverage. Do not present conditional model coverage as complete validation coverage. RankIC is averaged over dates, null dates remain in coverage,
+and paired differences use identical samples. Moving-block bootstrap must preserve the four-model row
+structure and use a centered null p-value. Holm has a fixed family of four; unestimable hypotheses remain
+in that family. `multiple_testing_scope="CURRENT_PREREGISTERED_FAMILY_ONLY"` and
+`global_trial_history_complete=false` must be reported. Persisted result sections must permit exact
+reconstruction of the full report and verification of `report_hash`. Walk-forward statuses are development evidence,
+never frozen OOS, Alpha confirmation, production readiness or trading validity.

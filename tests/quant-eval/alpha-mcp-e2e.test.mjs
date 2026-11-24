@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -43,6 +43,15 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     await client.connect(transport);
     const {tools} = await client.listTools();
     const trainingSchema = tools.find(tool => tool.name === "quant_train_alpha_model").inputSchema;
+    const walkForwardSchema = tools.find(tool => tool.name === "quant_run_alpha_walk_forward").inputSchema;
+    assert.deepEqual(Object.keys(walkForwardSchema.properties).sort(), [
+      "baseline_comparison", "development_window", "evaluation_mode", "feature_set_id", "idempotency_key",
+      "label_spec", "lightgbm_hyperparameters", "max_seconds", "random_seed", "research_protocol_hash",
+      "resource_budget", "stock_dataset_id", "walk_forward_config",
+    ]);
+    assert.ok(!("test_start" in walkForwardSchema.properties));
+    assert.ok(!("test_feature_set_id" in walkForwardSchema.properties));
+    assert.ok(!("freeze_id" in walkForwardSchema.properties));
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
       "baseline_comparison", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
       "random_seed", "research_protocol_hash", "resource_budget", "windows",
@@ -71,7 +80,7 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
       return JSON.parse(result.content[0].text);
     }
     async function done(id) {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 600; i++) {
         const job = await call("quant_get_job", {job_id: id});
         if (job.status === "completed") return;
         assert(["queued", "running"].includes(job.status), JSON.stringify(job));
@@ -243,6 +252,84 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 120000}, a
     const comparisonModel = (await call("quant_get_result", {job_id: comparisonTrain.job_id, section: "model_registry"})).rows[0];
     assert.equal(comparisonModel.test_window, null);
     assert.ok(!("oos" in comparisonModel.metrics));
+
+    const modelRoot = resolve(tmp, "quant.models");
+    const countModelArtifacts = () => existsSync(modelRoot)
+      ? readdirSync(modelRoot).filter(name => existsSync(join(modelRoot, name, "metadata.json"))).length
+      : 0;
+    const modelsBeforeWalkForward = countModelArtifacts();
+    const walkForwardArgs = {
+      evaluation_mode: "validation_only",
+      research_protocol_hash: "sha256:" + "7".repeat(64),
+      feature_set_id: baselineFactorDataset.dataset_id,
+      stock_dataset_id: baselineDataset.dataset_id,
+      label_spec: {
+        label_name: "stock_forward_return", target_type: "stock_return",
+        stock_dataset_id: baselineDataset.dataset_id, horizon_days: 5,
+      },
+      development_window: {
+        development_start: "2024-01-02T00:00:00Z", development_end: "2024-05-02T00:00:00Z",
+      },
+      baseline_comparison: baselineConfig,
+      lightgbm_hyperparameters: {n_estimators: 20, min_child_samples: 2, num_leaves: 7},
+      random_seed: 7,
+      walk_forward_config: {
+        schema_version: "1.0", mode: "expanding", train_sessions: 30,
+        validation_sessions: 10, inner_validation_sessions: 5, step_sessions: 10,
+        embargo_days: 0, min_folds: 3, max_folds: 12,
+        inference: {
+          bootstrap_method: "moving_block", bootstrap_block_sessions: 5,
+          bootstrap_replicates: 25, confidence_level: 0.95, multiple_testing_method: "holm",
+        },
+      },
+      resource_budget: {
+        max_seconds: 120, max_total_physical_rows: 50000, max_total_training_samples: 50000,
+        max_partitions: 100, max_lineage_nodes: 20, max_bootstrap_replicates: 50,
+      },
+      max_seconds: 120,
+    };
+    const invalidWalkForward = await client.callTool({name: "quant_run_alpha_walk_forward", arguments: {
+      ...walkForwardArgs,
+      development_window: {...walkForwardArgs.development_window, test_start: "2024-05-02T00:00:00Z"},
+    }});
+    assert.equal(Boolean(invalidWalkForward.isError), true);
+    assert.match(invalidWalkForward.content[0].text, /development_window\.test_start/);
+    const walkForward = await call("quant_run_alpha_walk_forward", walkForwardArgs);
+    await done(walkForward.job_id);
+    const walkForwardSummary = await call("quant_get_result", {job_id: walkForward.job_id, section: "summary"});
+    assert.match(walkForwardSummary.report_hash, /^sha256:[0-9a-f]{64}$/);
+    assert.ok(walkForwardSummary.fold_count >= 3);
+    assert.equal(walkForwardSummary.multiple_testing.family_size, 4);
+    const walkForwardCoverage = walkForwardSummary.common_cohort;
+    assert.ok(walkForwardCoverage.planned_feature_opportunities >= walkForwardCoverage.eligible_matured_label_opportunities);
+    assert.ok(walkForwardCoverage.eligible_matured_label_opportunities >= walkForwardCoverage.successfully_scored_opportunities);
+    assert.ok(walkForwardCoverage.successfully_scored_opportunities >= walkForwardCoverage.common_cohort_opportunities);
+    assert.equal(walkForwardSummary.multiple_testing.multiple_testing_scope, "CURRENT_PREREGISTERED_FAMILY_ONLY");
+    assert.equal(walkForwardSummary.multiple_testing.global_trial_history_complete, false);
+    const walkForwardFolds = await call("quant_get_result", {job_id: walkForward.job_id, section: "walk_forward", limit: 2});
+    assert.equal(walkForwardFolds.total_count, walkForwardSummary.fold_count);
+    assert.equal(walkForwardFolds.rows.length, 2);
+    assert.ok(walkForwardFolds.rows.every(fold => fold.knowledge_cutoff));
+    assert.ok(walkForwardFolds.rows.every(fold => fold.train_window.start < fold.train_window.end));
+    const walkForwardDiagnostics = await call("quant_get_result", {job_id: walkForward.job_id, section: "diagnostics", limit: 5});
+    assert.ok(walkForwardDiagnostics.total_count > 0);
+    const walkForwardTrials = await call("quant_get_result", {job_id: walkForward.job_id, section: "trials"});
+    assert.equal(walkForwardTrials.total_count, 4);
+    const walkForwardReproducibility = await call("quant_get_result", {job_id: walkForward.job_id, section: "reproducibility"});
+    assert.equal(walkForwardReproducibility.walk_forward_protocol_hash, walkForwardSummary.walk_forward_protocol_hash);
+    assert.equal(walkForwardReproducibility.resource_usage.training_samples > 0, true);
+    const walkForwardReconstruction = walkForwardReproducibility.report_reconstruction;
+    assert.equal(walkForwardReconstruction.folds_section, "walk_forward");
+    assert.equal(walkForwardReconstruction.report_without_folds.report_hash, walkForwardSummary.report_hash);
+    assert.ok(!("folds" in walkForwardReconstruction.report_without_folds));
+    assert.equal(walkForwardReproducibility.label_generation.source_dataset_id, baselineDataset.dataset_id);
+    assert.equal(walkForwardReproducibility.label_generation.external_label_rows_accepted, false);
+    assert.equal(countModelArtifacts(), modelsBeforeWalkForward);
+    const noFoldModels = await client.callTool({name: "quant_get_result", arguments: {
+      job_id: walkForward.job_id, section: "model_registry",
+    }});
+    assert.equal(Boolean(noFoldModels.isError), true);
+    assert.match(noFoldModels.content[0].text, /RESULT_SECTION_UNAVAILABLE/);
     const invalidBaseline = await client.callTool({name: "quant_train_alpha_model", arguments: {
       ...baselineTrainingArgs,
       baseline_comparison: {

@@ -157,5 +157,7 @@ def quantile_returns(y_true: np.ndarray, y_pred: np.ndarray, decisions: list, qu
             bucket = min(quantiles - 1, index * quantiles // max(1, len(ordered)))
             buckets[bucket].append(target)
     means = {str(bucket): float(np.mean(values)) for bucket, values in sorted(buckets.items()) if values}
-    spread = (means.get(str(quantiles - 1)) - means.get("0")) if len(means) >= 2 else None
+    top = means.get(str(quantiles - 1))
+    bottom = means.get("0")
+    spread = top - bottom if top is not None and bottom is not None else None
     return {"quantile_returns": means, "top_bottom_spread": spread}

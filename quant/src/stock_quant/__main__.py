@@ -6,17 +6,17 @@ are syntax-checked and stored as data; isolated job workers load strategy code.
 import json
 import os
 import sys
-from pathlib import Path
 from importlib.metadata import version
+from pathlib import Path
 
+from .alpha.capabilities import AlphaCapabilities
+from .calendar import CALENDAR_PROVIDER_VERSION, CalendarSchedule, generate_calendar
 from .compiler import OPERATORS, CompileError, validate_strategy
 from .contracts import Strategy
-from .calendar import CalendarSchedule, generate_calendar, CALENDAR_PROVIDER_VERSION
 from .jobs import JobStore
 from .pagination import MAX_FRAME_BYTES, fits_response
-from .worker import wake_worker
 from .sandbox import PythonArtifact, SandboxSession, validate_python
-from .alpha.capabilities import AlphaCapabilities
+from .worker import wake_worker
 
 
 def capabilities():
@@ -105,7 +105,7 @@ def main():
         elif method == "validate":
             result = (validate_python(request["strategy"]) if request["strategy"].get("mode") == "python"
                       else validate_strategy(request["strategy"], request.get("parameters"), request.get("symbol")))
-        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "audit_training_rejection", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
+        elif method in ("register", "compile", "import_snapshot", "run_backtest", "submit_alpha", "audit_training_rejection", "audit_walk_forward_rejection", "get_job", "cancel_job", "get_result", "evaluate_signal", "optimize", "screen", "data_quality", "resample"):
             with JobStore(request["registry_path"]) as registry:
                 if method == "register":
                     result = registry.register(request["strategy"])
@@ -135,6 +135,11 @@ def main():
                     if not isinstance(fields, list) or not 1 <= len(fields) <= 20 or any(not isinstance(field, str) for field in fields):
                         raise ValueError("Invalid training rejection fields")
                     result = registry.audit_training_rejection("mcp", fields)
+                elif method == "audit_walk_forward_rejection":
+                    fields = request["fields"]
+                    if not isinstance(fields, list) or not 1 <= len(fields) <= 20 or any(not isinstance(field, str) for field in fields):
+                        raise ValueError("Invalid walk-forward rejection fields")
+                    result = registry.audit_walk_forward_rejection("mcp", fields)
                 elif method == "get_job":
                     result = registry.get_job(request["job_id"])
                     # Reads can restart consumers for queued or expired work, never
