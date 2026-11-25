@@ -1,10 +1,11 @@
 """Strict persisted contracts for the Alpha research experiment registry."""
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, PrivateAttr, model_validator
 
 from ...contracts import StrictModel
 from ..contracts import Hash
@@ -278,6 +279,7 @@ class ResearchTrialTerminalState(StrictModel):
     hypothesis_id: Hash
     protocol_hash: Hash
     trial_definition_hash: Hash
+    canonical_request_hash: Hash | None = None
     trial_purpose: TrialPurpose
     preregistration_status: PreregistrationStatus
     terminal_state: str
@@ -285,6 +287,7 @@ class ResearchTrialTerminalState(StrictModel):
     job_status: str | None = None
     job_config_hash: Hash | None = None
     result_hash: Hash | None = None
+    rejection_reason: str | None = None
     evidence_references: list[dict[str, Any]] = Field(default_factory=list)
     exclusion_reason: str | None = None
 
@@ -303,6 +306,20 @@ class ResearchLedgerSnapshot(StrictModel):
     scope_completeness: ScopeCompleteness
     trial_accounting: TrialAccounting
     candidate_ledger_hash: Hash
+
+    _stored_payload: dict[str, Any] | None = PrivateAttr(default=None)
+
+    @classmethod
+    def from_stored_payload(cls, payload: dict[str, Any]) -> ResearchLedgerSnapshot:
+        snapshot = cls.model_validate(payload)
+        snapshot._stored_payload = deepcopy(payload)
+        return snapshot
+
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
+        passthrough = {"mode", "by_alias", "round_trip", "warnings", "serialize_as_any", "fallback"}
+        if self._stored_payload is not None and not args and not (set(kwargs) - passthrough):
+            return deepcopy(self._stored_payload)
+        return super().model_dump(*args, **kwargs)
 
 
 class ExcludedCandidate(StrictModel):

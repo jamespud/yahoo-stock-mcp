@@ -220,6 +220,10 @@ preserves failed, cancelled, rejected and negative-result Trials. A Candidate Le
 sealed only after all registered Trials and Jobs are terminal. Its system-computed
 `candidate_ledger_hash` and Selection Record are required by a managed Freeze.
 
+A pre-submission rejection is terminal only when its `TRIAL_REJECTED` audit event exists and the Trial
+has no submission/execution evidence or Job binding. It remains in the Snapshot and Trial accounting but
+is excluded from the candidate pool with null Job and result identities.
+
 `quant_get_alpha_research_report` reconstructs PR3 Baseline reports and every PR4 Walk-forward fold,
 validates their hashes, reports data reuse and exposure, and keeps:
 
