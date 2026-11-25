@@ -1329,7 +1329,10 @@ class ResearchExperimentRegistry:
             "trial_accounting": accounting.model_dump(mode="json"),
         }
         ledger_hash = snapshot_hash_for(snapshot_body)
-        snapshot = ResearchLedgerSnapshot.model_validate({**snapshot_body, "candidate_ledger_hash": ledger_hash})
+        snapshot = ResearchLedgerSnapshot.from_stored_payload({
+            **snapshot_body,
+            "candidate_ledger_hash": ledger_hash,
+        })
         selection = self._compute_selection(snapshot, protocol, trials, selection_candidates, excluded)
         existing_snapshot = self.connection.execute(
             "SELECT 1 FROM alpha_research_ledger_snapshots WHERE candidate_ledger_hash=?", (ledger_hash,)
@@ -1603,7 +1606,7 @@ class ResearchExperimentRegistry:
         payload = _load(row[0])
         if snapshot_hash_for(payload) != payload.get("candidate_ledger_hash"):
             raise AlphaError(AlphaErrorCode.RESEARCH_EVIDENCE_HASH_MISMATCH, "Candidate Ledger Snapshot hash mismatch", {})
-        return ResearchLedgerSnapshot.model_validate(payload)
+        return ResearchLedgerSnapshot.from_stored_payload(payload)
 
     def get_selection(self, candidate_ledger_hash: str) -> ResearchSelection:
         row = self.connection.execute(
@@ -2074,11 +2077,19 @@ class ResearchExperimentRegistry:
             "TRIAL_REJECTED": "REJECTED",
         }
         for row in self.connection.execute(
-            "SELECT event_type FROM alpha_research_events WHERE trial_id=? AND event_sequence<=? ORDER BY event_sequence",
+            "SELECT event_type,detail FROM alpha_research_events WHERE trial_id=? AND event_sequence<=? ORDER BY event_sequence",
             (trial_id, watermark),
         ).fetchall():
-            if row[0] in mapping and status != "COMPLETED":
-                status = mapping[row[0]]
+            event_type, encoded_detail = row
+            detail = _load(encoded_detail)
+            if (
+                event_type == "TRIAL_REJECTED"
+                and isinstance(detail, dict)
+                and detail.get("status_preserved") is True
+            ):
+                continue
+            if event_type in mapping and status != "COMPLETED":
+                status = mapping[event_type]
         return status
 
     def _event_sequence(self, *, trial_id: str | None = None, event_type: str | None = None,

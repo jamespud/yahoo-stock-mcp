@@ -388,26 +388,42 @@ def test_lifecycle_event_chain_snapshot_selection_and_deterministic_report(tmp_p
         jobs.connection.close()
 
 
-def test_prior_snapshot_payload_without_new_terminal_fields_remains_readable(tmp_path):
-    from stock_quant.alpha.research.protocol import snapshot_hash_for
+def test_prior_snapshot_payload_preserves_original_identity_across_public_paths(tmp_path):
+    from stock_quant.alpha.research.protocol import canonical_digest, selection_hash_for, snapshot_hash_for
 
     jobs, registry, campaign, protocol = _setup_registry(tmp_path)
     try:
         request, trial = _register_trial(registry, protocol)
         _publish_training(jobs, request, trial)
-        snapshot, _selection = registry.seal_candidate_ledger(
+        snapshot, selection = registry.seal_candidate_ledger(
             campaign_id=campaign.campaign_id,
             protocol_hash=protocol.protocol_hash,
         )
-        payload = json.loads(jobs.connection.execute(
+        current_payload = json.loads(jobs.connection.execute(
             "SELECT payload FROM alpha_research_ledger_snapshots WHERE candidate_ledger_hash=?",
             (snapshot.candidate_ledger_hash,),
         ).fetchone()[0])
+        payload = json.loads(json.dumps(current_payload))
         for state in payload["registered_trials"]:
             state.pop("canonical_request_hash", None)
             state.pop("rejection_reason", None)
         prior_hash = snapshot_hash_for(payload)
         payload["candidate_ledger_hash"] = prior_hash
+        prior_selection = json.loads(jobs.connection.execute(
+            "SELECT payload FROM alpha_research_selections WHERE candidate_ledger_hash=?",
+            (snapshot.candidate_ledger_hash,),
+        ).fetchone()[0])
+        prior_selection["candidate_ledger_hash"] = prior_hash
+        prior_selection.pop("selection_id")
+        prior_selection.pop("selection_hash")
+        prior_selection_hash = selection_hash_for(prior_selection)
+        prior_selection_id = canonical_digest({
+            "campaign_id": campaign.campaign_id,
+            "selection_hash": prior_selection_hash,
+        })
+        prior_selection["selection_id"] = prior_selection_id
+        prior_selection["selection_hash"] = prior_selection_hash
+        created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         jobs.connection.execute(
             "INSERT INTO alpha_research_ledger_snapshots(candidate_ledger_hash,campaign_id,protocol_hash,"
             "ledger_watermark,payload,created_at) VALUES (?,?,?,?,?,?)",
@@ -417,15 +433,72 @@ def test_prior_snapshot_payload_without_new_terminal_fields_remains_readable(tmp
                 protocol.protocol_hash,
                 payload["ledger_watermark"],
                 json.dumps(payload, sort_keys=True, separators=(",", ":")),
-                datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                created_at,
             ),
+        )
+        jobs.connection.execute(
+            "INSERT INTO alpha_research_selections(selection_id,campaign_id,protocol_hash,candidate_ledger_hash,"
+            "selection_hash,payload,created_at) VALUES (?,?,?,?,?,?,?)",
+            (
+                prior_selection_id,
+                campaign.campaign_id,
+                protocol.protocol_hash,
+                prior_hash,
+                prior_selection_hash,
+                json.dumps(prior_selection, sort_keys=True, separators=(",", ":")),
+                created_at,
+            ),
+        )
+        registry._append_event(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            event_type="LEDGER_SEALED",
+            detail={"candidate_ledger_hash": prior_hash, "ledger_watermark": payload["ledger_watermark"]},
+        )
+        registry._append_event(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            event_type="SELECTION_REGISTERED",
+            detail={
+                "candidate_ledger_hash": prior_hash,
+                "selection_id": prior_selection_id,
+                "selected_trial_id": prior_selection["selected_trial_id"],
+                "selected_model_id": prior_selection["selected_model_id"],
+                "selection_status": prior_selection["selection_status"],
+            },
         )
         jobs.connection.commit()
 
         loaded = registry.get_snapshot(prior_hash)
         assert loaded.candidate_ledger_hash == prior_hash
-        assert loaded.registered_trials[0].canonical_request_hash is None
-        assert loaded.registered_trials[0].rejection_reason is None
+        assert loaded.model_dump(mode="json") == payload
+        assert "canonical_request_hash" not in loaded.model_dump(mode="json")["registered_trials"][0]
+        assert "rejection_reason" not in loaded.model_dump(mode="json")["registered_trials"][0]
+        assert snapshot_hash_for(loaded.model_dump(mode="json")) == prior_hash
+        assert snapshot_hash_for(snapshot.model_dump(mode="json")) == snapshot.candidate_ledger_hash
+        assert snapshot.model_dump(mode="json")["registered_trials"][0]["canonical_request_hash"] == trial.canonical_request_hash
+        assert "rejection_reason" in snapshot.model_dump(mode="json")["registered_trials"][0]
+
+        ledger = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id,
+            section="snapshots",
+            ledger_watermark=registry.ledger_watermark(campaign.campaign_id),
+        )
+        returned = next(row for row in ledger["rows"] if row["candidate_ledger_hash"] == prior_hash)
+        assert returned == payload
+        assert snapshot_hash_for(returned) == prior_hash
+
+        repeated_snapshot, repeated_selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        assert repeated_snapshot.candidate_ledger_hash == prior_hash
+        assert repeated_snapshot.model_dump(mode="json") == payload
+        assert snapshot_hash_for(repeated_snapshot.model_dump(mode="json")) == prior_hash
+        assert repeated_selection.selection_id == prior_selection_id
+        assert repeated_selection.selection_hash == prior_selection_hash
+        assert repeated_selection.candidate_ledger_hash == prior_hash
+        assert selection.selection_id != prior_selection_id
     finally:
         jobs.connection.close()
 
@@ -1505,6 +1578,85 @@ def test_rejection_does_not_overwrite_completed_trial_status(tmp_path):
         ]
         assert rejected[-1].detail["previous_status"] == "COMPLETED"
         assert rejected[-1].detail["status_preserved"] is True
+        watermark = registry.ledger_watermark(campaign.campaign_id)
+        assert registry._trial_status_at(trial.trial_id, watermark) == "COMPLETED"
+        report = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            ledger_watermark=watermark,
+        )
+        assert report.scope_completeness.managed_campaign_history_complete is True
+        assert report.scope_completeness.job_lifecycle_reconciled is True
+        snapshot, _selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        assert snapshot.registered_trials[0].terminal_state == "COMPLETED"
+    finally:
+        jobs.connection.close()
+
+
+@pytest.mark.parametrize(
+    ("expected_status", "should_seal"),
+    [("FAILED", True), ("CANCELLED", True), ("RUNNING", False)],
+)
+def test_rejection_preserved_respects_historical_status_scope_and_seal(tmp_path, expected_status, should_seal):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        submission = jobs.submit_alpha({**request, "research_trial_id": trial.trial_id})
+        if expected_status == "FAILED":
+            claim = jobs.claim()
+            assert claim is not None
+            assert jobs.finish(claim, error=RuntimeError("synthetic failure"), error_code="DATA_UNAVAILABLE")
+        elif expected_status == "CANCELLED":
+            jobs.cancel(submission["job_id"])
+        else:
+            assert jobs.claim() is not None
+        assert registry.get_trial(trial.trial_id).status == expected_status
+        before_rejection = registry.ledger_watermark(campaign.campaign_id)
+        assert registry._trial_status_at(trial.trial_id, before_rejection) == expected_status
+
+        with pytest.raises(AlphaError) as error:
+            jobs.submit_alpha({**request, "research_trial_id": trial.trial_id, "random_seed": 8})
+        assert error.value.code == AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH
+        assert registry.get_trial(trial.trial_id).status == expected_status
+        rejection = [
+            event for event in registry.list_events(campaign.campaign_id)
+            if event.event_type == "TRIAL_REJECTED" and event.trial_id == trial.trial_id
+        ][-1]
+        assert rejection.detail["previous_status"] == expected_status
+        assert rejection.detail["status_preserved"] is True
+
+        watermark = registry.ledger_watermark(campaign.campaign_id)
+        assert registry._trial_status_at(trial.trial_id, watermark) == expected_status
+        trials = registry.read_research_ledger(
+            campaign_id=campaign.campaign_id,
+            section="trials",
+            ledger_watermark=watermark,
+        )
+        historical_trial = next(row for row in trials["rows"] if row["trial_id"] == trial.trial_id)
+        assert historical_trial["status"] == expected_status
+        report = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            ledger_watermark=watermark,
+        )
+        assert report.scope_completeness.managed_campaign_history_complete is should_seal
+        assert report.scope_completeness.job_lifecycle_reconciled is should_seal
+
+        if should_seal:
+            snapshot, _selection = registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+            state = next(item for item in snapshot.registered_trials if item.trial_id == trial.trial_id)
+            assert state.terminal_state == expected_status
+        else:
+            with pytest.raises(AlphaError) as seal_error:
+                registry.seal_candidate_ledger(
+                    campaign_id=campaign.campaign_id,
+                    protocol_hash=protocol.protocol_hash,
+                )
+            assert seal_error.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
     finally:
         jobs.connection.close()
 
