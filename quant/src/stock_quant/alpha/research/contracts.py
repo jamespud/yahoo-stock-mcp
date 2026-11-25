@@ -278,6 +278,7 @@ class ResearchTrialTerminalState(StrictModel):
     hypothesis_id: Hash
     protocol_hash: Hash
     trial_definition_hash: Hash
+    canonical_request_hash: Hash | None = None
     trial_purpose: TrialPurpose
     preregistration_status: PreregistrationStatus
     terminal_state: str
@@ -285,6 +286,7 @@ class ResearchTrialTerminalState(StrictModel):
     job_status: str | None = None
     job_config_hash: Hash | None = None
     result_hash: Hash | None = None
+    rejection_reason: str | None = None
     evidence_references: list[dict[str, Any]] = Field(default_factory=list)
     exclusion_reason: str | None = None
 

@@ -104,6 +104,7 @@ def _training_request(**overrides):
     return payload
 
 
+
 def _setup_registry(tmp_path):
     jobs = JobStore(tmp_path / "registry.sqlite3")
     registry = jobs.research_registry
@@ -122,6 +123,27 @@ def _register_trial(registry, protocol, *, seed=7, purpose="INITIAL_HYPOTHESIS_T
         trial_purpose=purpose,
     )
     return request, trial
+
+
+def _register_walk_forward_trial(registry, protocol):
+    request = _walk_forward_request(protocol.protocol_hash)
+    trial = registry.register_trial(
+        campaign_id=protocol.definition.campaign_id,
+        protocol_hash=protocol.protocol_hash,
+        hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+        request=request,
+        trial_purpose="INITIAL_HYPOTHESIS_TEST",
+    )
+    return request, trial
+
+
+def _reject_before_submission(jobs, request, trial):
+    with pytest.raises(ValueError, match="RESEARCH_MODE_REQUIRED"):
+        jobs.submit_alpha({
+            **request,
+            "research_trial_id": trial.trial_id,
+            "evaluation_mode": None,
+        })
 
 
 def _publish_training(jobs, request, trial, *, rank_ic=0.1, model_text="tree"):
@@ -258,6 +280,72 @@ def test_request_mismatch_and_registration_budget_fail_closed(tmp_path):
         jobs.connection.close()
 
 
+def test_training_protocol_hash_mismatch_is_rejected_without_consuming_budget(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        mismatch = _training_request(
+            research_protocol_hash="sha256:" + "f" * 64,
+            random_seed=7,
+        )
+        with pytest.raises(AlphaError) as error:
+            registry.register_trial(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+                hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+                request=mismatch,
+                trial_purpose="INITIAL_HYPOTHESIS_TEST",
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH
+        assert registry.trial_accounting(campaign.campaign_id).registered_trial_count == 0
+        assert jobs.connection.execute("SELECT count(*) FROM alpha_research_trials").fetchone()[0] == 0
+        assert jobs.connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+        with pytest.raises(AlphaError) as unregistered_outer:
+            registry.register_trial(
+                campaign_id=campaign.campaign_id,
+                protocol_hash="sha256:" + "e" * 64,
+                hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+                request=mismatch,
+                trial_purpose="INITIAL_HYPOTHESIS_TEST",
+            )
+        assert unregistered_outer.value.code == AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH
+
+        for seed in (7, 8, 9, 10):
+            _register_trial(registry, protocol, seed=seed, purpose="PARAMETER_VARIATION")
+        with pytest.raises(AlphaError) as budget:
+            _register_trial(registry, protocol, seed=11, purpose="PARAMETER_VARIATION")
+        assert budget.value.code == AlphaErrorCode.RESEARCH_TRIAL_BUDGET_EXCEEDED
+        registered = [
+            event for event in registry.list_events(campaign.campaign_id)
+            if event.event_type == "TRIAL_REGISTERED"
+        ]
+        assert len(registered) == 4
+    finally:
+        jobs.connection.close()
+
+
+def test_walk_forward_protocol_hash_mismatch_is_rejected_without_consuming_budget(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        mismatch = _walk_forward_request("sha256:" + "f" * 64)
+        with pytest.raises(AlphaError) as error:
+            registry.register_trial(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+                hypothesis_id=protocol.registered_hypotheses[0].hypothesis_id,
+                request=mismatch,
+                trial_purpose="INITIAL_HYPOTHESIS_TEST",
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH
+        assert registry.trial_accounting(campaign.campaign_id).registered_trial_count == 0
+        assert jobs.connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+
+        _request, trial = _register_walk_forward_trial(registry, protocol)
+        assert trial.status == "REGISTERED"
+        assert registry.trial_accounting(campaign.campaign_id).registered_trial_count == 1
+    finally:
+        jobs.connection.close()
+
+
 def test_lifecycle_event_chain_snapshot_selection_and_deterministic_report(tmp_path):
     jobs, registry, campaign, protocol = _setup_registry(tmp_path)
     try:
@@ -296,6 +384,48 @@ def test_lifecycle_event_chain_snapshot_selection_and_deterministic_report(tmp_p
         seal_events = [event.event_type for event in registry.list_events(campaign.campaign_id)]
         assert seal_events.count("LEDGER_SEALED") == 1
         assert seal_events.count("SELECTION_REGISTERED") == 1
+    finally:
+        jobs.connection.close()
+
+
+def test_prior_snapshot_payload_without_new_terminal_fields_remains_readable(tmp_path):
+    from stock_quant.alpha.research.protocol import snapshot_hash_for
+
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        _publish_training(jobs, request, trial)
+        snapshot, _selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        payload = json.loads(jobs.connection.execute(
+            "SELECT payload FROM alpha_research_ledger_snapshots WHERE candidate_ledger_hash=?",
+            (snapshot.candidate_ledger_hash,),
+        ).fetchone()[0])
+        for state in payload["registered_trials"]:
+            state.pop("canonical_request_hash", None)
+            state.pop("rejection_reason", None)
+        prior_hash = snapshot_hash_for(payload)
+        payload["candidate_ledger_hash"] = prior_hash
+        jobs.connection.execute(
+            "INSERT INTO alpha_research_ledger_snapshots(candidate_ledger_hash,campaign_id,protocol_hash,"
+            "ledger_watermark,payload,created_at) VALUES (?,?,?,?,?,?)",
+            (
+                prior_hash,
+                campaign.campaign_id,
+                protocol.protocol_hash,
+                payload["ledger_watermark"],
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            ),
+        )
+        jobs.connection.commit()
+
+        loaded = registry.get_snapshot(prior_hash)
+        assert loaded.candidate_ledger_hash == prior_hash
+        assert loaded.registered_trials[0].canonical_request_hash is None
+        assert loaded.registered_trials[0].rejection_reason is None
     finally:
         jobs.connection.close()
 
@@ -506,6 +636,255 @@ def test_rejected_managed_request_is_audited_against_the_registered_trial(tmp_pa
         events = [event.event_type for event in registry.list_events(campaign.campaign_id)]
         assert "TRIAL_REJECTED" in events
         assert registry.trial_accounting(campaign.campaign_id).rejected_submission_count == 1
+    finally:
+        jobs.connection.close()
+
+
+def test_pre_submission_rejected_trial_seals_without_job_binding_and_stays_immutable(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        _reject_before_submission(jobs, request, trial)
+        persisted_before = registry.get_trial(trial.trial_id).model_dump(mode="json")
+        rejection = next(
+            event for event in registry.list_events(campaign.campaign_id)
+            if event.event_type == "TRIAL_REJECTED" and event.trial_id == trial.trial_id
+        )
+
+        snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        assert snapshot.scope_completeness.managed_campaign_history_complete is True
+        assert snapshot.scope_completeness.job_lifecycle_reconciled is True
+        assert len(snapshot.registered_trials) == 1
+        rejected = snapshot.registered_trials[0]
+        assert rejected.terminal_state == "REJECTED"
+        assert rejected.canonical_request_hash == trial.canonical_request_hash
+        assert rejected.rejection_reason == "RESEARCH_MODE_REQUIRED"
+        assert rejected.rejection_reason == rejection.reason_code
+        assert rejected.job_id is None
+        assert rejected.result_hash is None
+        assert rejected.evidence_references == []
+        assert rejected.exclusion_reason == "TRIAL_REJECTED_BEFORE_SUBMISSION"
+        assert snapshot.evidence_references == []
+        assert snapshot.excluded_candidates == [{
+            "trial_id": trial.trial_id,
+            "model_id": None,
+            "reason": "TRIAL_REJECTED_BEFORE_SUBMISSION",
+            "detail": {
+                "canonical_request_hash": trial.canonical_request_hash,
+                "rejection_reason": "RESEARCH_MODE_REQUIRED",
+            },
+        }]
+        assert selection.eligible_candidate_ids == []
+        assert selection.selected_trial_id is None
+        assert selection.selected_model_id is None
+        assert snapshot.trial_accounting.registered_trial_count == 1
+        assert snapshot.trial_accounting.rejected_submission_count == 1
+
+        report1 = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        report2 = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        assert report1.report_hash == report2.report_hash
+        repeated_snapshot, repeated_selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        assert repeated_snapshot.candidate_ledger_hash == snapshot.candidate_ledger_hash
+        assert repeated_selection.selection_hash == selection.selection_hash
+
+        assert registry.get_trial(trial.trial_id).model_dump(mode="json") == persisted_before
+    finally:
+        jobs.connection.close()
+
+
+def test_completed_trial_with_multiple_rejected_trials_can_seal(tmp_path):
+    jobs = JobStore(tmp_path / "registry.sqlite3")
+    registry = jobs.research_registry
+    try:
+        campaign = registry.register_campaign(_campaign(resource_policy={
+            "max_registered_trials": 32,
+            "max_submitted_trials": 32,
+            "max_distinct_candidate_definitions": 32,
+            "max_evaluation_jobs": 32,
+            "max_execution_attempts": 32,
+            "max_protocol_revisions": 2,
+        }))
+        protocol = registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            candidate_definitions=[{"seed": seed} for seed in range(7, 29)],
+        ))
+
+        rejected_trials = []
+        for seed in range(7, 28):
+            request, trial = _register_trial(
+                registry,
+                protocol,
+                seed=seed,
+                purpose="PARAMETER_VARIATION",
+            )
+            _reject_before_submission(jobs, request, trial)
+            rejected_trials.append(trial)
+
+        request, completed_trial = _register_trial(
+            registry,
+            protocol,
+            seed=28,
+            purpose="FINAL_REFIT",
+        )
+        _submission, model = _publish_training(jobs, request, completed_trial)
+
+        snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+        )
+        assert len(snapshot.registered_trials) == 22
+        assert snapshot.scope_completeness.managed_campaign_history_complete is True
+        assert snapshot.scope_completeness.job_lifecycle_reconciled is True
+        rejected_states = [
+            state for state in snapshot.registered_trials
+            if state.terminal_state == "REJECTED"
+        ]
+        assert len(rejected_states) == 21
+        assert {state.trial_id for state in rejected_states} == {trial.trial_id for trial in rejected_trials}
+        assert all(state.job_id is None and state.result_hash is None for state in rejected_states)
+        assert all(state.rejection_reason == "RESEARCH_MODE_REQUIRED" for state in rejected_states)
+        assert all(state.exclusion_reason == "TRIAL_REJECTED_BEFORE_SUBMISSION" for state in rejected_states)
+        assert snapshot.trial_accounting.registered_trial_count == 22
+        assert snapshot.trial_accounting.rejected_submission_count == 21
+        assert snapshot.trial_accounting.completed_evaluation_count == 1
+        assert sum(
+            entry["reason"] == "TRIAL_REJECTED_BEFORE_SUBMISSION"
+            for entry in snapshot.excluded_candidates
+        ) == 21
+        assert selection.selection_status == "CANDIDATE_SELECTED_FOR_FURTHER_RESEARCH"
+        assert selection.selected_trial_id == completed_trial.trial_id
+        assert selection.selected_model_id == model["model_id"]
+
+        report1 = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        report2 = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id,
+            candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        assert report1.report_hash == report2.report_hash
+    finally:
+        jobs.connection.close()
+
+
+def test_rejected_status_without_real_rejection_event_blocks_seal(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        _request, trial = _register_trial(registry, protocol)
+        jobs.connection.execute(
+            "UPDATE alpha_research_trials SET status='REJECTED' WHERE trial_id=?",
+            (trial.trial_id,),
+        )
+        jobs.connection.commit()
+        with pytest.raises(AlphaError) as error:
+            registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
+        report = registry.build_evidence_report(campaign_id=campaign.campaign_id)
+        assert report.scope_completeness.managed_campaign_history_complete is False
+        assert report.scope_completeness.job_lifecycle_reconciled is False
+        registry._append_event(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            trial_id=trial.trial_id,
+            event_type="TRIAL_REJECTED",
+            reason_code="SYNTHETIC_REJECTION",
+        )
+        jobs.connection.commit()
+        with pytest.raises(AlphaError) as malformed:
+            registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+        assert malformed.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
+    finally:
+        jobs.connection.close()
+
+
+def test_rejected_trial_with_submission_evidence_blocks_seal_without_job_binding(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        registry._append_event(
+            campaign_id=campaign.campaign_id,
+            protocol_hash=protocol.protocol_hash,
+            trial_id=trial.trial_id,
+            event_type="TRIAL_SUBMITTED",
+            job_id="synthetic-job",
+            request_hash=trial.canonical_request_hash,
+        )
+        jobs.connection.commit()
+        registry.record_rejection(request, reason_code="SYNTHETIC_REJECTION")
+        with pytest.raises(AlphaError) as error:
+            registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
+    finally:
+        jobs.connection.close()
+
+
+@pytest.mark.parametrize("terminal_state", ["COMPLETED", "FAILED", "CANCELLED"])
+def test_terminal_trial_without_job_binding_blocks_seal(tmp_path, terminal_state):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        if terminal_state == "COMPLETED":
+            _publish_training(jobs, request, trial, model_text=terminal_state)
+        else:
+            submission = jobs.submit_alpha({**request, "research_trial_id": trial.trial_id})
+            if terminal_state == "FAILED":
+                claim = jobs.claim()
+                assert claim is not None
+                assert jobs.finish(claim, error=RuntimeError("synthetic failure"), error_code="DATA_UNAVAILABLE")
+            else:
+                jobs.cancel(submission["job_id"])
+            assert registry.get_trial(trial.trial_id).status == terminal_state
+        jobs.connection.execute(
+            "DELETE FROM alpha_research_trial_jobs WHERE trial_id=?",
+            (trial.trial_id,),
+        )
+        jobs.connection.commit()
+        with pytest.raises(AlphaError) as error:
+            registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
+    finally:
+        jobs.connection.close()
+
+
+def test_unterminated_trial_blocks_seal(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        _register_trial(registry, protocol)
+        with pytest.raises(AlphaError) as error:
+            registry.seal_candidate_ledger(
+                campaign_id=campaign.campaign_id,
+                protocol_hash=protocol.protocol_hash,
+            )
+        assert error.value.code == AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE
+        assert jobs.connection.execute(
+            "SELECT count(*) FROM alpha_research_ledger_snapshots WHERE campaign_id=?",
+            (campaign.campaign_id,),
+        ).fetchone()[0] == 0
     finally:
         jobs.connection.close()
 

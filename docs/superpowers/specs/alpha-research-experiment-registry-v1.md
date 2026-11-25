@@ -216,8 +216,10 @@ Fold hashes never become formal `model_id` values.
 
 A snapshot is generated only after ledger integrity verification and Job reconciliation. It includes
 all hypotheses, trials, terminal states, evidence references, exclusions, the watermark, event root,
-selection-policy hash and scope completeness. A registered but unsubmitted trial, or any queued/running/
-publishing Job, blocks sealing.
+selection-policy hash and scope completeness. A registered but non-terminal trial, or any queued/running/
+publishing Job, blocks sealing. A REJECTED trial is terminal without a Job binding only when the ledger
+contains its real `TRIAL_REJECTED` event and no submission, execution or binding evidence; it remains in
+the Snapshot and accounting but is excluded from the candidate pool.
 
 Selection is computed from the Protocol's predeclared rules. The default valid-candidate rules require:
 

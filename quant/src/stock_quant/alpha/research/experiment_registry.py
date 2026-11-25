@@ -569,12 +569,21 @@ class ResearchExperimentRegistry:
         )
 
         campaign = self.get_campaign(campaign_id)
-        protocol = self.get_protocol(protocol_hash)
-        if protocol.definition.campaign_id != campaign_id:
-            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Protocol belongs to another Campaign", {})
         parsed = ALPHA_REQUEST_ADAPTER.validate_python(request)
         if not isinstance(parsed, (TrainAlphaModelJob, WalkForwardAlphaRequest)):
             raise TypeError("Managed Research trials currently support training and walk-forward Jobs only")
+        if parsed.research_protocol_hash != protocol_hash:
+            raise AlphaError(
+                AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH,
+                "Trial and request Protocol differ",
+                {
+                    "trial_protocol_hash": protocol_hash,
+                    "request_protocol_hash": parsed.research_protocol_hash,
+                },
+            )
+        protocol = self.get_protocol(protocol_hash)
+        if protocol.definition.campaign_id != campaign_id:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Protocol belongs to another Campaign", {})
         if parsed.kind not in protocol.definition.allowed_job_kinds:
             raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Job kind is not allowed by the Protocol", {"kind": parsed.kind})
         if isinstance(parsed, TrainAlphaModelJob):
@@ -1133,7 +1142,50 @@ class ResearchExperimentRegistry:
             "evidence_scope_hash": trial.evidence_scope_hash,
         }
 
-    def _trial_terminal_state(self, trial: ResearchTrialRecord) -> ResearchTrialTerminalState:
+    def _pre_submission_rejection_event(self, trial_id: str, watermark: int) -> ResearchLedgerEvent | None:
+        rows = self.connection.execute(
+            "SELECT event_id,event_sequence,event_type,campaign_id,protocol_hash,trial_id,job_id,attempt,"
+            "request_hash,result_hash,reason_code,detail,previous_event_hash,event_hash,created_at "
+            "FROM alpha_research_events WHERE trial_id=? AND event_sequence<=? ORDER BY event_sequence",
+            (trial_id, watermark),
+        ).fetchall()
+        rejection = None
+        registered = False
+        for row in rows:
+            event = self._event_from_row(row)
+            if event.event_type == "TRIAL_REGISTERED":
+                registered = True
+                continue
+            if event.event_type == "TRIAL_REJECTED" and registered and event.reason_code:
+                if rejection is None:
+                    if event.detail.get("previous_status") != "REGISTERED" or event.detail.get("status_preserved") is not False:
+                        return None
+                    rejection = event
+                continue
+            return None
+        if not registered or rejection is None or self.get_trial_job(trial_id) is not None:
+            return None
+        return rejection
+
+    def _trial_reconciled_at(self, trial_id: str, watermark: int) -> bool:
+        state = self._trial_status_at(trial_id, watermark)
+        if state not in TERMINAL_TRIAL_STATES:
+            return False
+        if state == "REJECTED":
+            return self._pre_submission_rejection_event(trial_id, watermark) is not None
+        binding = self.get_trial_job(trial_id)
+        submitted = self._trial_submitted_sequence(trial_id)
+        if binding is None or submitted is None or submitted > watermark:
+            return False
+        job = self._job_row(binding.job_id)
+        return job is not None and job["status"] in TERMINAL_JOB_STATES
+
+    def _trial_terminal_state(
+        self,
+        trial: ResearchTrialRecord,
+        *,
+        rejection: ResearchLedgerEvent | None = None,
+    ) -> ResearchTrialTerminalState:
         binding = self.get_trial_job(trial.trial_id)
         job = None if binding is None else self._job_row(binding.job_id)
         evidence = [] if job is None else [{
@@ -1144,7 +1196,11 @@ class ResearchExperimentRegistry:
         }]
         exclusion = None
         if binding is None:
-            exclusion = "TRIAL_NOT_SUBMITTED"
+            exclusion = (
+                "TRIAL_REJECTED_BEFORE_SUBMISSION"
+                if rejection is not None
+                else "TRIAL_NOT_SUBMITTED"
+            )
         elif job["status"] == "completed":
             if self._job_result(binding.job_id) is None:
                 exclusion = "RESULT_EVIDENCE_INVALID"
@@ -1154,10 +1210,12 @@ class ResearchExperimentRegistry:
             trial_id=trial.trial_id, hypothesis_id=trial.hypothesis_id, protocol_hash=trial.protocol_hash,
             trial_definition_hash=trial.trial_definition_hash, trial_purpose=trial.trial_purpose,
             preregistration_status=trial.preregistration_status,
+            canonical_request_hash=trial.canonical_request_hash,
             terminal_state=trial.status, job_id=None if binding is None else binding.job_id,
             job_status=None if job is None else job["status"],
             job_config_hash=None if job is None else job["config_hash"],
             result_hash=None if job is None else job["result_hash"],
+            rejection_reason=None if rejection is None else rejection.reason_code,
             evidence_references=evidence, exclusion_reason=exclusion,
         )
 
@@ -1172,17 +1230,7 @@ class ResearchExperimentRegistry:
         for (trial_id,) in rows:
             if (self._trial_registered_sequence(trial_id) or 0) > target:
                 continue
-            state = self._trial_status_at(trial_id, target)
-            if state not in TERMINAL_TRIAL_STATES:
-                complete = False
-                break
-            if state == "REJECTED":
-                continue
-            submitted = self._trial_submitted_sequence(trial_id)
-            if submitted is None or submitted > target:
-                complete = False
-                break
-            if state in {"SUBMITTED", "RUNNING", "PUBLISHING"}:
+            if not self._trial_reconciled_at(trial_id, target):
                 complete = False
                 break
         return ScopeCompleteness(
@@ -1233,14 +1281,20 @@ class ResearchExperimentRegistry:
                 "latest_protocol_hash": latest_protocol[0],
             })
         trials = self._all_trials(campaign_id)
+        terminal_states: list[ResearchTrialTerminalState] = []
         for trial in trials:
-            binding = self.get_trial_job(trial.trial_id)
-            if binding is None or trial.status not in TERMINAL_TRIAL_STATES:
-                raise AlphaError(AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE, "A registered trial is not terminal", {"trial_id": trial.trial_id, "status": trial.status})
-            job = self._job_row(binding.job_id)
-            if job is None or job["status"] not in TERMINAL_JOB_STATES:
-                raise AlphaError(AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE, "A managed Job is not terminal", {"trial_id": trial.trial_id})
-        terminal_states = [self._trial_terminal_state(trial) for trial in trials]
+            if not self._trial_reconciled_at(trial.trial_id, integrity.ledger_watermark):
+                raise AlphaError(
+                    AlphaErrorCode.RESEARCH_LEDGER_INCOMPLETE,
+                    "A registered trial is not reconciled to a terminal state",
+                    {"trial_id": trial.trial_id, "status": self._trial_status_at(trial.trial_id, integrity.ledger_watermark)},
+                )
+            rejection = (
+                self._pre_submission_rejection_event(trial.trial_id, integrity.ledger_watermark)
+                if trial.status == "REJECTED"
+                else None
+            )
+            terminal_states.append(self._trial_terminal_state(trial, rejection=rejection))
         references = [
             {
                 "trial_id": state.trial_id, "job_id": state.job_id, "job_status": state.job_status,
@@ -1351,7 +1405,25 @@ class ResearchExperimentRegistry:
         for trial in compatible_trials:
             binding = self.get_trial_job(trial.trial_id)
             if binding is None:
-                excluded.append(ExcludedCandidate(trial_id=trial.trial_id, reason="TRIAL_NOT_SUBMITTED"))
+                rejection = (
+                    self._pre_submission_rejection_event(
+                        trial.trial_id,
+                        self.ledger_watermark(trial.campaign_id),
+                    )
+                    if trial.status == "REJECTED"
+                    else None
+                )
+                if rejection is not None:
+                    excluded.append(ExcludedCandidate(
+                        trial_id=trial.trial_id,
+                        reason="TRIAL_REJECTED_BEFORE_SUBMISSION",
+                        detail={
+                            "canonical_request_hash": trial.canonical_request_hash,
+                            "rejection_reason": rejection.reason_code,
+                        },
+                    ))
+                else:
+                    excluded.append(ExcludedCandidate(trial_id=trial.trial_id, reason="TRIAL_NOT_SUBMITTED"))
                 continue
             job = self._job_row(binding.job_id)
             if job is None or job["status"] != "completed":
@@ -1528,10 +1600,10 @@ class ResearchExperimentRegistry:
         ).fetchone()
         if row is None:
             raise AlphaError(AlphaErrorCode.RESEARCH_EVIDENCE_HASH_MISMATCH, "Candidate Ledger Snapshot does not exist", {"candidate_ledger_hash": candidate_ledger_hash})
-        snapshot = ResearchLedgerSnapshot.model_validate(_load(row[0]))
-        if snapshot_hash_for(snapshot.model_dump(mode="json")) != snapshot.candidate_ledger_hash:
+        payload = _load(row[0])
+        if snapshot_hash_for(payload) != payload.get("candidate_ledger_hash"):
             raise AlphaError(AlphaErrorCode.RESEARCH_EVIDENCE_HASH_MISMATCH, "Candidate Ledger Snapshot hash mismatch", {})
-        return snapshot
+        return ResearchLedgerSnapshot.model_validate(payload)
 
     def get_selection(self, candidate_ledger_hash: str) -> ResearchSelection:
         row = self.connection.execute(
