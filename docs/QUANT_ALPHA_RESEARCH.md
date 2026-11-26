@@ -101,8 +101,18 @@ any out-of-range row group fail with `QUALITY_SCOPE_NOT_ISOLATED` with zero part
 produces `COMPARISON_EXPLORATORY`; `RESEARCH_BLOCKED` produces `COMPARISON_INVALID`. None of the
 comparison statuses certifies statistical significance or trading validity.
 
-Read `training_metrics[0].baseline_comparison` and the compact Job `reproducibility.baseline_comparison`
-record. No new MCP Tool or result section is created.
+Small Baseline reports remain inline at `training_metrics[0].baseline_comparison`. Reports that would
+exceed the Artifact/MCP single-row budget are stored losslessly in the paginated
+`baseline_comparison` result section. `training_metrics[0].baseline_comparison` then carries a versioned
+reference bound to the Job, original report hash, byte length and chunk count. Read every page, then
+reconstruct and validate the original report hash. Historical inline reports remain readable. The compact
+Job `reproducibility.baseline_comparison` record remains available.
+
+New training requests advertise `resource_budget.max_seconds` (default 120, maximum 1800). The legacy
+top-level `max_seconds` is accepted when it is the only field supplied and must match when both are
+present. New requests receive a separate 30-second publication budget and a 5-second hard-termination
+grace; the Worker's absolute attempt guard is therefore 1835 seconds. Already persisted Jobs keep their
+original top-level runtime cap and config hash.
 
 ## Development walk-forward validation
 

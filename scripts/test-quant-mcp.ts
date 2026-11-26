@@ -25,7 +25,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter((pair): pair i
 const transportOptions = {command: process.execPath, args: [resolve(root, "dist/cli.js"), "server"], env: { ...env, QUANT_ENABLED: "1", QUANT_PYTHON: process.env.QUANT_PYTHON || resolve(root, "quant/.venv/bin/python"), QUANT_REGISTRY_PATH: resolve(tmp, "quant.db"), STOCK_MCP_DB_PATH: resolve(tmp, "data.db"), YAHOO_STOCK_MCP_SQLITE_PATH: resolve(tmp, "data.db") }, stderr: "pipe" as const};
 let transport = new StdioClientTransport(transportOptions);
 let client = new Client({name: "quant-acceptance", version: "1.0"});
-const deadline = setTimeout(() => { void transport.close(); }, 120_000);
+const deadline = setTimeout(() => { void transport.close(); }, 180_000);
 try {
   await client.connect(transport);
   const tools = await client.listTools();

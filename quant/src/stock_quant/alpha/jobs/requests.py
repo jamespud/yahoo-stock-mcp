@@ -7,6 +7,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter, field_validator, model_v
 
 from ...contracts import StrictModel
 from ..contracts import Hash, Identifier, ModelResourceBudget, PriceBasis, QuotePolicy
+from ..runtime_budget import TRAINING_RUNTIME_CONTRACT
 from ..models.baseline_comparison import BaselineComparisonConfig
 from ..models.hyperparameters import INT32_MAX, validate_hyperparameters
 from ..models.temporal_split import ModelDevelopmentSplit
@@ -79,6 +80,7 @@ class ComputeOptionFactorsJob(AlphaJobBase):
 
 class TrainAlphaModelJob(AlphaJobBase):
     kind: Literal["train_alpha_model"]
+    budget_contract_version: Literal["training-attempt-deadline-v1"] | None = None
     research_trial_id: Hash | None = None
     feature_set_id: Hash
     label_name: str = Field(min_length=1, max_length=128)
@@ -93,6 +95,12 @@ class TrainAlphaModelJob(AlphaJobBase):
     min_rank_ic: float = 0.03
     resource_budget: ModelResourceBudget = Field(default_factory=ModelResourceBudget)
     baseline_comparison: BaselineComparisonConfig | None = None
+
+    @model_validator(mode="after")
+    def normalized_budget(self):
+        if self.budget_contract_version == TRAINING_RUNTIME_CONTRACT and self.max_seconds != self.resource_budget.max_seconds:
+            raise ValueError("Normalized training max_seconds fields must match")
+        return self
 
     _validate_hyperparameters = field_validator("hyperparameters")(validate_hyperparameters)
 

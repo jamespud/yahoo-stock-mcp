@@ -371,6 +371,7 @@ class JobStore(Registry):
                 WalkForwardAlphaRequest,
             )
             from .alpha.models.registry import AlphaModelRegistry
+            from .alpha.runtime_budget import normalize_training_request
             from .alpha.research_admission import (
                 ResearchAdmissionError,
                 authorize_oos,
@@ -384,6 +385,15 @@ class JobStore(Registry):
             raise ValueError("DATA_UNAVAILABLE: Alpha optional dependencies are not installed") from error
         kind = raw.get("kind") if isinstance(raw, dict) else None
         if kind == "train_alpha_model":
+            original_raw = raw
+            try:
+                raw = normalize_training_request(raw)
+            except ValueError as error:
+                self.audit_training_rejection("runtime", ["max_seconds"], "RESOURCE_LIMIT_EXCEEDED")
+                self.research_registry.record_rejection(
+                    original_raw, reason_code="RESOURCE_LIMIT_EXCEEDED", detail={"fields": ["max_seconds"]},
+                )
+                raise
             try:
                 require_training_submission_raw(raw)
             except ResearchAdmissionError as error:
@@ -641,15 +651,17 @@ class JobStore(Registry):
             changed = self.connection.execute("UPDATE jobs SET lease_until=unixepoch()+15,progress=? WHERE id=? AND owner=? AND status IN ('running','publishing') AND lease_until>unixepoch()", (min(.99, max(0., progress)), claim["id"], claim["owner"]))
         return changed.rowcount == 1
 
-    def _serialize_result(self, claim: dict, result: dict) -> tuple[dict, dict]:
+    def _serialize_result(self, claim: dict, result: dict, *, checkpoint=None) -> tuple[dict, dict]:
         references = {}
-        def checkpoint():
+        def durable_checkpoint():
+            if checkpoint is not None:
+                checkpoint()
             if not self.heartbeat(claim, .99):
                 raise OwnershipLost()
         compact = {}
         for section, value in result.items():
             if isinstance(value, list):
-                references[section] = self.artifacts.write_rows(iter(value), checkpoint=checkpoint, enforce_mcp_budget=True)
+                references[section] = self.artifacts.write_rows(iter(value), checkpoint=durable_checkpoint, enforce_mcp_budget=True)
                 compact[section] = {"$artifact": references[section]}
             else:
                 compact[section] = value
@@ -657,35 +669,49 @@ class JobStore(Registry):
             raise ValueError("RESOURCE_LIMIT_EXCEEDED: result metadata exceeds 16 MiB")
         return compact, references
 
-    def begin_publish(self, claim: dict, result: dict) -> bool:
+    def begin_publish(self, claim: dict, result: dict, *, checkpoint=None) -> bool:
         """Persist result artifacts and enter an internal fenced publishing phase."""
-        if not self.connection.execute("SELECT 1 FROM jobs WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (claim["id"], claim["owner"])).fetchone():
-            return False
         try:
-            compact, references = self._serialize_result(claim, result)
+            if checkpoint is not None:
+                checkpoint()
+            if not self.connection.execute("SELECT 1 FROM jobs WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()", (claim["id"], claim["owner"])).fetchone():
+                return False
+            compact, references = self._serialize_result(claim, result, checkpoint=checkpoint)
         except OwnershipLost:
             return False
         except Exception as error:  # noqa: BLE001 - serialization failure is terminal for this claim
-            self.fail_publish(claim, error)
+            code = getattr(error, "code", None)
+            self.fail_publish(claim, error, getattr(code, "value", None))
             return False
         encoded = json.dumps(compact, allow_nan=False)
-        with self.connection:
-            changed = self.connection.execute(
-                "UPDATE jobs SET status='publishing',progress=.99,result=?,result_hash=?,error_code=NULL,error_message=NULL,lease_until=unixepoch()+15 WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()",
-                (encoded, digest(compact), claim["id"], claim["owner"]),
-            )
-            if changed.rowcount == 1:
-                self.connection.execute("DELETE FROM result_artifacts WHERE job_id=?", (claim["id"],))
-                for section, reference in references.items():
-                    self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
-                self.research_registry.record_lifecycle(
-                    job_id=claim["id"], event_type="TRIAL_PUBLISHING",
-                    detail={"result_hash": digest(compact)},
+        try:
+            if checkpoint is not None:
+                checkpoint()
+            with self.connection:
+                changed = self.connection.execute(
+                    "UPDATE jobs SET status='publishing',progress=.99,result=?,result_hash=?,error_code=NULL,error_message=NULL,lease_until=unixepoch()+15 WHERE id=? AND owner=? AND status='running' AND lease_until>unixepoch()",
+                    (encoded, digest(compact), claim["id"], claim["owner"]),
                 )
+                if changed.rowcount == 1:
+                    self.connection.execute("DELETE FROM result_artifacts WHERE job_id=?", (claim["id"],))
+                    for section, reference in references.items():
+                        self.connection.execute("INSERT INTO result_artifacts VALUES (?, ?, ?)", (claim["id"], section, json.dumps(reference, allow_nan=False)))
+                    self.research_registry.record_lifecycle(
+                        job_id=claim["id"], event_type="TRIAL_PUBLISHING",
+                        detail={"result_hash": digest(compact)},
+                    )
+        except OwnershipLost:
+            return False
+        except Exception as error:  # noqa: BLE001 - publication transition is terminal for this claim
+            code = getattr(error, "code", None)
+            self.fail_publish(claim, error, getattr(code, "value", None))
+            return False
         return changed.rowcount == 1
 
-    def complete_publish(self, claim: dict, *, dataset_ids=()) -> bool:
+    def complete_publish(self, claim: dict, *, dataset_ids=(), checkpoint=None) -> bool:
         owns_transaction = not self.connection.in_transaction
+        if checkpoint is not None:
+            checkpoint()
         if owns_transaction:
             self.connection.execute("BEGIN IMMEDIATE")
         try:
@@ -828,7 +854,7 @@ class JobStore(Registry):
 
     def _get_result(self, job_id: str, section="summary", limit=100, cursor=None, *, mcp_overhead_bytes=None,
                     record_exposure: bool = True) -> dict:
-        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
+        sections = ("artifacts", "analytics", "attribution", "daily_returns", "summary", "orders", "fills", "equity_curve", "reproducibility", "final_account", "diagnostics", "cash_ledger", "corporate_actions", "exposures", "risk_events", "trials", "walk_forward", "parameter_sensitivity", "screen", "dataset", "data_quality", "factors", "factor_diagnostics", "option_analytics", "training_metrics", "baseline_comparison", "model_registry", "predictions", "rank_ic", "portfolio_metrics", "target_weights", "trades")
         if section not in sections or type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Invalid result section or limit")
         job = self.get_job(job_id)

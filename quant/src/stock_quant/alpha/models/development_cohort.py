@@ -1,7 +1,6 @@
 """Single shared, matured development cohort for LightGBM and comparison baselines."""
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -110,17 +109,12 @@ def _sample_keys_hash(keys: frozenset) -> str:
     return digest([[decision.isoformat(), instrument] for decision, instrument in sorted(keys)])
 
 
-def _check_deadline(deadline_monotonic: float | None) -> None:
-    if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
-        raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training time budget exceeded")
-
-
 def prepare_development_cohort(
     request,
     *,
     store: DatasetStore,
     label_rows: list[LabelRow],
-    deadline_monotonic: float | None = None,
+    attempt_deadline: AttemptDeadline | None = None,
     checkpoint: Callable[[float], None] | None = None,
 ) -> DevelopmentCohort:
     """Prepare the sole LightGBM/Ridge/Baseline Train and Validation sample identity."""
@@ -128,15 +122,23 @@ def prepare_development_cohort(
     if not label_rows:
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "No labels match the requested label_name")
     cutoff = request.split.validation_end
+    if attempt_deadline:
+        attempt_deadline.enter("training_lineage")
     feature_manifest = store.load_manifest(request.feature_set_id)
     label_manifest = store.load_manifest(request.label_source_dataset_id)
+    if attempt_deadline:
+        attempt_deadline.enter("training_feature_read")
     features, schema = _feature_frame(
         store.read_rows(request.feature_set_id, start_at=request.split.train_start, end_at=cutoff)
     )
+    if attempt_deadline:
+        attempt_deadline.enter("training_join")
     joined = _join_labels(features, schema, label_rows)
     if len(joined) > request.resource_budget.max_rows:
         raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training rows exceed budget")
     matured = split_matured_development(label_rows, request.split)
+    if attempt_deadline:
+        attempt_deadline.enter("training_split")
 
     def allowed(frame: pd.DataFrame, rows: list[LabelRow]) -> pd.DataFrame:
         keys = {(row.feature_decision_at, row.instrument_id) for row in rows}
@@ -148,7 +150,8 @@ def prepare_development_cohort(
     validation = allowed(_subset(joined, request.split.validation_start, request.split.validation_end), matured["validation"])
     if train.empty or validation.empty:
         raise AlphaError(AlphaErrorCode.INSUFFICIENT_HISTORY, "Train and validation require matured labels")
-    _check_deadline(deadline_monotonic)
+    if attempt_deadline:
+        attempt_deadline.enter("training_cohort")
 
     # Retain the exact feature-side key set without expanding the pivot into a second frame.
     feature_validation_keys = frozenset(

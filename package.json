@@ -85,7 +85,8 @@
     "test:quant-alpha-e2e": "node --test tests/quant-eval/alpha-mcp-e2e.test.mjs",
     "test:quant-alpha-scalability": "node --test tests/quant-eval/alpha-scalability.test.mjs",
     "test:quant-alpha-research": "node scripts/quant-eval/run-alpha-research-reliability.mjs",
-    "test:quant-data-validity": "node --test tests/quant-eval/alpha-data-validity.test.mjs && node scripts/quant-eval/run-alpha-data-validity.mjs"
+    "test:quant-data-validity": "node --test tests/quant-eval/alpha-data-validity.test.mjs && node scripts/quant-eval/run-alpha-data-validity.mjs",
+    "test:quant-alpha-capacity": "PYTHONPATH=$PWD/quant/src OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 uv run --project quant --all-extras python scripts/quant-eval/run-alpha-capacity-profile.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

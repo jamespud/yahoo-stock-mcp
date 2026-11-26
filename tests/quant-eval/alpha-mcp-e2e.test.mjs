@@ -54,8 +54,8 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
     assert.ok(!("test_feature_set_id" in walkForwardSchema.properties));
     assert.ok(!("freeze_id" in walkForwardSchema.properties));
     assert.deepEqual(Object.keys(trainingSchema.properties).sort(), [
-      "baseline_comparison", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "min_rank_ic",
-      "random_seed", "research_protocol_hash", "research_trial_id", "resource_budget", "windows",
+      "baseline_comparison", "evaluation_mode", "feature_set_id", "hyperparameters", "label_spec", "max_seconds",
+      "min_rank_ic", "random_seed", "research_protocol_hash", "research_trial_id", "resource_budget", "windows",
     ]);
     assert.deepEqual(trainingSchema.required, ["evaluation_mode", "research_protocol_hash", "feature_set_id", "label_spec", "windows"]);
     function advertisedType(schema, type) {
@@ -359,12 +359,12 @@ test("Alpha research workflow completes through stdio MCP", {timeout: 180000}, a
     let retryJob = null;
     for (let i = 0; i < 400; i++) {
       retryJob = await call("quant_get_job", {job_id: retrySubmission.job_id});
-      if (retryJob.status === "running") break;
+      if (retryJob.status === "running" || retryJob.status === "publishing") break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-    assert.equal(retryJob.status, "running", JSON.stringify(retryJob));
+    assert.ok(["running", "publishing"].includes(retryJob.status), JSON.stringify(retryJob));
     const expired = execFileSync(pythonBinary, ["-c",
-      "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); n=c.execute(\"update jobs set lease_until=0 where id=? and status='running'\",(sys.argv[2],)).rowcount; c.commit(); print(n)",
+      "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); n=c.execute(\"update jobs set lease_until=0 where id=? and status in ('running','publishing')\",(sys.argv[2],)).rowcount; c.commit(); print(n)",
       resolve(tmp, "quant.db"), retrySubmission.job_id], {encoding: "utf8"}).trim();
     assert.equal(expired, "1");
     await done(retrySubmission.job_id);

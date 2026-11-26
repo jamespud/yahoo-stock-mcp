@@ -1,7 +1,6 @@
 """Deterministic development-window comparison of factor, Ridge and LightGBM candidates."""
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -181,11 +180,6 @@ class BaselineComparisonReport(StrictModel):
         if digest(payload) != self.report_hash:
             raise ValueError("baseline comparison report hash mismatch")
         return self
-
-
-def _check_deadline(deadline_monotonic: float | None) -> None:
-    if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
-        raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Baseline comparison time budget exceeded")
 
 
 def _lineage_manifests(store: DatasetStore, roots: list[str], *, max_nodes: int = 512) -> dict[str, DatasetManifest]:
@@ -731,19 +725,21 @@ def compare_development_models(
     lightgbm_model_id: str,
     lightgbm_model_hash: str,
     lightgbm_metrics: dict,
-    deadline_monotonic: float | None,
+    attempt_deadline=None,
     checkpoint: Callable[[float], None] | None = None,
 ) -> BaselineComparisonReport:
     """Compare the fixed four candidates without publishing any baseline model."""
     compiled = validate_baseline_factor_source(config, cohort)
-    _check_deadline(deadline_monotonic)
+    if attempt_deadline:
+        attempt_deadline.enter("baseline_factor_validation")
     feature_quality, label_quality = _quality_reports(
         store,
         cohort,
         cutoff=cohort.split.validation_end,
         max_scan_rows=max(1, cohort.resource_budget.max_rows // 2),
     )
-    _check_deadline(deadline_monotonic)
+    if attempt_deadline:
+        attempt_deadline.enter("quality_scan")
     if checkpoint:
         checkpoint(0.55)
 
@@ -751,6 +747,8 @@ def compare_development_models(
     train = cohort.train.reset_index(drop=True)
     decisions = sorted(validation["decision_at"].unique().tolist())
     targets = validation["label_value"].to_numpy(dtype=float)
+    if attempt_deadline:
+        attempt_deadline.enter("baseline_candidate_comparison")
     factor_predictions = _fixed_factor_scores(cohort, config)
     ridge_train_predictions, ridge_predictions, ridge_fitted_hash = _ridge_predictions(cohort, float(config.ridge_alpha))
     lightgbm = np.asarray(lightgbm_predictions, dtype=float)
@@ -957,6 +955,8 @@ def compare_development_models(
 
     if checkpoint:
         checkpoint(0.85)
+    if attempt_deadline:
+        attempt_deadline.enter("baseline_paired_comparison")
     paired = _paired_records(common_predictions, common)
     common_coverage, omitted_common_decisions = _common_cohort_coverage(validation, common_mask)
     feature_summary = _quality_summary(feature_quality)

@@ -13,6 +13,8 @@ from typing import Any
 from ...compiler import digest
 from ...pagination import result_page
 from ..errors import AlphaError, AlphaErrorCode
+from ..models.baseline_evidence import BaselineEvidenceLoader, BaselineEvidenceError
+from ..runtime_budget import TRAINING_DEFAULT_SECONDS
 from .contracts import (
     ExcludedCandidate,
     HypothesisRecord,
@@ -717,8 +719,17 @@ class ResearchExperimentRegistry:
         if declared_minimum_rank_ic is not None and request.get("min_rank_ic") is not None and request.get("min_rank_ic") < declared_minimum_rank_ic:
             raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial minimum RankIC differs from the Protocol", {"field": "min_rank_ic"})
         stopping = protocol.stopping_policy
-        if "max_seconds" in stopping and (request.get("max_seconds") is None or request["max_seconds"] > stopping["max_seconds"]):
-            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial max_seconds exceeds the Protocol", {"field": "max_seconds"})
+        if "max_seconds" in stopping:
+            if request.get("kind") == "train_alpha_model":
+                effective_seconds = (
+                    (request.get("resource_budget") or {}).get("max_seconds")
+                    if (request.get("resource_budget") or {}).get("max_seconds") is not None
+                    else request.get("max_seconds", TRAINING_DEFAULT_SECONDS)
+                )
+            else:
+                effective_seconds = request.get("max_seconds")
+            if effective_seconds is None or effective_seconds > stopping["max_seconds"]:
+                raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial max_seconds exceeds the Protocol", {"field": "resource_budget.max_seconds"})
         budget = request.get("resource_budget") or {}
         if "max_total_training_samples" in stopping and budget.get("max_total_training_samples", request.get("resource_budget", {}).get("max_rows")) is not None and budget.get("max_total_training_samples", request.get("resource_budget", {}).get("max_rows")) > stopping["max_total_training_samples"]:
             raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial training-sample budget exceeds the Protocol", {"field": "resource_budget.max_total_training_samples"})
@@ -791,6 +802,13 @@ class ResearchExperimentRegistry:
             raise AlphaError(AlphaErrorCode.RESEARCH_TRIAL_REQUEST_MISMATCH, "Trial is not available for submission", {"trial_id": trial_id, "status": trial.status})
         campaign = self.get_campaign(trial.campaign_id)
         protocol = self.get_protocol(trial.protocol_hash)
+        hypothesis = next(
+            (row.definition for row in protocol.registered_hypotheses if row.hypothesis_id == trial.hypothesis_id),
+            None,
+        )
+        if hypothesis is None:
+            raise AlphaError(AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH, "Trial Hypothesis is not registered", {"trial_id": trial_id})
+        self._validate_protocol_constraints(protocol.definition, request, hypothesis)
         for scope, budget in (
             ("campaign", campaign.definition.resource_policy),
             ("protocol", protocol.definition.trial_budget),
@@ -1100,11 +1118,12 @@ class ResearchExperimentRegistry:
         trial = self.get_trial(trial_id)
         if trial.canonical_request.get("kind") == "train_alpha_model":
             try:
-                metrics = self._read_all_section(binding.job_id, "training_metrics")
-            except (ValueError, AlphaError):
+                _metrics, baseline = BaselineEvidenceLoader(self.job_store).load(
+                    binding.job_id, result,
+                )
+            except (BaselineEvidenceError, ValueError, AlphaError):
                 return 0
-            baseline = metrics[0].get("baseline_comparison") if metrics else None
-            return 2 if baseline else 1
+            return 2 if baseline is not None else 1
         if trial.canonical_request.get("kind") == "walk_forward_alpha":
             fold_count = len(result.get("walk_forward") or [])
             return 3 * fold_count
@@ -1464,8 +1483,19 @@ class ResearchExperimentRegistry:
                         reason="MODEL_NOT_FOUND_IN_ORIGINAL_REGISTRY", detail={"message": str(error)[:512]},
                     ))
                     continue
-            training_rows = self._read_all_section(binding.job_id, "training_metrics")
-            metrics = training_rows[0] if training_rows else {}
+            job_result = self._job_result(binding.job_id)
+            try:
+                if job_result is None:
+                    raise BaselineEvidenceError("Job result is unavailable")
+                metrics, parsed_baseline = BaselineEvidenceLoader(self.job_store).load(
+                    binding.job_id, job_result,
+                )
+            except Exception as error:  # noqa: BLE001 - malformed persisted evidence is invalid evidence
+                excluded.append(ExcludedCandidate(
+                    trial_id=trial.trial_id, model_id=model_id,
+                    reason="BASELINE_EVIDENCE_HASH_MISMATCH", detail={"message": str(error)[:512]},
+                ))
+                continue
             validation = metrics.get("validation") or {}
             rank_ic = validation.get("rank_ic_mean")
             if rank_ic is None or not isinstance(rank_ic, (int, float)) or not math.isfinite(float(rank_ic)):
@@ -1474,18 +1504,7 @@ class ResearchExperimentRegistry:
             if policy.minimum_rank_ic is not None and float(rank_ic) < policy.minimum_rank_ic:
                 excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="BELOW_PRIMARY_METRIC_THRESHOLD"))
                 continue
-            parsed_baseline = None
-            baseline = metrics.get("baseline_comparison")
-            if baseline is not None:
-                try:
-                    from ..models.baseline_comparison import BaselineComparisonReport
-                    parsed_baseline = BaselineComparisonReport.model_validate(baseline)
-                except Exception as error:  # noqa: BLE001 - malformed persisted evidence is invalid evidence
-                    excluded.append(ExcludedCandidate(
-                        trial_id=trial.trial_id, model_id=model_id,
-                        reason="BASELINE_EVIDENCE_HASH_MISMATCH", detail={"message": str(error)[:512]},
-                    ))
-                    continue
+            if parsed_baseline is not None:
                 if parsed_baseline.comparison_status == "COMPARISON_INVALID":
                     excluded.append(ExcludedCandidate(trial_id=trial.trial_id, model_id=model_id, reason="COMPARISON_INVALID"))
                     continue
@@ -1682,19 +1701,15 @@ class ResearchExperimentRegistry:
         result = self._job_result(job_id)
         if result is None or "training_metrics" not in result:
             return None
-        metrics_rows = self._read_all_section(job_id, "training_metrics")
-        metrics = metrics_rows[0] if metrics_rows else {}
-        baseline = metrics.get("baseline_comparison")
-        if baseline is None:
-            return None
         try:
-            from ..models.baseline_comparison import BaselineComparisonReport
-            report = BaselineComparisonReport.model_validate(baseline)
+            _metrics, report = BaselineEvidenceLoader(self.job_store).load(job_id, result)
         except Exception as error:  # noqa: BLE001 - report exposes malformed evidence as invalid
             return {
                 "trial_id": trial.trial_id, "job_id": job_id, "status": "INVALID",
                 "reason": "BASELINE_EVIDENCE_HASH_MISMATCH", "message": str(error)[:512],
             }
+        if report is None:
+            return None
         return {
             "trial_id": trial.trial_id, "job_id": job_id, "status": report.comparison_status,
             "report_hash": report.report_hash, "comparison_protocol_hash": report.comparison_protocol_hash,

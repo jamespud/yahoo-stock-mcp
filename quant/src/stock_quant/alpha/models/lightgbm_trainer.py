@@ -16,6 +16,7 @@ from ..contracts import Hash, ModelResourceBudget
 from ..data.catalog import DatasetStore
 from ..errors import AlphaError, AlphaErrorCode
 from ..research_admission import require_training_execution
+from ..runtime_budget import AttemptDeadline
 from .baseline_comparison import (
     BaselineComparisonConfig,
     BaselineComparisonReport,
@@ -163,16 +164,28 @@ def _model_manifest(
     )
 
 
+def _model_fit_deadline_callback(attempt_deadline: AttemptDeadline):
+    def callback(_environment):
+        attempt_deadline.enter("model_fit")
+    return callback
+
+
 def _train_validation_outcome(
     request: TrainAlphaRequest,
     *,
     store: DatasetStore,
     registry: AlphaModelRegistry,
     label_rows: list[LabelRow],
+    attempt_deadline: AttemptDeadline | None = None,
     checkpoint: Callable[[float], None] | None = None,
 ) -> _TrainingOutcome:
     """Strict Validation-only training path; no Test feature, label, prediction, or metric is created."""
     require_training_execution(request)
+    if attempt_deadline is None:
+        attempt_deadline = AttemptDeadline.for_training_request({
+            "kind": "train_alpha_model", "max_seconds": request.resource_budget.max_seconds,
+        })
+    attempt_deadline.enter("training_preflight")
     if not isinstance(request.split, ModelDevelopmentSplit):
         raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Validation-only training requires ModelDevelopmentSplit")
     preflight_baseline_comparison(
@@ -182,24 +195,31 @@ def _train_validation_outcome(
         config=request.baseline_comparison,
         store=store,
     )
-    began = time.monotonic()
-    deadline = began + request.resource_budget.max_seconds
     cohort = prepare_development_cohort(
         request, store=store, label_rows=label_rows,
-        deadline_monotonic=deadline, checkpoint=checkpoint,
+        attempt_deadline=attempt_deadline, checkpoint=checkpoint,
     )
     train = cohort.train
     validation = cohort.validation
     schema = list(cohort.feature_schema)
+    attempt_deadline.enter("training_datasets")
     params, num_boost_round = _params(request)
     train_data = lgb.Dataset(train[schema], label=train["label_value"], feature_name=schema, free_raw_data=False)
     valid_data = lgb.Dataset(validation[schema], label=validation["label_value"], feature_name=schema, reference=train_data, free_raw_data=False)
-    booster = lgb.train(params, train_data, num_boost_round=num_boost_round, valid_sets=[valid_data], callbacks=[lgb.log_evaluation(0), lgb.early_stopping(max(1, min(20, num_boost_round // 5)), verbose=False)])
-    if time.monotonic() > deadline:
-        raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Training time budget exceeded")
+    booster = lgb.train(
+        params, train_data, num_boost_round=num_boost_round, valid_sets=[valid_data],
+        callbacks=[
+            lgb.log_evaluation(0),
+            lgb.early_stopping(max(1, min(20, num_boost_round // 5)), verbose=False),
+            _model_fit_deadline_callback(attempt_deadline),
+        ],
+    )
+    attempt_deadline.enter("model_fit")
     selected_iteration = booster.best_iteration or num_boost_round
+    attempt_deadline.enter("training_prediction")
     train_predictions = booster.predict(train[schema], num_iteration=selected_iteration)
     predictions = booster.predict(validation[schema], num_iteration=selected_iteration)
+    attempt_deadline.enter("training_metrics")
     train_metrics = metrics(train["label_value"].to_numpy(), train_predictions, train["decision_at"].tolist())
     validation_metrics = metrics(validation["label_value"].to_numpy(), predictions, validation["decision_at"].tolist())
     importance = booster.feature_importance(importance_type="gain", iteration=selected_iteration)
@@ -211,6 +231,7 @@ def _train_validation_outcome(
         and validation_metrics["prediction_coverage"] >= 0.8
     )
     feature_manifest = cohort.feature_manifest
+    attempt_deadline.enter("model_registry_write")
     trained = registry.save(model_text=model_text, metadata={
         "model_type": MODEL_TYPE, "model_version": MODEL_VERSION, "feature_set_id": request.feature_set_id,
         "label_definition_hash": cohort.label_definition_hash,
@@ -234,6 +255,7 @@ def _train_validation_outcome(
         train_metrics=train_metrics, validation_metrics=validation_metrics,
         validation_gate=validation_gate,
     )
+    attempt_deadline.enter("training_outcome")
     if request.baseline_comparison is None:
         if checkpoint:
             checkpoint(1.0)
@@ -259,7 +281,7 @@ def _train_validation_outcome(
             },
             "random_seed": request.random_seed,
         },
-        deadline_monotonic=deadline,
+        attempt_deadline=attempt_deadline,
         checkpoint=checkpoint,
     )
     if checkpoint:
@@ -291,6 +313,7 @@ def _train_alpha_outcome(
     store: DatasetStore,
     registry: AlphaModelRegistry,
     label_rows: list[LabelRow] | None = None,
+    attempt_deadline: AttemptDeadline | None = None,
     checkpoint: Callable[[float], None] | None = None,
 ) -> _TrainingOutcome:
     """Private Job entry point that may carry the optional comparison report."""
@@ -298,7 +321,8 @@ def _train_alpha_outcome(
     if label_rows is None:
         raise AlphaError(AlphaErrorCode.DATA_UNAVAILABLE, "Label rows must be supplied or generated by the label job")
     return _train_validation_outcome(
-        request, store=store, registry=registry, label_rows=label_rows, checkpoint=checkpoint,
+        request, store=store, registry=registry, label_rows=label_rows,
+        attempt_deadline=attempt_deadline, checkpoint=checkpoint,
     )
 
 

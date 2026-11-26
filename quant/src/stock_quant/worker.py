@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 
+from .alpha.runtime_budget import hard_attempt_seconds
 from .jobs import JobStore, execute_job
 
 
@@ -27,7 +28,7 @@ def main():
             # Hard wall-clock guard also bounds a stuck evaluator between checks.
             # A killed worker leaves its lease to expire for fenced retry.
             if hasattr(signal, "alarm"):
-                signal.alarm(125)
+                signal.alarm(hard_attempt_seconds(claim["request"]))
             execute_job(store, claim)
             if hasattr(signal, "alarm"):
                 signal.alarm(0)

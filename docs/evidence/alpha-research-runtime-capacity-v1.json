@@ -1,0 +1,115 @@
+{
+  "artifacts": [
+    {
+      "max_mcp_response_bytes": 2350135,
+      "max_mcp_row_envelope_bytes": 1910983,
+      "max_row_json_bytes": 1636129,
+      "parquet_bytes": 136104,
+      "rows": 3,
+      "section": "baseline_comparison",
+      "serialized_json_bytes": 2033342
+    },
+    {
+      "max_mcp_response_bytes": 2433,
+      "max_mcp_row_envelope_bytes": 5266,
+      "max_row_json_bytes": 1795,
+      "parquet_bytes": 8777,
+      "rows": 1,
+      "section": "diagnostics",
+      "serialized_json_bytes": 1795
+    },
+    {
+      "max_mcp_response_bytes": 1073208,
+      "max_mcp_row_envelope_bytes": 1076035,
+      "max_row_json_bytes": 1068089,
+      "parquet_bytes": 88082,
+      "rows": 1,
+      "section": "model_registry",
+      "serialized_json_bytes": 1068089
+    },
+    {
+      "max_mcp_response_bytes": 1072334,
+      "max_mcp_row_envelope_bytes": 1075157,
+      "max_row_json_bytes": 1067250,
+      "parquet_bytes": 87492,
+      "rows": 1,
+      "section": "training_metrics",
+      "serialized_json_bytes": 1067250
+    }
+  ],
+  "completion": {
+    "candidate_ledger_hash": "sha256:7e3129e7b9e7b195c31927a1215b8387fe5827059cd3a9473a4a101ef9f2b127",
+    "evidence_report_hash": "sha256:8acd622f9b031adc259debdb0f61514ace93cca98f20f7cb537f76a662800095",
+    "job_id": "alpha_02b344a49869420098b9361749e87308",
+    "ledger_status": "VERIFIED",
+    "model_fit_count": 2,
+    "report_hash": "sha256:4ec02556d29250d6726c7e8d7b0cc5cfdf918d3a8d0217d1490309f0619abe2f",
+    "research_verdict": "RESEARCH_EXPLORATORY_ONLY",
+    "selected_model_id": "sha256:f6f6af2d810a7811ac26b1cb8c79b2a7c6027a8a573aa6079bb4f26d1abe3536",
+    "trial_id": "sha256:cd7d8ec3982c91111f65005832193f683b6e691f6eb2581971d66221ea4e07f3"
+  },
+  "counts": {
+    "baseline_candidates": 4,
+    "days": 4532,
+    "development_samples": 577024,
+    "feature_outputs": 18,
+    "feature_rows": 10441728,
+    "lineage_rows": 11021824,
+    "quality_scan_rows": 11021824,
+    "stock_bars": 580096,
+    "symbols": 128,
+    "train_samples": 384896,
+    "validation_decisions": 1501,
+    "validation_samples": 192128
+  },
+  "evidence": {
+    "base_commit": "ab62cb85aa81cc96ce01a720e6ab34dc037de3cd",
+    "command": "npm run test:quant-alpha-capacity",
+    "environment": {
+      "production_research_data_used_for_training": false,
+      "single_threaded": true,
+      "synthetic_fixture_only": true
+    }
+  },
+  "profile": "PRODUCTION_RESEARCH_CAPACITY_PROFILE_V1",
+  "resource_contract": {
+    "effective_compute_remaining_before_publish": 1613.133279,
+    "effective_publication_remaining_after_publish": 29.871964,
+    "hard_termination_grace_seconds": 5,
+    "max_rows": 25000000,
+    "max_seconds": 1800,
+    "publication_seconds": 30
+  },
+  "resources": {
+    "cpu_seconds": 24.180355,
+    "job_cpu_seconds": 187.918735,
+    "job_peak_rss_kib": 9445168,
+    "peak_rss_kib": 2714020
+  },
+  "status": "PASS",
+  "synthetic_only": true,
+  "timings_seconds": {
+    "attempt_compute_observed": 186.977975,
+    "attempt_total": 187.106011,
+    "baseline_reconstruction": 0.133407,
+    "baseline_report_assembly": 0.098656,
+    "compute_to_first_publish": 186.866721,
+    "data_read_total": 53.771194,
+    "evidence_report_build": 0.129705,
+    "evidence_report_repeat": 0.130446,
+    "execute_attempt_total": 187.105095,
+    "feature_dataset_publish": 14.711297,
+    "feature_table_generation": 0.700604,
+    "fixed_report_repeat_read": 0.269704,
+    "lightgbm_fit": 1.195799,
+    "mcp_pagination_reconstruction": 0.314368,
+    "publication_observed": 0.128036,
+    "publish_finalize": 0.005201,
+    "publish_serialization": 0.122835,
+    "quality_scan": 78.286615,
+    "registry_selection_seal": 0.279578,
+    "stock_dataset_generation": 1.470309,
+    "stock_dataset_publish": 6.050618,
+    "wall_total": 212.730398
+  }
+}
