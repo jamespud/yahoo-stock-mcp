@@ -33,6 +33,7 @@ from ..factors.compiler import FactorCompileError, compile_factor_spec
 from ..factors.engine import combine_feature_panels, compute_stock_factors
 from ..factors.option_factors import compute_option_factors
 from ..models.baseline_comparison import preflight_baseline_comparison
+from ..models.baseline_evidence import training_metrics_with_report
 from ..models.feature_diagnostics import diagnose_alpha_model
 from ..models.inference import predict_alpha
 from ..models.labels import stock_forward_labels
@@ -55,6 +56,7 @@ from ..models.walk_forward import (
 from ..options.pricing import OptionPricingConfig
 from ..portfolio.option_backtest import OptionExecutionConfig, run_option_backtest
 from ..portfolio.stock_backtest import TopKPortfolioConfig, run_top_k_backtest
+from ..runtime_budget import AttemptDeadline
 from ..research_admission import (
     authorize_oos,
     require_training_execution,
@@ -131,6 +133,10 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         if isinstance(raw_request, dict) and raw_request.get("kind") == "walk_forward_alpha":
             require_walk_forward_submission_raw(raw_request)
         request = ALPHA_REQUEST_ADAPTER.validate_python(raw_request)
+        attempt_deadline = (
+            AttemptDeadline.for_training_request(raw_request, started=began)
+            if isinstance(request, TrainAlphaModelJob) else None
+        )
         if digest(request.model_dump(mode="json")) != claim["config_hash"]:
             raise AlphaError(AlphaErrorCode.DATASET_MISMATCH, "Job configuration integrity check failed")
         if isinstance(request, TrainAlphaModelJob):
@@ -157,7 +163,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
         staged_model = None
         staged_freeze = None
         def bounded(progress):
-            if time.monotonic() - began > request.max_seconds:
+            if attempt_deadline is not None:
+                attempt_deadline.check()
+            elif time.monotonic() - began > request.max_seconds:
                 raise AlphaError(AlphaErrorCode.RESOURCE_LIMIT_EXCEEDED, "Alpha job exceeded max_seconds")
             checkpoint(progress)
         if isinstance(request, PrepareStockDatasetJob):
@@ -234,7 +242,9 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             result = {"dataset": {"section": "dataset", **_manifest_payload(feature)},
                       "factors": [{"dataset_id": feature.dataset_id}], "option_analytics": [], "factor_diagnostics": []}
         elif isinstance(request, TrainAlphaModelJob):
+            attempt_deadline.enter("training_stock_manifest")
             stock_manifest = datasets.load_manifest(request.stock_dataset_id)
+            attempt_deadline.enter("training_preflight")
             preflight_baseline_comparison(
                 feature_set_id=request.feature_set_id,
                 label_source_dataset_id=request.stock_dataset_id,
@@ -242,11 +252,13 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 config=request.baseline_comparison,
                 store=datasets,
             )
+            attempt_deadline.enter("training_label_read")
             labels = stock_forward_labels(
                 datasets.read_rows(request.stock_dataset_id, start_at=request.split.train_start, end_at=request.split.validation_end),
                 horizon=request.horizon_days,
                 calendar=mapped_stock_calendar(stock_manifest),
             )
+            attempt_deadline.enter("training_labels")
             train_req = TrainAlphaRequest(
                 feature_set_id=request.feature_set_id,
                 label_source_dataset_id=request.stock_dataset_id,
@@ -259,15 +271,20 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                 baseline_comparison=request.baseline_comparison,
             )
             outcome = _train_alpha_outcome(
-                train_req, store=datasets, registry=staging_registry, label_rows=labels, checkpoint=bounded,
+                train_req, store=datasets, registry=staging_registry, label_rows=labels,
+                attempt_deadline=attempt_deadline, checkpoint=bounded,
             )
             model = outcome.manifest
             staged_model = model
             model_diagnostics = diagnose_alpha_model(model.model_id, registry=staging_registry)
             metrics = dict(model.metrics)
+            baseline_records = None
             reproducibility = {"model_hash": model.model_hash, "environment_hash": model.environment_hash}
             if outcome.baseline_comparison is not None:
-                metrics["baseline_comparison"] = outcome.baseline_comparison.model_dump(mode="json")
+                report = outcome.baseline_comparison.model_dump(mode="json")
+                metrics, baseline_records = training_metrics_with_report(
+                    metrics, report, job_id=claim["id"],
+                )
                 reproducibility["baseline_comparison"] = {
                     "report_hash": outcome.baseline_comparison.report_hash,
                     "comparison_protocol_hash": outcome.baseline_comparison.comparison_protocol_hash,
@@ -284,6 +301,8 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                       "training_metrics": [metrics], "model_registry": [model.model_dump(mode="json")],
                       "diagnostics": [model_diagnostics],
                       "reproducibility": reproducibility}
+            if baseline_records is not None:
+                result["baseline_comparison"] = baseline_records
         elif isinstance(request, WalkForwardAlphaRequest):
             report = run_development_walk_forward(
                 request,
@@ -381,11 +400,22 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
                     candidate_ledger_hash=request.candidate_ledger_hash,
                     selected_model_id=request.selected_model_ids[0],
                 )
-        if not store.begin_publish(claim, result):
+        if attempt_deadline is not None:
+            attempt_deadline.begin_publish()
+        def serialization_checkpoint():
+            if attempt_deadline is not None:
+                attempt_deadline.check_publish("publish_serialization")
+        began_publish = (
+            store.begin_publish(claim, result, checkpoint=serialization_checkpoint)
+            if attempt_deadline is not None else store.begin_publish(claim, result)
+        )
+        if not began_publish:
             return False
         staged_freeze_path = None
         try:
             def publish_checkpoint():
+                if attempt_deadline is not None:
+                    attempt_deadline.check_publish("publication")
                 if not store.heartbeat(claim, .99):
                     raise RuntimeError("OWNERSHIP_LOST during publication")
             if isinstance(request, FreezeAlphaSelectionJob):
@@ -405,7 +435,14 @@ def execute_alpha_job(store, claim: dict, checkpoint) -> bool:
             if staged_freeze is not None:
                 freeze_store, freeze_record = staged_freeze
                 staged_freeze_path = freeze_store.stage(freeze_record, checkpoint=publish_checkpoint)
-            completed = store.complete_publish(claim, dataset_ids=[manifest.dataset_id for manifest in pending])
+            completed = (
+                store.complete_publish(
+                    claim, dataset_ids=[manifest.dataset_id for manifest in pending],
+                    checkpoint=publish_checkpoint,
+                )
+                if attempt_deadline is not None
+                else store.complete_publish(claim, dataset_ids=[manifest.dataset_id for manifest in pending])
+            )
         except AlphaError as error:
             if staged_freeze_path is not None and staged_freeze_path.exists():
                 staged_freeze_path.unlink()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from datetime import UTC, datetime, timedelta
 
@@ -23,6 +24,7 @@ from stock_quant.alpha.models.baseline_comparison import (
 )
 from stock_quant.alpha.models.development_cohort import prepare_development_cohort
 from stock_quant.alpha.models.labels import LabelRow
+from stock_quant.compiler import digest
 from stock_quant.alpha.models.lightgbm_trainer import (
     AlphaModelRegistry,
     ModelResourceBudget,
@@ -706,7 +708,7 @@ def test_job_adds_report_to_training_metrics_without_new_section(tmp_path):
         assert reproducibility["baseline_comparison"]["report_hash"] == report.report_hash
         assert reproducibility["baseline_comparison"]["train_identity_hash"] == report.cohort_identity.train_identity_hash
         assert reproducibility["baseline_comparison"]["validation_identity_hash"] == report.cohort_identity.validation_identity_hash
-        with pytest.raises(ValueError, match="Invalid result section or limit"):
+        with pytest.raises(ValueError, match="RESULT_SECTION_UNAVAILABLE"):
             jobs.get_result(submitted["job_id"], "baseline_comparison")
 
 
@@ -737,3 +739,188 @@ def test_job_default_training_metrics_have_no_baseline_field(tmp_path):
         assert set(metrics) == {"train", "validation"}
         reproducibility = jobs.get_result(submitted["job_id"], "reproducibility")
         assert "baseline_comparison" not in reproducibility
+
+
+def _large_report_for_transport(report: BaselineComparisonReport) -> dict:
+    payload = report.model_dump(mode="json")
+    payload["report_hash"] = None
+    payload["reproducibility"] = {**payload["reproducibility"], "transport_padding": "x" * 2_650_000}
+    payload.pop("report_hash")
+    payload["report_hash"] = digest(payload)
+    return BaselineComparisonReport.model_validate(payload).model_dump(mode="json")
+
+
+def _claim_for_result(jobs, job_id):
+    with jobs.connection:
+        jobs.connection.execute(
+            "INSERT INTO jobs(id,status,request,config_hash) VALUES (?,'queued','{}',?)",
+            (job_id, digest(job_id)),
+        )
+    claim = jobs.claim()
+    assert claim is not None
+    return claim
+
+
+def test_large_baseline_report_round_trips_through_versioned_pagination(tmp_path):
+    from stock_quant.alpha.models.baseline_evidence import (
+        ARTIFACT_VERSION,
+        BaselineEvidenceLoader,
+        SECTION,
+        training_metrics_with_report,
+    )
+    from stock_quant.artifacts import MAX_RESPONSE_ROW_BYTES
+    from stock_quant.pagination import fits_response_row
+
+    fixture = _fixture(tmp_path)
+    report = _outcome(fixture, tmp_path).baseline_comparison
+    assert report is not None
+    report_payload = _large_report_for_transport(report)
+    with JobStore(tmp_path / "transport.sqlite3") as jobs:
+        claim = _claim_for_result(jobs, "large-baseline")
+        metrics, records = training_metrics_with_report(
+            {"validation": {"rank_ic_mean": 0.1}}, report_payload, job_id=claim["id"],
+        )
+        assert records is not None and len(records) > 2
+        assert metrics["baseline_comparison"]["record_type"] == "paginated-reference"
+        for row in records:
+            size = len(json.dumps(row, allow_nan=False).encode())
+            assert size <= MAX_RESPONSE_ROW_BYTES
+            assert fits_response_row(row, size)
+        result = {"training_metrics": [metrics], SECTION: records}
+        assert jobs.begin_publish(claim, result)
+        with pytest.raises(ValueError, match="RESULT_NOT_READY"):
+            jobs.get_result(claim["id"], SECTION)
+        assert jobs.complete_publish(claim)
+        pages, cursor = [], None
+        while True:
+            page = jobs.get_result(claim["id"], SECTION, 1, cursor)
+            assert page["total_count"] == len(records)
+            pages.extend(page["rows"])
+            cursor = page["next_cursor"]
+            if cursor is None:
+                break
+        assert pages == records
+        compact = jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0]
+        _metrics, restored = BaselineEvidenceLoader(jobs).load(claim["id"], json.loads(compact))
+        assert restored is not None
+        assert restored.model_dump(mode="json") == report_payload
+        assert digest({key: value for key, value in report_payload.items() if key != "report_hash"}) == report_payload["report_hash"]
+        assert ARTIFACT_VERSION == records[0]["artifact_version"]
+
+
+@pytest.mark.parametrize("corruption", [
+    "missing", "duplicate", "wrong_job", "wrong_version", "payload", "ordinal", "byte_range", "chunk_report_hash", "path",
+])
+def test_paginated_baseline_rejects_corruption(tmp_path, corruption):
+    from stock_quant.alpha.models.baseline_evidence import (
+        BaselineEvidenceError,
+        BaselineEvidenceLoader,
+        SECTION,
+        paginated_baseline_records,
+        paginated_reference,
+    )
+
+    fixture = _fixture(tmp_path)
+    report = _outcome(fixture, tmp_path).baseline_comparison
+    assert report is not None
+    payload = _large_report_for_transport(report)
+    with JobStore(tmp_path / "transport.sqlite3") as jobs:
+        claim = _claim_for_result(jobs, f"corrupt-{corruption}")
+        records = paginated_baseline_records(payload, job_id=claim["id"])
+        reference = paginated_reference(records)
+        changed = json.loads(json.dumps(records))
+        if corruption == "missing":
+            changed.pop()
+        elif corruption == "duplicate":
+            changed.append(json.loads(json.dumps(changed[-1])))
+        elif corruption == "wrong_job":
+            changed[0]["job_id"] = "alpha_other"
+        elif corruption == "wrong_version":
+            changed[0]["artifact_version"] = "baseline-comparison-artifact-v2"
+        elif corruption == "ordinal":
+            changed[2]["ordinal"] = 0
+        elif corruption == "byte_range":
+            changed[2]["byte_start"] += 1
+        elif corruption == "chunk_report_hash":
+            changed[1]["report_hash"] = "sha256:" + "f" * 64
+        elif corruption == "path":
+            changed[1]["path"] = "$.candidates"
+        else:
+            changed[1]["payload"] = ("z" if changed[1]["payload"][0] != "z" else "y") + changed[1]["payload"][1:]
+        result = {
+            "training_metrics": [{"validation": {}, "baseline_comparison": reference}],
+            SECTION: changed,
+        }
+        assert jobs.begin_publish(claim, result)
+        assert jobs.complete_publish(claim)
+        compact = json.loads(jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0])
+        with pytest.raises((BaselineEvidenceError, ValueError)):
+            BaselineEvidenceLoader(jobs).load(claim["id"], compact)
+
+
+def test_inline_baseline_rejects_duplicate_paginated_source(tmp_path):
+    from stock_quant.alpha.models.baseline_evidence import (
+        BaselineEvidenceError, BaselineEvidenceLoader, SECTION,
+    )
+
+    fixture = _fixture(tmp_path)
+    report = _outcome(fixture, tmp_path).baseline_comparison
+    assert report is not None
+    with JobStore(tmp_path / "transport.sqlite3") as jobs:
+        claim = _claim_for_result(jobs, "double-source")
+        result = {
+            "training_metrics": [{
+                "validation": {}, "baseline_comparison": report.model_dump(mode="json"),
+            }],
+            SECTION: [{"unexpected": True}],
+        }
+        assert jobs.begin_publish(claim, result)
+        assert jobs.complete_publish(claim)
+        compact = json.loads(jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0])
+        with pytest.raises(BaselineEvidenceError, match="both inline and paginated"):
+            BaselineEvidenceLoader(jobs).load(claim["id"], compact)
+
+
+def test_inline_baseline_history_remains_readable(tmp_path):
+    from stock_quant.alpha.models.baseline_evidence import BaselineEvidenceLoader
+
+    fixture = _fixture(tmp_path)
+    report = _outcome(fixture, tmp_path).baseline_comparison
+    assert report is not None
+    with JobStore(tmp_path / "transport.sqlite3") as jobs:
+        claim = _claim_for_result(jobs, "legacy-inline")
+        result = {"training_metrics": [{
+            "validation": {"rank_ic_mean": 0.1}, "baseline_comparison": report.model_dump(mode="json"),
+        }]}
+        assert jobs.begin_publish(claim, result)
+        assert jobs.complete_publish(claim)
+        compact = json.loads(jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0])
+        _metrics, restored = BaselineEvidenceLoader(jobs).load(claim["id"], compact)
+        assert restored is not None and restored.report_hash == report.report_hash
+
+
+def test_paginated_baseline_detects_artifact_tampering(tmp_path):
+    from stock_quant.alpha.models.baseline_evidence import (
+        BaselineEvidenceLoader, SECTION, training_metrics_with_report,
+    )
+
+    fixture = _fixture(tmp_path)
+    report = _outcome(fixture, tmp_path).baseline_comparison
+    assert report is not None
+    payload = _large_report_for_transport(report)
+    with JobStore(tmp_path / "transport.sqlite3") as jobs:
+        claim = _claim_for_result(jobs, "tampered-baseline")
+        metrics, records = training_metrics_with_report({}, payload, job_id=claim["id"])
+        result = {"training_metrics": [metrics], SECTION: records}
+        assert jobs.begin_publish(claim, result)
+        assert jobs.complete_publish(claim)
+        manifest = json.loads(jobs.connection.execute(
+            "SELECT manifest FROM result_artifacts WHERE job_id=? AND section=?", (claim["id"], SECTION),
+        ).fetchone()[0])
+        path = jobs.artifacts.resolve(manifest)
+        with path.open("r+b") as stream:
+            stream.seek(8)
+            stream.write(bytes([stream.read(1)[0] ^ 1]))
+        compact = json.loads(jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0])
+        with pytest.raises(ValueError, match="integrity|start|parquet|footer|magic"):
+            BaselineEvidenceLoader(jobs).load(claim["id"], compact)

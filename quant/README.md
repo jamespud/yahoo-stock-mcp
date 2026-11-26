@@ -191,8 +191,11 @@ it is not the numerical contract. This rule preserves decimal threshold parity
 between PIT and NumPy. Standard binary64 rounding applies to integers above 2^53.
 
 The queue admits at most 32 queued/running jobs, with four valid running leases.
-Workers renew a 15-second DB-time lease, check cancellation during execution and
-cap each run at 120 seconds (a 125-second hard process guard on POSIX). Result
+Workers renew a 15-second DB-time lease and check cancellation during execution. Legacy
+non-training Jobs retain the 120-second execution cap and 125-second hard process guard on POSIX.
+New training Jobs normalize `resource_budget.max_seconds` (default 120, maximum 1800), receive a
+30-second publication budget and a 5-second termination grace, and use a 1835-second absolute attempt
+guard. Already persisted Jobs keep their original runtime identity. Result
 publication requires the current owner and a valid lease. Expired owners can be
 reclaimed up to three attempts; polling a job wakes a consumer after worker loss.
 Detached workers drain the queue and survive MCP/client disconnection; restarting

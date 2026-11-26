@@ -203,6 +203,12 @@ test("Validation-only training contract is explicit and rejects Test windows", (
     ...input,
     windows: {...windows, embargo_days: -1},
   }));
+  assert.equal(trainAlphaModelInput.parse({...input, resource_budget: undefined, max_seconds: 300}).max_seconds, 300);
+  assert.equal(trainAlphaModelInput.parse({...input, max_seconds: 60}).resource_budget.max_seconds, 60);
+  assert.equal(trainAlphaModelInput.parse({...input, max_seconds: 1800, resource_budget: {max_seconds: 1800}}).max_seconds, 1800);
+  assert.throws(() => trainAlphaModelInput.parse({...input, max_seconds: 60, resource_budget: {max_seconds: 61}}));
+  assert.throws(() => trainAlphaModelInput.parse({...input, max_seconds: 1801}));
+  assert.throws(() => trainAlphaModelInput.parse({...input, resource_budget: {max_seconds: 1801}}));
 });
 
 test("Research Registry contracts bind Campaign, Protocol and Trial without caller hashes", () => {

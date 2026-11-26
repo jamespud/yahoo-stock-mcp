@@ -86,6 +86,7 @@ _REQUEST_RUNTIME_PATHS = (
     ("research_trial_id",),
     ("max_seconds",),
     ("resource_budget", "max_seconds"),
+    ("budget_contract_version",),
 )
 
 

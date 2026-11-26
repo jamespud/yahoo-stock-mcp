@@ -191,9 +191,10 @@ export const trainAlphaModelInputFields = z.object({
   hyperparameters: lightgbmHyperparameters.optional(),
   random_seed: z.number().int().min(-int32Max - 1).max(int32Max).optional(),
   resource_budget: z.object({
-    max_seconds: z.number().int().min(1).max(86400).optional(),
+    max_seconds: z.number().int().min(1).max(1800).optional(),
     max_rows: z.number().int().min(1).optional(),
   }).strict().optional(),
+  max_seconds: z.number().int().min(1).max(1800).optional(),
   min_rank_ic: z.number().min(-1).max(1).optional(),
   baseline_comparison: baselineComparisonInput.optional(),
 }).strict();
@@ -220,6 +221,7 @@ export const trainAlphaModelToolFields = z.object({
   hyperparameters: auditableField(training.hyperparameters.describe("Set random_seed on the request itself.")),
   random_seed: auditableField(training.random_seed),
   resource_budget: auditableField(training.resource_budget),
+  max_seconds: auditableField(training.max_seconds.describe("Legacy-compatible training attempt budget; must match resource_budget.max_seconds when both are explicit.")),
   min_rank_ic: auditableField(training.min_rank_ic),
   baseline_comparison: auditableField(training.baseline_comparison.describe("Optional fixed four-candidate development comparison.")),
 }).passthrough();
@@ -237,6 +239,14 @@ export const trainAlphaModelInput = trainAlphaModelInputFields.superRefine((valu
       code: z.ZodIssueCode.custom,
       path: ["evaluation_mode"],
       message: "evaluation_mode must be validation_only",
+    });
+  }
+  if (value.max_seconds !== undefined && value.resource_budget?.max_seconds !== undefined
+      && value.max_seconds !== value.resource_budget.max_seconds) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["max_seconds"],
+      message: "max_seconds must match resource_budget.max_seconds",
     });
   }
 });

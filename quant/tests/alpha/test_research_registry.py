@@ -2283,3 +2283,174 @@ def test_complete_publish_holds_immediate_write_lock_against_new_trial(tmp_path,
     finally:
         release.set()
         jobs.connection.close()
+
+
+def _paginated_baseline_fixture(request, *, padding=2_650_000):
+    from stock_quant.alpha.models.baseline_comparison import BaselineComparisonReport
+    from stock_quant.alpha.models.baseline_evidence import training_metrics_with_report
+
+    h = lambda digit: "sha256:" + digit * 64
+    candidates = []
+    for index, key in enumerate(("short_reversal_5", "rsi_5", "ridge_v1", "lightgbm_v1")):
+        fitted = index >= 2
+        candidates.append({
+            "model_key": key,
+            "model_id": h(str(index + 1)),
+            "model_hash": h(str(index + 1)) if fitted else None,
+            "candidate_definition_hash": h("a"),
+            "fitted_model_hash": h(str(index + 1)) if fitted else None,
+            "model_version": "synthetic-v1",
+            "fitting_policy": "fixture",
+            "parameter_definition": {},
+            "feature_schema_hash": h("b"),
+            "signal_direction": "HIGHER_SCORE_EXPECTED_HIGHER_RETURN_RANK",
+            "factor_node": None if fitted else key,
+            "factor_spec_hash": None if fitted else h("c"),
+            "train_sample_count": 10, "validation_sample_count": 5,
+            "common_cohort_sample_count": 5, "train_evaluable_sample_count": 10,
+            "validation_valid_prediction_count": 5, "prediction_coverage": 1.0,
+            "train_metrics": {}, "validation_metrics": {"rank_ic_mean": 0.1} if fitted else {},
+            "common_cohort_metrics": {}, "exclusion_reasons": {},
+            "coverage_by_decision": [], "omitted_coverage_decisions": 0,
+        })
+    pairs = []
+    for left, right in (
+        ("lightgbm_v1", "ridge_v1"), ("lightgbm_v1", "short_reversal_5"),
+        ("lightgbm_v1", "rsi_5"), ("ridge_v1", "short_reversal_5"),
+    ):
+        pairs.append({
+            "model_ids": [left, right], "left_model_id": left, "right_model_id": right,
+            "common_date_count": 1, "common_sample_count": 5, "unpaired_date_count": 0,
+            "mean_paired_rank_ic_difference": 0.0, "positive_date_fraction": 0.5,
+            "daily_differences": [0.0], "paired_ic_by_date": [],
+            "omitted_date_count": 0, "definition": "fixture",
+        })
+    body = {
+        "schema_version": "alpha-baseline-comparison-v1",
+        "comparison_protocol_hash": h("d"),
+        "research_protocol_hash": request["research_protocol_hash"],
+        "feature_set_id": request["feature_set_id"],
+        "label_source_dataset_id": request["stock_dataset_id"],
+        "label_definition_hash": h("e"),
+        "label_definition": {"label_name": "stock_forward_return"},
+        "factor_spec_hash": h("c"),
+        "development_window": request["split"],
+        "cohort_identity": {
+            "sample_identity": "(decision_at, instrument_id)",
+            "train_identity_hash": h("1"), "validation_identity_hash": h("2"),
+            "universe_identity_hash": h("3"), "decision_identity_hash": h("4"),
+            "instrument_count": 2, "train_sample_count": 10, "validation_sample_count": 5,
+            "raw_validation_candidate_count": 5, "matured_validation_label_count": 5,
+            "feature_matched_validation_count": 5, "common_cohort_sample_count": 5,
+            "train_decision_count": 1, "validation_decision_count": 1,
+        },
+        "data_quality": {
+            "scope": "development_only",
+            "feature": {"research_readiness": "RESEARCH_EXPLORATORY"},
+            "label_source": {"research_readiness": "RESEARCH_EXPLORATORY"},
+        },
+        "common_cohort_coverage_by_decision": [],
+        "omitted_common_cohort_decisions": 0,
+        "metric_interpretation": "Synthetic transport fixture only.",
+        "candidates": candidates, "paired_comparisons": pairs,
+        "exclusions": {"common_cohort_excluded_count": 0},
+        "reproducibility": {
+            "software_versions": {}, "environment_hash": h("f"), "random_seed": 7,
+            "computation_sample_count": 15, "report_identity_excludes_elapsed_time": True,
+            "transport_padding": "x" * padding,
+        },
+        "comparison_status": "COMPARISON_EXPLORATORY",
+    }
+    body["report_hash"] = digest(body)
+    return BaselineComparisonReport.model_validate(body).model_dump(mode="json")
+
+
+def test_paginated_baseline_flows_through_selection_seal_and_evidence_report(tmp_path):
+    from stock_quant.alpha.models.baseline_evidence import (
+        BaselineEvidenceLoader, SECTION, training_metrics_with_report,
+    )
+
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        request, trial = _register_trial(registry, protocol)
+        model_registry = AlphaModelRegistry(Path(jobs.path).with_suffix(".models"))
+        request = {**request, "research_trial_id": trial.trial_id, "idempotency_key": f"submit:{trial.trial_id}"}
+        jobs.submit_alpha(request)
+        claim = jobs.claim()
+        assert claim is not None
+        model = model_registry.save(model_text="tree", metadata={
+            "feature_set_id": request["feature_set_id"],
+            "label_definition_hash": "sha256:" + "3" * 64,
+            "label_spec": {"label_name": "stock_forward_return"},
+            "label_source_dataset_id": request["stock_dataset_id"],
+            "factor_spec_hash": "sha256:" + "4" * 64,
+            "calendar_version": "synthetic", "training_window": request["split"],
+            "validation_window": request["split"], "evaluation_mode": "validation_only",
+            "research_protocol_hash": request["research_protocol_hash"], "selected_iteration": 1,
+            "hyperparameters": {}, "feature_schema": ["value"],
+            "feature_schema_hash": "sha256:" + "5" * 64,
+            "environment_hash": "sha256:" + "6" * 64, "random_seed": request["random_seed"],
+            "feature_importance": {"value": 1.0}, "train_metrics": {},
+            "validation_metrics": {}, "validation_gate_passed": True,
+        })
+        baseline = _paginated_baseline_fixture(request)
+        metrics, records = training_metrics_with_report(
+            {"validation": {"rank_ic_mean": 0.1, "prediction_coverage": 0.9}},
+            baseline, job_id=claim["id"],
+        )
+        result = {
+            "summary": {"status": "COMPLETED"},
+            "dataset": {"section": "dataset", "model_id": model["model_id"], "model_set_id": model["model_set_id"]},
+            "training_metrics": [metrics], SECTION: records,
+            "model_registry": [model], "diagnostics": [{"status": "OK"}],
+            "reproducibility": {"model_hash": model["model_hash"]},
+        }
+        assert jobs.begin_publish(claim, result)
+        assert jobs.complete_publish(claim)
+        snapshot, selection = registry.seal_candidate_ledger(
+            campaign_id=campaign.campaign_id, protocol_hash=protocol.protocol_hash,
+        )
+        assert selection.selected_model_id == model["model_id"]
+        report = registry.build_evidence_report(
+            campaign_id=campaign.campaign_id, candidate_ledger_hash=snapshot.candidate_ledger_hash,
+        )
+        evidence = next(item for item in report.baseline_evidence if item["trial_id"] == trial.trial_id)
+        assert report.trial_accounting.model_fit_count >= 2
+        assert evidence["status"] == "COMPARISON_EXPLORATORY"
+        assert evidence["report_hash"] == baseline["report_hash"]
+        page = registry.read_research_report(
+            campaign_id=campaign.campaign_id, candidate_ledger_hash=snapshot.candidate_ledger_hash,
+            section="baseline_evidence", limit=1,
+        )
+        assert page["rows"][0]["report_hash"] == baseline["report_hash"]
+        compact = json.loads(jobs.connection.execute("SELECT result FROM jobs WHERE id=?", (claim["id"],)).fetchone()[0])
+        _metrics, restored = BaselineEvidenceLoader(jobs).load(claim["id"], compact)
+        assert restored is not None and restored.report_hash == baseline["report_hash"]
+    finally:
+        jobs.connection.close()
+
+
+def test_training_protocol_budget_uses_public_nested_max_seconds(tmp_path):
+    jobs, registry, campaign, protocol = _setup_registry(tmp_path)
+    try:
+        bounded = registry.register_protocol(_protocol(
+            campaign.campaign_id,
+            protocol_revision=2,
+            parent_protocol_hash=protocol.protocol_hash,
+            modification_reason="Bind the public nested runtime budget.",
+            stopping_policy={"max_seconds": 30},
+        ))
+        request = _training_request(
+            research_protocol_hash=bounded.protocol_hash,
+            resource_budget={"max_seconds": 60, "max_rows": 1000},
+        )
+        with pytest.raises(AlphaError) as raised:
+            registry.register_trial(
+                campaign_id=campaign.campaign_id, protocol_hash=bounded.protocol_hash,
+                hypothesis_id=bounded.registered_hypotheses[0].hypothesis_id,
+                request=request, trial_purpose="INITIAL_HYPOTHESIS_TEST",
+            )
+        assert raised.value.code == AlphaErrorCode.RESEARCH_PROTOCOL_MISMATCH
+        assert raised.value.context["field"] == "resource_budget.max_seconds"
+    finally:
+        jobs.connection.close()
